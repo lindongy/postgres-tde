@@ -121,7 +121,7 @@ CREATE INDEX hogeviewidx ON hogeview (i);
 DELETE FROM hoge;
 REFRESH MATERIALIZED VIEW hogeview;
 SELECT * FROM hogeview WHERE i < 10;
-VACUUM ANALYZE;
+VACUUM ANALYZE hogeview;
 SELECT * FROM hogeview WHERE i < 10;
 DROP TABLE hoge CASCADE;
 
@@ -138,6 +138,14 @@ ALTER TABLE v RENAME COLUMN i TO x;
 INSERT INTO v values (1, 2);
 CREATE UNIQUE INDEX mv_v_ii ON mv_v (ii);
 REFRESH MATERIALIZED VIEW mv_v;
+SELECT * FROM v;
+SELECT * FROM mv_v;
+DROP TABLE v CASCADE;
+
+-- make sure that matview rows can be referenced as source rows (bug #9398)
+CREATE TABLE v AS SELECT generate_series(1,10) AS a;
+CREATE MATERIALIZED VIEW mv_v AS SELECT a FROM v WHERE a <= 5;
+DELETE FROM v WHERE EXISTS ( SELECT * FROM mv_v WHERE mv_v.a = v.a );
 SELECT * FROM v;
 SELECT * FROM mv_v;
 DROP TABLE v CASCADE;

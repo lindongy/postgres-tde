@@ -2699,7 +2699,7 @@ SELECT count(*) FROM dupindexcols
 --
 -- Check ordering of =ANY indexqual results (bug in 9.2.0)
 --
-vacuum analyze tenk1;		-- ensure we get consistent plans here
+vacuum tenk1;		-- ensure we get consistent plans here
 explain (costs off)
 SELECT unique1 FROM tenk1
 WHERE unique1 IN (1,42,7)
@@ -2739,5 +2739,16 @@ ORDER BY thousand;
 ----------+----------
         0 |     3000
         1 |     1001
+(2 rows)
+
+--
+-- Check elimination of constant-NULL subexpressions
+--
+explain (costs off)
+  select * from tenk1 where (thousand, tenthous) in ((1,1001), (null,null));
+                      QUERY PLAN                      
+------------------------------------------------------
+ Index Scan using tenk1_thous_tenthous on tenk1
+   Index Cond: ((thousand = 1) AND (tenthous = 1001))
 (2 rows)
 

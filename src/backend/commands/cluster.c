@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * cluster.c
- *	  CLUSTER a table on an index.	This is now also used for VACUUM FULL.
+ *	  CLUSTER a table on an index.  This is now also used for VACUUM FULL.
  *
  * There is hardly anything left of Paul Brown's original implementation...
  *
@@ -64,9 +64,13 @@ typedef struct
 
 
 static void rebuild_relation(Relation OldHeap, Oid indexOid,
-				 int freeze_min_age, int freeze_table_age, bool verbose);
+				 int freeze_min_age, int freeze_table_age,
+				 int multixact_freeze_min_age, int multixact_freeze_table_age,
+				 bool verbose);
 static void copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex,
-			   int freeze_min_age, int freeze_table_age, bool verbose,
+			   int freeze_min_age, int freeze_table_age,
+			   int multixact_freeze_min_age, int multixact_freeze_table_age,
+			   bool verbose,
 			   bool *pSwapToastByContent, TransactionId *pFreezeXid,
 			   MultiXactId *pCutoffMulti);
 static List *get_tables_to_cluster(MemoryContext cluster_context);
@@ -95,7 +99,7 @@ static void reform_and_rewrite_tuple(HeapTuple tuple,
  *
  * The single-relation case does not have any such overhead.
  *
- * We also allow a relation to be specified without index.	In that case,
+ * We also allow a relation to be specified without index.  In that case,
  * the indisclustered bit will be looked up, and an ERROR will be thrown
  * if there is no index with the bit set.
  *---------------------------------------------------------------------------
@@ -179,7 +183,7 @@ cluster(ClusterStmt *stmt, bool isTopLevel)
 		 * Do the job.  We use a -1 freeze_min_age to avoid having CLUSTER
 		 * freeze tuples earlier than a plain VACUUM would.
 		 */
-		cluster_rel(tableOid, indexOid, false, stmt->verbose, -1, -1);
+		cluster_rel(tableOid, indexOid, false, stmt->verbose, -1, -1, -1, -1);
 	}
 	else
 	{
@@ -210,7 +214,7 @@ cluster(ClusterStmt *stmt, bool isTopLevel)
 												ALLOCSET_DEFAULT_MAXSIZE);
 
 		/*
-		 * Build the list of relations to cluster.	Note that this lives in
+		 * Build the list of relations to cluster.  Note that this lives in
 		 * cluster_context.
 		 */
 		rvs = get_tables_to_cluster(cluster_context);
@@ -230,7 +234,7 @@ cluster(ClusterStmt *stmt, bool isTopLevel)
 			PushActiveSnapshot(GetTransactionSnapshot());
 			/* Do the job.  As above, use a -1 freeze_min_age. */
 			cluster_rel(rvtc->tableOid, rvtc->indexOid, true, stmt->verbose,
-						-1, -1);
+						-1, -1, -1, -1);
 			PopActiveSnapshot();
 			CommitTransactionCommand();
 		}
@@ -248,7 +252,7 @@ cluster(ClusterStmt *stmt, bool isTopLevel)
  *
  * This clusters the table by creating a new, clustered table and
  * swapping the relfilenodes of the new table and the old table, so
- * the OID of the original table is preserved.	Thus we do not lose
+ * the OID of the original table is preserved.  Thus we do not lose
  * GRANT, inheritance nor references to this table (this was a bug
  * in releases thru 7.3).
  *
@@ -257,12 +261,13 @@ cluster(ClusterStmt *stmt, bool isTopLevel)
  * them incrementally while we load the table.
  *
  * If indexOid is InvalidOid, the table will be rewritten in physical order
- * instead of index order.	This is the new implementation of VACUUM FULL,
+ * instead of index order.  This is the new implementation of VACUUM FULL,
  * and error messages should refer to the operation as VACUUM not CLUSTER.
  */
 void
 cluster_rel(Oid tableOid, Oid indexOid, bool recheck, bool verbose,
-			int freeze_min_age, int freeze_table_age)
+			int freeze_min_age, int freeze_table_age,
+			int multixact_freeze_min_age, int multixact_freeze_table_age)
 {
 	Relation	OldHeap;
 
@@ -271,7 +276,7 @@ cluster_rel(Oid tableOid, Oid indexOid, bool recheck, bool verbose,
 
 	/*
 	 * We grab exclusive access to the target rel and index for the duration
-	 * of the transaction.	(This is redundant for the single-transaction
+	 * of the transaction.  (This is redundant for the single-transaction
 	 * case, since cluster() already did it.)  The index lock is taken inside
 	 * check_index_is_clusterable.
 	 */
@@ -306,7 +311,7 @@ cluster_rel(Oid tableOid, Oid indexOid, bool recheck, bool verbose,
 		 * check in the "recheck" case is appropriate (which currently means
 		 * somebody is executing a database-wide CLUSTER), because there is
 		 * another check in cluster() which will stop any attempt to cluster
-		 * remote temp tables by name.	There is another check in cluster_rel
+		 * remote temp tables by name.  There is another check in cluster_rel
 		 * which is redundant, but we leave it for extra safety.
 		 */
 		if (RELATION_IS_OTHER_TEMP(OldHeap))
@@ -399,7 +404,7 @@ cluster_rel(Oid tableOid, Oid indexOid, bool recheck, bool verbose,
 
 	/*
 	 * All predicate locks on the tuples or pages are about to be made
-	 * invalid, because we move tuples around.	Promote them to relation
+	 * invalid, because we move tuples around.  Promote them to relation
 	 * locks.  Predicate locks on indexes will be promoted when they are
 	 * reindexed.
 	 */
@@ -407,6 +412,7 @@ cluster_rel(Oid tableOid, Oid indexOid, bool recheck, bool verbose,
 
 	/* rebuild_relation does all the dirty work */
 	rebuild_relation(OldHeap, indexOid, freeze_min_age, freeze_table_age,
+					 multixact_freeze_min_age, multixact_freeze_table_age,
 					 verbose);
 
 	/* NB: rebuild_relation does heap_close() on OldHeap */
@@ -447,7 +453,7 @@ check_index_is_clusterable(Relation OldHeap, Oid indexOid, bool recheck, LOCKMOD
 
 	/*
 	 * Disallow clustering on incomplete indexes (those that might not index
-	 * every row of the relation).	We could relax this by making a separate
+	 * every row of the relation).  We could relax this by making a separate
 	 * seqscan pass over the table to copy the missing rows, but that seems
 	 * expensive and tedious.
 	 */
@@ -566,7 +572,9 @@ mark_index_clustered(Relation rel, Oid indexOid, bool is_internal)
  */
 static void
 rebuild_relation(Relation OldHeap, Oid indexOid,
-				 int freeze_min_age, int freeze_table_age, bool verbose)
+				 int freeze_min_age, int freeze_table_age,
+				 int multixact_freeze_min_age, int multixact_freeze_table_age,
+				 bool verbose)
 {
 	Oid			tableOid = RelationGetRelid(OldHeap);
 	Oid			tableSpace = OldHeap->rd_rel->reltablespace;
@@ -591,7 +599,9 @@ rebuild_relation(Relation OldHeap, Oid indexOid,
 
 	/* Copy the heap data into the new table in the desired order */
 	copy_heap_data(OIDNewHeap, tableOid, indexOid,
-				   freeze_min_age, freeze_table_age, verbose,
+				   freeze_min_age, freeze_table_age,
+				   multixact_freeze_min_age, multixact_freeze_table_age,
+				   verbose,
 				   &swap_toast_by_content, &frozenXid, &cutoffMulti);
 
 	/*
@@ -648,14 +658,14 @@ make_new_heap(Oid OIDOldHeap, Oid NewTableSpace)
 
 	/*
 	 * Create the new heap, using a temporary name in the same namespace as
-	 * the existing table.	NOTE: there is some risk of collision with user
+	 * the existing table.  NOTE: there is some risk of collision with user
 	 * relnames.  Working around this seems more trouble than it's worth; in
 	 * particular, we can't create the new heap in a different namespace from
 	 * the old, or we will have problems with the TEMP status of temp tables.
 	 *
 	 * Note: the new heap is not a shared relation, even if we are rebuilding
 	 * a shared rel.  However, we do make the new heap mapped if the source is
-	 * mapped.	This simplifies swap_relation_files, and is absolutely
+	 * mapped.  This simplifies swap_relation_files, and is absolutely
 	 * necessary for rebuilding pg_class, for reasons explained there.
 	 */
 	snprintf(NewHeapName, sizeof(NewHeapName), "pg_temp_%u", OIDOldHeap);
@@ -733,7 +743,9 @@ make_new_heap(Oid OIDOldHeap, Oid NewTableSpace)
  */
 static void
 copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex,
-			   int freeze_min_age, int freeze_table_age, bool verbose,
+			   int freeze_min_age, int freeze_table_age,
+			   int multixact_freeze_min_age, int multixact_freeze_table_age,
+			   bool verbose,
 			   bool *pSwapToastByContent, TransactionId *pFreezeXid,
 			   MultiXactId *pCutoffMulti)
 {
@@ -788,12 +800,12 @@ copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex,
 
 	/*
 	 * If the OldHeap has a toast table, get lock on the toast table to keep
-	 * it from being vacuumed.	This is needed because autovacuum processes
+	 * it from being vacuumed.  This is needed because autovacuum processes
 	 * toast tables independently of their main tables, with no lock on the
-	 * latter.	If an autovacuum were to start on the toast table after we
+	 * latter.  If an autovacuum were to start on the toast table after we
 	 * compute our OldestXmin below, it would use a later OldestXmin, and then
 	 * possibly remove as DEAD toast tuples belonging to main tuples we think
-	 * are only RECENTLY_DEAD.	Then we'd fail while trying to copy those
+	 * are only RECENTLY_DEAD.  Then we'd fail while trying to copy those
 	 * tuples.
 	 *
 	 * We don't need to open the toast relation here, just lock it.  The lock
@@ -814,7 +826,7 @@ copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex,
 	/*
 	 * If both tables have TOAST tables, perform toast swap by content.  It is
 	 * possible that the old table has a toast table but the new one doesn't,
-	 * if toastable columns have been dropped.	In that case we have to do
+	 * if toastable columns have been dropped.  In that case we have to do
 	 * swap by links.  This is okay because swap by content is only essential
 	 * for system catalogs, and we don't support schema changes for them.
 	 */
@@ -833,7 +845,7 @@ copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex,
 		 *
 		 * Note that we must hold NewHeap open until we are done writing data,
 		 * since the relcache will not guarantee to remember this setting once
-		 * the relation is closed.	Also, this technique depends on the fact
+		 * the relation is closed.  Also, this technique depends on the fact
 		 * that no one will try to read from the NewHeap until after we've
 		 * finished writing it and swapping the rels --- otherwise they could
 		 * follow the toast pointers to the wrong place.  (It would actually
@@ -849,6 +861,7 @@ copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex,
 	 * compute xids used to freeze and weed out dead tuples.
 	 */
 	vacuum_set_xid_limits(freeze_min_age, freeze_table_age,
+						  multixact_freeze_min_age, multixact_freeze_table_age,
 						  OldHeap->rd_rel->relisshared,
 						  &OldestXmin, &FreezeXid, NULL, &MultiXactCutoff,
 						  NULL);
@@ -859,6 +872,12 @@ copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex,
 	 */
 	if (TransactionIdPrecedes(FreezeXid, OldHeap->rd_rel->relfrozenxid))
 		FreezeXid = OldHeap->rd_rel->relfrozenxid;
+
+	/*
+	 * MultiXactCutoff, similarly, shouldn't go backwards either.
+	 */
+	if (MultiXactIdPrecedes(MultiXactCutoff, OldHeap->rd_rel->relminmxid))
+		MultiXactCutoff = OldHeap->rd_rel->relminmxid;
 
 	/* return selected values to caller */
 	*pFreezeXid = FreezeXid;
@@ -928,7 +947,7 @@ copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex,
 	/*
 	 * Scan through the OldHeap, either in OldIndex order or sequentially;
 	 * copy each tuple into the NewHeap, or transiently to the tuplesort
-	 * module.	Note that we don't bother sorting dead tuples (they won't get
+	 * module.  Note that we don't bother sorting dead tuples (they won't get
 	 * to the new table anyway).
 	 */
 	for (;;)
@@ -1218,7 +1237,7 @@ swap_relation_files(Oid r1, Oid r2, bool target_is_pg_class,
 				 NameStr(relform2->relname), r2);
 
 		/*
-		 * Send replacement mappings to relmapper.	Note these won't actually
+		 * Send replacement mappings to relmapper.  Note these won't actually
 		 * take effect until CommandCounterIncrement.
 		 */
 		RelationMapUpdateMap(r1, relfilenode2, relform1->relisshared, false);
@@ -1428,7 +1447,7 @@ swap_relation_files(Oid r1, Oid r2, bool target_is_pg_class,
 	 * non-transient relation.)
 	 *
 	 * Caution: the placement of this step interacts with the decision to
-	 * handle toast rels by recursion.	When we are trying to rebuild pg_class
+	 * handle toast rels by recursion.  When we are trying to rebuild pg_class
 	 * itself, the smgr close on pg_class must happen after all accesses in
 	 * this function.
 	 */
@@ -1475,9 +1494,9 @@ finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap,
 
 	/*
 	 * Rebuild each index on the relation (but not the toast table, which is
-	 * all-new at this point).	It is important to do this before the DROP
+	 * all-new at this point).  It is important to do this before the DROP
 	 * step because if we are processing a system catalog that will be used
-	 * during DROP, we want to have its indexes available.	There is no
+	 * during DROP, we want to have its indexes available.  There is no
 	 * advantage to the other order anyway because this is all transactional,
 	 * so no chance to reclaim disk space before commit.  We do not need a
 	 * final CommandCounterIncrement() because reindex_relation does it.

@@ -135,6 +135,12 @@ static void print_msg(const char *msg);
 static void adjust_data_dir(void);
 
 #if defined(WIN32) || defined(__CYGWIN__)
+#if (_MSC_VER >= 1800)
+#include <versionhelpers.h>
+#else
+static bool IsWindowsXPOrGreater(void);
+static bool IsWindows7OrGreater(void);
+#endif
 static bool pgwin32_IsInstalled(SC_HANDLE);
 static char *pgwin32_CommandLine(bool);
 static void pgwin32_doRegister(void);
@@ -455,7 +461,7 @@ test_postmaster_connection(bool do_checkpoint)
 			 *		6	9.1+ server, shared memory not created
 			 *		7	9.1+ server, shared memory created
 			 *
-			 * This code does not support pre-9.1 servers.	On Unix machines
+			 * This code does not support pre-9.1 servers.  On Unix machines
 			 * we could consider extracting the port number from the shmem
 			 * key, but that (a) is not robust, and (b) doesn't help with
 			 * finding out the socket directory.  And it wouldn't work anyway
@@ -488,7 +494,7 @@ test_postmaster_connection(bool do_checkpoint)
 					time_t		pmstart;
 
 					/*
-					 * Make sanity checks.	If it's for a standalone backend
+					 * Make sanity checks.  If it's for a standalone backend
 					 * (negative PID), or the recorded start time is before
 					 * pg_ctl started, then either we are looking at the wrong
 					 * data directory, or this is a pre-existing pidfile that
@@ -602,7 +608,7 @@ test_postmaster_connection(bool do_checkpoint)
 
 		/*
 		 * If we've been able to identify the child postmaster's PID, check
-		 * the process is still alive.	This covers cases where the postmaster
+		 * the process is still alive.  This covers cases where the postmaster
 		 * successfully created the pidfile but then crashed without removing
 		 * it.
 		 */
@@ -1150,7 +1156,7 @@ postmaster_is_alive(pid_t pid)
 	 * postmaster we are after.
 	 *
 	 * Don't believe that our own PID or parent shell's PID is the postmaster,
-	 * either.	(Windows hasn't got getppid(), though.)
+	 * either.  (Windows hasn't got getppid(), though.)
 	 */
 	if (pid == getpid())
 		return false;
@@ -1226,6 +1232,29 @@ do_kill(pgpid_t pid)
 }
 
 #if defined(WIN32) || defined(__CYGWIN__)
+
+#if (_MSC_VER < 1800)
+static bool
+IsWindowsXPOrGreater(void)
+{
+	OSVERSIONINFO osv;
+	osv.dwOSVersionInfoSize = sizeof(osv);
+
+	 /* Windows XP = Version 5.1 */
+	return (!GetVersionEx(&osv) || /* could not get version */
+			osv.dwMajorVersion > 5 || (osv.dwMajorVersion == 5 && osv.dwMinorVersion >= 1));
+}
+
+static bool IsWindows7OrGreater(void)
+{
+	OSVERSIONINFO osv;
+	osv.dwOSVersionInfoSize = sizeof(osv);
+
+	 /* Windows 7 = Version 6.0 */
+	return (!GetVersionEx(&osv) || /* could not get version */
+			osv.dwMajorVersion > 6 || (osv.dwMajorVersion == 6 && osv.dwMinorVersion >= 0));
+}
+#endif
 
 static bool
 pgwin32_IsInstalled(SC_HANDLE hSCM)
@@ -1656,12 +1685,7 @@ CreateRestrictedProcess(char *cmd, PROCESS_INFORMATION *processInfo, bool as_ser
 		 * IsProcessInJob() is not available on < WinXP, so there is no need
 		 * to log the error every time in that case
 		 */
-		OSVERSIONINFO osv;
-
-		osv.dwOSVersionInfoSize = sizeof(osv);
-		if (!GetVersionEx(&osv) ||		/* could not get version */
-			(osv.dwMajorVersion == 5 && osv.dwMinorVersion > 0) ||		/* 5.1=xp, 5.2=2003, etc */
-			osv.dwMajorVersion > 5)		/* anything newer should have the API */
+		if (IsWindowsXPOrGreater())
 
 			/*
 			 * Log error if we can't get version, or if we're on WinXP/2003 or
@@ -1693,7 +1717,6 @@ CreateRestrictedProcess(char *cmd, PROCESS_INFORMATION *processInfo, bool as_ser
 					JOBOBJECT_BASIC_LIMIT_INFORMATION basicLimit;
 					JOBOBJECT_BASIC_UI_RESTRICTIONS uiRestrictions;
 					JOBOBJECT_SECURITY_LIMIT_INFORMATION securityLimit;
-					OSVERSIONINFO osv;
 
 					ZeroMemory(&basicLimit, sizeof(basicLimit));
 					ZeroMemory(&uiRestrictions, sizeof(uiRestrictions));
@@ -1709,10 +1732,7 @@ CreateRestrictedProcess(char *cmd, PROCESS_INFORMATION *processInfo, bool as_ser
 
 					if (as_service)
 					{
-						osv.dwOSVersionInfoSize = sizeof(osv);
-						if (!GetVersionEx(&osv) ||
-							osv.dwMajorVersion < 6 ||
-						(osv.dwMajorVersion == 6 && osv.dwMinorVersion == 0))
+						if (!IsWindows7OrGreater())
 						{
 							/*
 							 * On Windows 7 (and presumably later),
@@ -1942,9 +1962,11 @@ adjust_data_dir(void)
 	else
 		my_exec_path = pg_strdup(exec_path);
 
-	snprintf(cmd, MAXPGPATH, SYSTEMQUOTE "\"%s\" %s%s -C data_directory" SYSTEMQUOTE,
-			 my_exec_path, pgdata_opt ? pgdata_opt : "", post_opts ?
-			 post_opts : "");
+	/* it's important for -C to be the first option, see main.c */
+	snprintf(cmd, MAXPGPATH, SYSTEMQUOTE "\"%s\" -C data_directory %s%s" SYSTEMQUOTE,
+			 my_exec_path,
+			 pgdata_opt ? pgdata_opt : "",
+			 post_opts ? post_opts : "");
 
 	fd = popen(cmd, "r");
 	if (fd == NULL || fgets(filename, sizeof(filename), fd) == NULL)

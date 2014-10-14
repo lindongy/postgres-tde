@@ -31,7 +31,7 @@
  * segment and page numbers in SimpleLruTruncate (see PagePrecedes()).
  *
  * Note: slru.c currently assumes that segment file names will be four hex
- * digits.	This sets a lower bound on the segment size (64K transactions
+ * digits.  This sets a lower bound on the segment size (64K transactions
  * for 32-bit TransactionIds).
  */
 #define SLRU_PAGES_PER_SEGMENT	32
@@ -150,6 +150,7 @@ extern bool SimpleLruDoesPhysicalPageExist(SlruCtl ctl, int pageno);
 typedef bool (*SlruScanCallback) (SlruCtl ctl, char *filename, int segpage,
 											  void *data);
 extern bool SlruScanDirectory(SlruCtl ctl, SlruScanCallback callback, void *data);
+extern void SlruDeleteSegment(SlruCtl ctl, char *filename);
 
 /* SlruScanDirectory public callbacks */
 extern bool SlruScanDirCbReportPresence(SlruCtl ctl, char *filename,

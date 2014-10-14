@@ -162,6 +162,7 @@ static const struct encoding_match encoding_match_list[] = {
 	{PG_SJIS, "SJIS"},
 	{PG_SJIS, "PCK"},
 	{PG_SJIS, "CP932"},
+	{PG_SJIS, "SHIFT_JIS"},
 
 	{PG_BIG5, "BIG5"},
 	{PG_BIG5, "BIG5HKSCS"},
@@ -343,7 +344,7 @@ pg_get_encoding_from_locale(const char *ctype, bool write_message)
 
 	/*
 	 * We print a warning if we got a CODESET string but couldn't recognize
-	 * it.	This means we need another entry in the table.
+	 * it.  This means we need another entry in the table.
 	 */
 	if (write_message)
 	{

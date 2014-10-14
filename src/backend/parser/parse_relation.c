@@ -38,6 +38,8 @@ static RangeTblEntry *scanNameSpaceForRefname(ParseState *pstate,
 						const char *refname, int location);
 static RangeTblEntry *scanNameSpaceForRelid(ParseState *pstate, Oid relid,
 					  int location);
+static void check_lateral_ref_ok(ParseState *pstate, ParseNamespaceItem *nsitem,
+					 int location);
 static void markRTEForSelectPriv(ParseState *pstate, RangeTblEntry *rte,
 					 int rtindex, AttrNumber col);
 static void expandRelation(Oid relid, Alias *eref,
@@ -69,7 +71,7 @@ static bool isQueryUsingTempRelation_walker(Node *node, void *context);
  *
  * A qualified refname (schemaname != NULL) can only match a relation RTE
  * that (a) has no alias and (b) is for the same relation identified by
- * schemaname.refname.	In this case we convert schemaname.refname to a
+ * schemaname.refname.  In this case we convert schemaname.refname to a
  * relation OID and search by relid, rather than by alias name.  This is
  * peculiar, but it's what SQL says to do.
  */
@@ -170,14 +172,7 @@ scanNameSpaceForRefname(ParseState *pstate, const char *refname, int location)
 						 errmsg("table reference \"%s\" is ambiguous",
 								refname),
 						 parser_errposition(pstate, location)));
-			/* SQL:2008 demands this be an error, not an invisible item */
-			if (nsitem->p_lateral_only && !nsitem->p_lateral_ok)
-				ereport(ERROR,
-						(errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
-						 errmsg("invalid reference to FROM-clause entry for table \"%s\"",
-								refname),
-						 errdetail("The combining JOIN type must be INNER or LEFT for a LATERAL reference."),
-						 parser_errposition(pstate, location)));
+			check_lateral_ref_ok(pstate, nsitem, location);
 			result = rte;
 		}
 	}
@@ -186,7 +181,7 @@ scanNameSpaceForRefname(ParseState *pstate, const char *refname, int location)
 
 /*
  * Search the query's table namespace for a relation RTE matching the
- * given relation OID.	Return the RTE if a unique match, or NULL
+ * given relation OID.  Return the RTE if a unique match, or NULL
  * if no match.  Raise error if multiple matches.
  *
  * See the comments for refnameRangeTblEntry to understand why this
@@ -221,14 +216,7 @@ scanNameSpaceForRelid(ParseState *pstate, Oid relid, int location)
 						 errmsg("table reference %u is ambiguous",
 								relid),
 						 parser_errposition(pstate, location)));
-			/* SQL:2008 demands this be an error, not an invisible item */
-			if (nsitem->p_lateral_only && !nsitem->p_lateral_ok)
-				ereport(ERROR,
-						(errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
-						 errmsg("invalid reference to FROM-clause entry for table \"%s\"",
-								rte->eref->aliasname),
-						 errdetail("The combining JOIN type must be INNER or LEFT for a LATERAL reference."),
-						 parser_errposition(pstate, location)));
+			check_lateral_ref_ok(pstate, nsitem, location);
 			result = rte;
 		}
 	}
@@ -297,7 +285,7 @@ isFutureCTE(ParseState *pstate, const char *refname)
  *
  * This is different from refnameRangeTblEntry in that it considers every
  * entry in the ParseState's rangetable(s), not only those that are currently
- * visible in the p_namespace list(s).	This behavior is invalid per the SQL
+ * visible in the p_namespace list(s).  This behavior is invalid per the SQL
  * spec, and it may give ambiguous results (there might be multiple equally
  * valid matches, but only one will be returned).  This must be used ONLY
  * as a heuristic in giving suitable error messages.  See errorMissingRTE.
@@ -320,8 +308,8 @@ searchRangeTableForRel(ParseState *pstate, RangeVar *relation)
 	 * relation.
 	 *
 	 * NB: It's not critical that RangeVarGetRelid return the correct answer
-	 * here in the face of concurrent DDL.	If it doesn't, the worst case
-	 * scenario is a less-clear error message.	Also, the tables involved in
+	 * here in the face of concurrent DDL.  If it doesn't, the worst case
+	 * scenario is a less-clear error message.  Also, the tables involved in
 	 * the query are already locked, which reduces the number of cases in
 	 * which surprising behavior can occur.  So we do the name lookup
 	 * unlocked.
@@ -411,8 +399,39 @@ checkNameSpaceConflicts(ParseState *pstate, List *namespace1,
 }
 
 /*
+ * Complain if a namespace item is currently disallowed as a LATERAL reference.
+ * This enforces both SQL:2008's rather odd idea of what to do with a LATERAL
+ * reference to the wrong side of an outer join, and our own prohibition on
+ * referencing the target table of an UPDATE or DELETE as a lateral reference
+ * in a FROM/USING clause.
+ *
+ * Convenience subroutine to avoid multiple copies of a rather ugly ereport.
+ */
+static void
+check_lateral_ref_ok(ParseState *pstate, ParseNamespaceItem *nsitem,
+					 int location)
+{
+	if (nsitem->p_lateral_only && !nsitem->p_lateral_ok)
+	{
+		/* SQL:2008 demands this be an error, not an invisible item */
+		RangeTblEntry *rte = nsitem->p_rte;
+		char	   *refname = rte->eref->aliasname;
+
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
+			errmsg("invalid reference to FROM-clause entry for table \"%s\"",
+				   refname),
+				 (rte == pstate->p_target_rangetblentry) ?
+				 errhint("There is an entry for table \"%s\", but it cannot be referenced from this part of the query.",
+						 refname) :
+				 errdetail("The combining JOIN type must be INNER or LEFT for a LATERAL reference."),
+				 parser_errposition(pstate, location)));
+	}
+}
+
+/*
  * given an RTE, return RT index (starting with 1) of the entry,
- * and optionally get its nesting depth (0 = current).	If sublevels_up
+ * and optionally get its nesting depth (0 = current).  If sublevels_up
  * is NULL, only consider rels at the current nesting level.
  * Raises error if RTE not found.
  */
@@ -622,15 +641,8 @@ colNameToVar(ParseState *pstate, char *colname, bool localonly,
 							(errcode(ERRCODE_AMBIGUOUS_COLUMN),
 							 errmsg("column reference \"%s\" is ambiguous",
 									colname),
-							 parser_errposition(orig_pstate, location)));
-				/* SQL:2008 demands this be an error, not an invisible item */
-				if (nsitem->p_lateral_only && !nsitem->p_lateral_ok)
-					ereport(ERROR,
-							(errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
-							 errmsg("invalid reference to FROM-clause entry for table \"%s\"",
-									rte->eref->aliasname),
-							 errdetail("The combining JOIN type must be INNER or LEFT for a LATERAL reference."),
-							 parser_errposition(orig_pstate, location)));
+							 parser_errposition(pstate, location)));
+				check_lateral_ref_ok(pstate, nsitem, location);
 				result = newresult;
 			}
 		}
@@ -651,7 +663,7 @@ colNameToVar(ParseState *pstate, char *colname, bool localonly,
  *
  * This is different from colNameToVar in that it considers every entry in
  * the ParseState's rangetable(s), not only those that are currently visible
- * in the p_namespace list(s).	This behavior is invalid per the SQL spec,
+ * in the p_namespace list(s).  This behavior is invalid per the SQL spec,
  * and it may give ambiguous results (there might be multiple equally valid
  * matches, but only one will be returned).  This must be used ONLY as a
  * heuristic in giving suitable error messages.  See errorMissingColumn.
@@ -1002,7 +1014,7 @@ addRangeTableEntry(ParseState *pstate,
 
 	/*
 	 * Get the rel's OID.  This access also ensures that we have an up-to-date
-	 * relcache entry for the rel.	Since this is typically the first access
+	 * relcache entry for the rel.  Since this is typically the first access
 	 * to a rel in a statement, be careful to get the right access level
 	 * depending on whether we're doing SELECT FOR UPDATE/SHARE.
 	 */
@@ -1611,6 +1623,10 @@ isLockedRefname(ParseState *pstate, const char *refname)
  * and/or namespace list.  (We assume caller has checked for any
  * namespace conflicts.)  The RTE is always marked as unconditionally
  * visible, that is, not LATERAL-only.
+ *
+ * Note: some callers know that they can find the new ParseNamespaceItem
+ * at the end of the pstate->p_namespace list.  This is a bit ugly but not
+ * worth complicating this function's signature for.
  */
 void
 addRTEtoQuery(ParseState *pstate, RangeTblEntry *rte,
@@ -2558,7 +2574,7 @@ errorMissingRTE(ParseState *pstate, RangeVar *relation)
 
 	/*
 	 * Check to see if there are any potential matches in the query's
-	 * rangetable.	(Note: cases involving a bad schema name in the RangeVar
+	 * rangetable.  (Note: cases involving a bad schema name in the RangeVar
 	 * will throw error immediately here.  That seems OK.)
 	 */
 	rte = searchRangeTableForRel(pstate, relation);
@@ -2612,7 +2628,7 @@ errorMissingColumn(ParseState *pstate,
 	RangeTblEntry *rte;
 
 	/*
-	 * If relname was given, just play dumb and report it.	(In practice, a
+	 * If relname was given, just play dumb and report it.  (In practice, a
 	 * bad qualification name should end up at errorMissingRTE, not here, so
 	 * no need to work hard on this case.)
 	 */

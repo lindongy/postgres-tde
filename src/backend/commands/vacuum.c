@@ -55,6 +55,8 @@
  */
 int			vacuum_freeze_min_age;
 int			vacuum_freeze_table_age;
+int			vacuum_multixact_freeze_min_age;
+int			vacuum_multixact_freeze_table_age;
 
 
 /* A few variables that don't seem worth passing around as parameters */
@@ -64,7 +66,10 @@ static BufferAccessStrategy vac_strategy;
 
 /* non-export function prototypes */
 static List *get_rel_oids(Oid relid, const RangeVar *vacrel);
-static void vac_truncate_clog(TransactionId frozenXID, MultiXactId minMulti);
+static void vac_truncate_clog(TransactionId frozenXID,
+				  MultiXactId minMulti,
+				  TransactionId lastSaneFrozenXid,
+				  MultiXactId lastSaneMinMulti);
 static bool vacuum_rel(Oid relid, VacuumStmt *vacstmt, bool do_toast,
 		   bool for_wraparound);
 
@@ -398,6 +403,8 @@ get_rel_oids(Oid relid, const RangeVar *vacrel)
 void
 vacuum_set_xid_limits(int freeze_min_age,
 					  int freeze_table_age,
+					  int multixact_freeze_min_age,
+					  int multixact_freeze_table_age,
 					  bool sharedRel,
 					  TransactionId *oldestXmin,
 					  TransactionId *freezeLimit,
@@ -406,14 +413,16 @@ vacuum_set_xid_limits(int freeze_min_age,
 					  MultiXactId *mxactFullScanLimit)
 {
 	int			freezemin;
+	int			mxid_freezemin;
 	TransactionId limit;
 	TransactionId safeLimit;
-	MultiXactId	mxactLimit;
+	MultiXactId mxactLimit;
+	MultiXactId safeMxactLimit;
 
 	/*
-	 * We can always ignore processes running lazy vacuum.	This is because we
+	 * We can always ignore processes running lazy vacuum.  This is because we
 	 * use these values only for deciding which tuples we must keep in the
-	 * tables.	Since lazy vacuum doesn't write its XID anywhere, it's safe to
+	 * tables.  Since lazy vacuum doesn't write its XID anywhere, it's safe to
 	 * ignore it.  In theory it could be problematic to ignore lazy vacuums in
 	 * a full vacuum, but keep in mind that only one vacuum process can be
 	 * working on a particular table at any time, and that each vacuum is
@@ -462,13 +471,36 @@ vacuum_set_xid_limits(int freeze_min_age,
 	*freezeLimit = limit;
 
 	/*
-	 * simplistic MultiXactId removal limit: use the same policy as for
-	 * freezing Xids (except we use the oldest known mxact instead of the
-	 * current next value).
+	 * Determine the minimum multixact freeze age to use: as specified by
+	 * caller, or vacuum_multixact_freeze_min_age, but in any case not more
+	 * than half autovacuum_multixact_freeze_max_age, so that autovacuums to
+	 * prevent MultiXact wraparound won't occur too frequently.
 	 */
-	mxactLimit = GetOldestMultiXactId() - freezemin;
+	mxid_freezemin = multixact_freeze_min_age;
+	if (mxid_freezemin < 0)
+		mxid_freezemin = vacuum_multixact_freeze_min_age;
+	mxid_freezemin = Min(mxid_freezemin,
+						 autovacuum_multixact_freeze_max_age / 2);
+	Assert(mxid_freezemin >= 0);
+
+	/* compute the cutoff multi, being careful to generate a valid value */
+	mxactLimit = GetOldestMultiXactId() - mxid_freezemin;
 	if (mxactLimit < FirstMultiXactId)
 		mxactLimit = FirstMultiXactId;
+
+	safeMxactLimit =
+		ReadNextMultiXactId() - autovacuum_multixact_freeze_max_age;
+	if (safeMxactLimit < FirstMultiXactId)
+		safeMxactLimit = FirstMultiXactId;
+
+	if (MultiXactIdPrecedes(mxactLimit, safeMxactLimit))
+	{
+		ereport(WARNING,
+				(errmsg("oldest multixact is far in the past"),
+				 errhint("Close open transactions with multixacts soon to avoid wraparound problems.")));
+		mxactLimit = safeMxactLimit;
+	}
+
 	*multiXactCutoff = mxactLimit;
 
 	if (xidFullScanLimit != NULL)
@@ -501,15 +533,33 @@ vacuum_set_xid_limits(int freeze_min_age,
 		*xidFullScanLimit = limit;
 
 		/*
-		 * Compute MultiXactId limit to cause a full-table vacuum, being
-		 * careful not to generate an invalid multi. We just copy the logic
-		 * (and limits) from plain XIDs here.
+		 * Similar to the above, determine the table freeze age to use for
+		 * multixacts: as specified by the caller, or
+		 * vacuum_multixact_freeze_table_age, but in any case not more than
+		 * autovacuum_multixact_freeze_table_age * 0.95, so that if you have
+		 * e.g. nightly VACUUM schedule, the nightly VACUUM gets a chance to
+		 * freeze multixacts before anti-wraparound autovacuum is launched.
+		 */
+		freezetable = multixact_freeze_table_age;
+		if (freezetable < 0)
+			freezetable = vacuum_multixact_freeze_table_age;
+		freezetable = Min(freezetable,
+						  autovacuum_multixact_freeze_max_age * 0.95);
+		Assert(freezetable >= 0);
+
+		/*
+		 * Compute MultiXact limit causing a full-table vacuum, being careful
+		 * to generate a valid MultiXact value.
 		 */
 		mxactLimit = ReadNextMultiXactId() - freezetable;
 		if (mxactLimit < FirstMultiXactId)
 			mxactLimit = FirstMultiXactId;
 
 		*mxactFullScanLimit = mxactLimit;
+	}
+	else
+	{
+		Assert(mxactFullScanLimit == NULL);
 	}
 }
 
@@ -519,7 +569,7 @@ vacuum_set_xid_limits(int freeze_min_age,
  *		If we scanned the whole relation then we should just use the count of
  *		live tuples seen; but if we did not, we should not trust the count
  *		unreservedly, especially not in VACUUM, which may have scanned a quite
- *		nonrandom subset of the table.	When we have only partial information,
+ *		nonrandom subset of the table.  When we have only partial information,
  *		we take the old value of pg_class.reltuples as a measurement of the
  *		tuple density in the unscanned pages.
  *
@@ -665,7 +715,7 @@ vac_update_relstats(Relation relation,
 
 	/*
 	 * If we have discovered that there are no indexes, then there's no
-	 * primary key either.	This could be done more thoroughly...
+	 * primary key either.  This could be done more thoroughly...
 	 */
 	if (pgcform->relhaspkey && !hasindex)
 	{
@@ -686,19 +736,33 @@ vac_update_relstats(Relation relation,
 	}
 
 	/*
-	 * relfrozenxid should never go backward.  Caller can pass
-	 * InvalidTransactionId if it has no new data.
+	 * Update relfrozenxid, unless caller passed InvalidTransactionId
+	 * indicating it has no new data.
+	 *
+	 * Ordinarily, we don't let relfrozenxid go backwards: if things are
+	 * working correctly, the only way the new frozenxid could be older would
+	 * be if a previous VACUUM was done with a tighter freeze_min_age, in
+	 * which case we don't want to forget the work it already did.  However,
+	 * if the stored relfrozenxid is "in the future", then it must be corrupt
+	 * and it seems best to overwrite it with the cutoff we used this time.
+	 * This should match vac_update_datfrozenxid() concerning what we consider
+	 * to be "in the future".
 	 */
 	if (TransactionIdIsNormal(frozenxid) &&
-		TransactionIdPrecedes(pgcform->relfrozenxid, frozenxid))
+		pgcform->relfrozenxid != frozenxid &&
+		(TransactionIdPrecedes(pgcform->relfrozenxid, frozenxid) ||
+		 TransactionIdPrecedes(ReadNewTransactionId(),
+							   pgcform->relfrozenxid)))
 	{
 		pgcform->relfrozenxid = frozenxid;
 		dirty = true;
 	}
 
-	/* relminmxid must never go backward, either */
+	/* Similarly for relminmxid */
 	if (MultiXactIdIsValid(minmulti) &&
-		MultiXactIdPrecedes(pgcform->relminmxid, minmulti))
+		pgcform->relminmxid != minmulti &&
+		(MultiXactIdPrecedes(pgcform->relminmxid, minmulti) ||
+		 MultiXactIdPrecedes(ReadNextMultiXactId(), pgcform->relminmxid)))
 	{
 		pgcform->relminmxid = minmulti;
 		dirty = true;
@@ -725,8 +789,8 @@ vac_update_relstats(Relation relation,
  *		truncate pg_clog and pg_multixact.
  *
  *		We violate transaction semantics here by overwriting the database's
- *		existing pg_database tuple with the new value.	This is reasonably
- *		safe since the new value is correct whether or not this transaction
+ *		existing pg_database tuple with the new values.  This is reasonably
+ *		safe since the new values are correct whether or not this transaction
  *		commits.  As with vac_update_relstats, this avoids leaving dead tuples
  *		behind after a VACUUM.
  */
@@ -740,6 +804,9 @@ vac_update_datfrozenxid(void)
 	HeapTuple	classTup;
 	TransactionId newFrozenXid;
 	MultiXactId newMinMulti;
+	TransactionId lastSaneFrozenXid;
+	MultiXactId lastSaneMinMulti;
+	bool		bogus = false;
 	bool		dirty = false;
 
 	/*
@@ -755,6 +822,14 @@ vac_update_datfrozenxid(void)
 	 * used on pg_class for new tables.  See AddNewRelationTuple().
 	 */
 	newMinMulti = GetOldestMultiXactId();
+
+	/*
+	 * Identify the latest relfrozenxid and relminmxid values that we could
+	 * validly see during the scan.  These are conservative values, but it's
+	 * not really worth trying to be more exact.
+	 */
+	lastSaneFrozenXid = ReadNewTransactionId();
+	lastSaneMinMulti = ReadNextMultiXactId();
 
 	/*
 	 * We must seqscan pg_class to find the minimum Xid, because there is no
@@ -781,6 +856,21 @@ vac_update_datfrozenxid(void)
 		Assert(TransactionIdIsNormal(classForm->relfrozenxid));
 		Assert(MultiXactIdIsValid(classForm->relminmxid));
 
+		/*
+		 * If things are working properly, no relation should have a
+		 * relfrozenxid or relminmxid that is "in the future".  However, such
+		 * cases have been known to arise due to bugs in pg_upgrade.  If we
+		 * see any entries that are "in the future", chicken out and don't do
+		 * anything.  This ensures we won't truncate clog before those
+		 * relations have been scanned and cleaned up.
+		 */
+		if (TransactionIdPrecedes(lastSaneFrozenXid, classForm->relfrozenxid) ||
+			MultiXactIdPrecedes(lastSaneMinMulti, classForm->relminmxid))
+		{
+			bogus = true;
+			break;
+		}
+
 		if (TransactionIdPrecedes(classForm->relfrozenxid, newFrozenXid))
 			newFrozenXid = classForm->relfrozenxid;
 
@@ -791,6 +881,10 @@ vac_update_datfrozenxid(void)
 	/* we're done with pg_class */
 	systable_endscan(scan);
 	heap_close(relation, AccessShareLock);
+
+	/* chicken out if bogus data found */
+	if (bogus)
+		return;
 
 	Assert(TransactionIdIsNormal(newFrozenXid));
 	Assert(MultiXactIdIsValid(newMinMulti));
@@ -805,21 +899,30 @@ vac_update_datfrozenxid(void)
 	dbform = (Form_pg_database) GETSTRUCT(tuple);
 
 	/*
-	 * Don't allow datfrozenxid to go backward (probably can't happen anyway);
-	 * and detect the common case where it doesn't go forward either.
+	 * As in vac_update_relstats(), we ordinarily don't want to let
+	 * datfrozenxid go backward; but if it's "in the future" then it must be
+	 * corrupt and it seems best to overwrite it.
 	 */
-	if (TransactionIdPrecedes(dbform->datfrozenxid, newFrozenXid))
+	if (dbform->datfrozenxid != newFrozenXid &&
+		(TransactionIdPrecedes(dbform->datfrozenxid, newFrozenXid) ||
+		 TransactionIdPrecedes(lastSaneFrozenXid, dbform->datfrozenxid)))
 	{
 		dbform->datfrozenxid = newFrozenXid;
 		dirty = true;
 	}
+	else
+		newFrozenXid = dbform->datfrozenxid;
 
-	/* ditto */
-	if (MultiXactIdPrecedes(dbform->datminmxid, newMinMulti))
+	/* Ditto for datminmxid */
+	if (dbform->datminmxid != newMinMulti &&
+		(MultiXactIdPrecedes(dbform->datminmxid, newMinMulti) ||
+		 MultiXactIdPrecedes(lastSaneMinMulti, dbform->datminmxid)))
 	{
 		dbform->datminmxid = newMinMulti;
 		dirty = true;
 	}
+	else
+		newMinMulti = dbform->datminmxid;
 
 	if (dirty)
 		heap_inplace_update(relation, tuple);
@@ -828,12 +931,13 @@ vac_update_datfrozenxid(void)
 	heap_close(relation, RowExclusiveLock);
 
 	/*
-	 * If we were able to advance datfrozenxid, see if we can truncate
-	 * pg_clog. Also do it if the shared XID-wrap-limit info is stale, since
-	 * this action will update that too.
+	 * If we were able to advance datfrozenxid or datminmxid, see if we can
+	 * truncate pg_clog and/or pg_multixact.  Also do it if the shared
+	 * XID-wrap-limit info is stale, since this action will update that too.
 	 */
 	if (dirty || ForceTransactionIdLimitUpdate())
-		vac_truncate_clog(newFrozenXid, newMinMulti);
+		vac_truncate_clog(newFrozenXid, newMinMulti,
+						  lastSaneFrozenXid, lastSaneMinMulti);
 }
 
 
@@ -843,16 +947,22 @@ vac_update_datfrozenxid(void)
  *		Scan pg_database to determine the system-wide oldest datfrozenxid,
  *		and use it to truncate the transaction commit log (pg_clog).
  *		Also update the XID wrap limit info maintained by varsup.c.
+ *		Likewise for datminmxid.
  *
- *		The passed XID is simply the one I just wrote into my pg_database
- *		entry.	It's used to initialize the "min" calculation.
+ *		The passed frozenXID and minMulti are the updated values for my own
+ *		pg_database entry. They're used to initialize the "min" calculations.
+ *		The caller also passes the "last sane" XID and MXID, since it has
+ *		those at hand already.
  *
  *		This routine is only invoked when we've managed to change our
- *		DB's datfrozenxid entry, or we found that the shared XID-wrap-limit
- *		info is stale.
+ *		DB's datfrozenxid/datminmxid values, or we found that the shared
+ *		XID-wrap-limit info is stale.
  */
 static void
-vac_truncate_clog(TransactionId frozenXID, MultiXactId minMulti)
+vac_truncate_clog(TransactionId frozenXID,
+				  MultiXactId minMulti,
+				  TransactionId lastSaneFrozenXid,
+				  MultiXactId lastSaneMinMulti)
 {
 	TransactionId myXID = GetCurrentTransactionId();
 	Relation	relation;
@@ -860,14 +970,15 @@ vac_truncate_clog(TransactionId frozenXID, MultiXactId minMulti)
 	HeapTuple	tuple;
 	Oid			oldestxid_datoid;
 	Oid			minmulti_datoid;
+	bool		bogus = false;
 	bool		frozenAlreadyWrapped = false;
 
-	/* init oldest datoids to sync with my frozen values */
+	/* init oldest datoids to sync with my frozenXID/minMulti values */
 	oldestxid_datoid = MyDatabaseId;
 	minmulti_datoid = MyDatabaseId;
 
 	/*
-	 * Scan pg_database to compute the minimum datfrozenxid
+	 * Scan pg_database to compute the minimum datfrozenxid/datminmxid
 	 *
 	 * Note: we need not worry about a race condition with new entries being
 	 * inserted by CREATE DATABASE.  Any such entry will have a copy of some
@@ -888,6 +999,19 @@ vac_truncate_clog(TransactionId frozenXID, MultiXactId minMulti)
 
 		Assert(TransactionIdIsNormal(dbform->datfrozenxid));
 		Assert(MultiXactIdIsValid(dbform->datminmxid));
+
+		/*
+		 * If things are working properly, no database should have a
+		 * datfrozenxid or datminmxid that is "in the future".  However, such
+		 * cases have been known to arise due to bugs in pg_upgrade.  If we
+		 * see any entries that are "in the future", chicken out and don't do
+		 * anything.  This ensures we won't truncate clog before those
+		 * databases have been scanned and cleaned up.  (We will issue the
+		 * "already wrapped" warning if appropriate, though.)
+		 */
+		if (TransactionIdPrecedes(lastSaneFrozenXid, dbform->datfrozenxid) ||
+			MultiXactIdPrecedes(lastSaneMinMulti, dbform->datminmxid))
+			bogus = true;
 
 		if (TransactionIdPrecedes(myXID, dbform->datfrozenxid))
 			frozenAlreadyWrapped = true;
@@ -922,18 +1046,24 @@ vac_truncate_clog(TransactionId frozenXID, MultiXactId minMulti)
 		return;
 	}
 
-	/* Truncate CLOG and Multi to the oldest computed value */
+	/* chicken out if data is bogus in any other way */
+	if (bogus)
+		return;
+
+	/*
+	 * Truncate CLOG to the oldest computed value.  Note we don't truncate
+	 * multixacts; that will be done by the next checkpoint.
+	 */
 	TruncateCLOG(frozenXID);
-	TruncateMultiXact(minMulti);
 
 	/*
 	 * Update the wrap limit for GetNewTransactionId and creation of new
 	 * MultiXactIds.  Note: these functions will also signal the postmaster
-	 * for an(other) autovac cycle if needed.	XXX should we avoid possibly
+	 * for an(other) autovac cycle if needed.   XXX should we avoid possibly
 	 * signalling twice?
 	 */
 	SetTransactionIdLimit(frozenXID, oldestxid_datoid);
-	MultiXactAdvanceOldest(minMulti, minmulti_datoid);
+	SetMultiXactIdLimit(minMulti, minmulti_datoid);
 }
 
 
@@ -941,7 +1071,7 @@ vac_truncate_clog(TransactionId frozenXID, MultiXactId minMulti)
  *	vacuum_rel() -- vacuum one heap relation
  *
  *		Doing one heap at a time incurs extra overhead, since we need to
- *		check that the heap exists again just before we vacuum it.	The
+ *		check that the heap exists again just before we vacuum it.  The
  *		reason that we do this is so that vacuuming can be spread across
  *		many small transactions.  Otherwise, two-phase locking would require
  *		us to lock the entire database during one pass of the vacuum cleaner.
@@ -998,7 +1128,7 @@ vacuum_rel(Oid relid, VacuumStmt *vacstmt, bool do_toast, bool for_wraparound)
 	}
 
 	/*
-	 * Check for user-requested abort.	Note we want this to be inside a
+	 * Check for user-requested abort.  Note we want this to be inside a
 	 * transaction, so xact.c doesn't issue useless WARNING.
 	 */
 	CHECK_FOR_INTERRUPTS();
@@ -1045,7 +1175,7 @@ vacuum_rel(Oid relid, VacuumStmt *vacstmt, bool do_toast, bool for_wraparound)
 	 *
 	 * We allow the user to vacuum a table if he is superuser, the table
 	 * owner, or the database owner (but in the latter case, only if it's not
-	 * a shared relation).	pg_class_ownercheck includes the superuser case.
+	 * a shared relation).  pg_class_ownercheck includes the superuser case.
 	 *
 	 * Note we choose to treat permissions failure as a WARNING and keep
 	 * trying to vacuum the rest of the DB --- is this appropriate?
@@ -1150,7 +1280,9 @@ vacuum_rel(Oid relid, VacuumStmt *vacstmt, bool do_toast, bool for_wraparound)
 		/* VACUUM FULL is now a variant of CLUSTER; see cluster.c */
 		cluster_rel(relid, InvalidOid, false,
 					(vacstmt->options & VACOPT_VERBOSE) != 0,
-					vacstmt->freeze_min_age, vacstmt->freeze_table_age);
+					vacstmt->freeze_min_age, vacstmt->freeze_table_age,
+					vacstmt->multixact_freeze_min_age,
+					vacstmt->multixact_freeze_table_age);
 	}
 	else
 		lazy_vacuum_rel(onerel, vacstmt, vac_strategy);
@@ -1174,7 +1306,7 @@ vacuum_rel(Oid relid, VacuumStmt *vacstmt, bool do_toast, bool for_wraparound)
 	/*
 	 * If the relation has a secondary toast rel, vacuum that too while we
 	 * still hold the session lock on the master table.  Note however that
-	 * "analyze" will not get done on the toast table.	This is good, because
+	 * "analyze" will not get done on the toast table.  This is good, because
 	 * the toaster always uses hardcoded index access and statistics are
 	 * totally unimportant for toast relations.
 	 */
@@ -1193,7 +1325,7 @@ vacuum_rel(Oid relid, VacuumStmt *vacstmt, bool do_toast, bool for_wraparound)
 
 /*
  * Open all the vacuumable indexes of the given relation, obtaining the
- * specified kind of lock on each.	Return an array of Relation pointers for
+ * specified kind of lock on each.  Return an array of Relation pointers for
  * the indexes into *Irel, and the number of indexes into *nindexes.
  *
  * We consider an index vacuumable if it is marked insertable (IndexIsReady).
@@ -1243,7 +1375,7 @@ vac_open_indexes(Relation relation, LOCKMODE lockmode,
 }
 
 /*
- * Release the resources acquired by vac_open_indexes.	Optionally release
+ * Release the resources acquired by vac_open_indexes.  Optionally release
  * the locks (say NoLock to keep 'em).
  */
 void

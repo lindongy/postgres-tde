@@ -961,7 +961,7 @@ get_bin_version(ClusterInfo *cluster)
 	int			pre_dot,
 				post_dot;
 
-	snprintf(cmd, sizeof(cmd), "\"%s/pg_ctl\" --version", cluster->bindir);
+	snprintf(cmd, sizeof(cmd), SYSTEMQUOTE "\"%s/pg_ctl\" --version" SYSTEMQUOTE, cluster->bindir);
 
 	if ((output = popen(cmd, "r")) == NULL ||
 		fgets(cmd_output, sizeof(cmd_output), output) == NULL)
@@ -1004,7 +1004,7 @@ get_canonical_locale_name(int category, const char *locale)
 	res = setlocale(category, locale);
 
 	if (!res)
-		pg_log(PG_FATAL, "failed to get system local name for \"%s\"\n", res);
+		pg_log(PG_FATAL, "failed to get system locale name for \"%s\"\n", locale);
 
 	res = pg_strdup(res);
 

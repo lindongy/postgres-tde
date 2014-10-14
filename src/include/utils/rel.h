@@ -134,7 +134,7 @@ typedef struct RelationData
 	 * Note: rd_amcache is available for index AMs to cache private data about
 	 * an index.  This must be just a cache since it may get reset at any time
 	 * (in particular, it will get reset by a relcache inval message for the
-	 * index).	If used, it must point to a single memory chunk palloc'd in
+	 * index).  If used, it must point to a single memory chunk palloc'd in
 	 * rd_indexcxt.  A relcache reset will include freeing that chunk and
 	 * setting rd_amcache = NULL.
 	 */
@@ -157,7 +157,7 @@ typedef struct RelationData
 	 * foreign-table support
 	 *
 	 * rd_fdwroutine must point to a single memory chunk palloc'd in
-	 * CacheMemoryContext.	It will be freed and reset to NULL on a relcache
+	 * CacheMemoryContext.  It will be freed and reset to NULL on a relcache
 	 * reset.
 	 */
 
@@ -187,7 +187,11 @@ typedef struct RelationData
  * be applied to relations that use this format or a superset for
  * private options data.
  */
- /* autovacuum-related reloptions. */
+ /*
+  * autovacuum-related reloptions.
+  *
+  * Split in two to avoid ABI break.
+  */
 typedef struct AutoVacOpts
 {
 	bool		enabled;
@@ -202,12 +206,26 @@ typedef struct AutoVacOpts
 	float8		analyze_scale_factor;
 } AutoVacOpts;
 
+/*
+ * The multixact freeze parameters were added after 9.3.2 had been released;
+ * to preserve ABI compatibility with modules that might have been compiled
+ * prior to 9.3.3, these are placed in a separate struct so that they can be
+ * located at the end of the containing struct.
+ */
+typedef struct AutoVacOpts2
+{
+	int		multixact_freeze_min_age;
+	int		multixact_freeze_max_age;
+	int		multixact_freeze_table_age;
+} AutoVacOpts2;
+
 typedef struct StdRdOptions
 {
 	int32		vl_len_;		/* varlena header (do not touch directly!) */
 	int			fillfactor;		/* page fill factor in percent (0..100) */
 	AutoVacOpts autovacuum;		/* autovacuum-related options */
 	bool		security_barrier;		/* for views */
+	AutoVacOpts2 autovacuum2;	/* rest of autovacuum options */
 } StdRdOptions;
 
 #define HEAP_MIN_FILLFACTOR			10
@@ -343,7 +361,7 @@ typedef struct StdRdOptions
  * RelationGetTargetBlock
  *		Fetch relation's current insertion target block.
  *
- * Returns InvalidBlockNumber if there is no current target block.	Note
+ * Returns InvalidBlockNumber if there is no current target block.  Note
  * that the target block status is discarded on any smgr-level invalidation.
  */
 #define RelationGetTargetBlock(relation) \

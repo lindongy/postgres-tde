@@ -6711,6 +6711,9 @@ SELECT SUBSTRING('XY1234Z', 'Y*?([0-9]{1,3})');
     </table>
 
    <para>
+    <indexterm>
+      <primary>OVERLAPS</primary>
+    </indexterm>
     In addition to these functions, the SQL <literal>OVERLAPS</> operator is
     supported:
 <synopsis>
@@ -15692,7 +15695,11 @@ postgres=# SELECT * FROM pg_xlogfile_name_offset(pg_stop_backup());
    <para>
     <function>pg_database_size</function> and <function>pg_tablespace_size</>
     accept the OID or name of a database or tablespace, and return the total
-    disk space used therein.
+    disk space used therein.  To use <function>pg_database_size</function>,
+    you must have <literal>CONNECT</> permission on the specified database
+    (which is granted by default).  To use <function>pg_tablespace_size</>,
+    you must have <literal>CREATE</> permission on the specified tablespace,
+    unless it is the default tablespace for the current database.
    </para>
 
    <para>

@@ -128,7 +128,7 @@ forget_matching_deletion(RelFileNode node, BlockNumber delblk)
  * in correct itemno sequence, but physically the opposite order from the
  * original, because we insert them in the opposite of itemno order.  This
  * does not matter in any current btree code, but it's something to keep an
- * eye on.	Is it worth changing just on general principles?  See also the
+ * eye on.  Is it worth changing just on general principles?  See also the
  * notes in btree_xlog_split().
  */
 static void
@@ -179,7 +179,7 @@ _bt_restore_meta(RelFileNode rnode, XLogRecPtr lsn,
 	pageop->btpo_flags = BTP_META;
 
 	/*
-	 * Set pd_lower just past the end of the metadata.	This is not essential
+	 * Set pd_lower just past the end of the metadata.  This is not essential
 	 * but it makes the page look compressible to xlog.c.
 	 */
 	((PageHeader) metapg)->pd_lower =
@@ -387,7 +387,7 @@ btree_xlog_split(bool onleft, bool isroot,
 
 				/*
 				 * Remove the items from the left page that were copied to the
-				 * right page.	Also remove the old high key, if any. (We must
+				 * right page.  Also remove the old high key, if any. (We must
 				 * remove everything before trying to insert any items, else
 				 * we risk not having enough space.)
 				 */
@@ -482,28 +482,47 @@ btree_xlog_vacuum(XLogRecPtr lsn, XLogRecord *record)
 	BTPageOpaque opaque;
 
 	/*
-	 * If queries might be active then we need to ensure every block is
+	 * If queries might be active then we need to ensure every leaf page is
 	 * unpinned between the lastBlockVacuumed and the current block, if there
-	 * are any. This ensures that every block in the index is touched during
-	 * VACUUM as required to ensure scans work correctly.
+	 * are any.  This prevents replay of the VACUUM from reaching the stage of
+	 * removing heap tuples while there could still be indexscans "in flight"
+	 * to those particular tuples (see nbtree/README).
+	 *
+	 * It might be worth checking if there are actually any backends running;
+	 * if not, we could just skip this.
+	 *
+	 * Since VACUUM can visit leaf pages out-of-order, it might issue records
+	 * with lastBlockVacuumed >= block; that's not an error, it just means
+	 * nothing to do now.
+	 *
+	 * Note: since we touch all pages in the range, we will lock non-leaf
+	 * pages, and also any empty (all-zero) pages that may be in the index. It
+	 * doesn't seem worth the complexity to avoid that.  But it's important
+	 * that HotStandbyActiveInReplay() will not return true if the database
+	 * isn't yet consistent; so we need not fear reading still-corrupt blocks
+	 * here during crash recovery.
 	 */
-	if (standbyState == STANDBY_SNAPSHOT_READY &&
-		(xlrec->lastBlockVacuumed + 1) != xlrec->block)
+	if (HotStandbyActiveInReplay())
 	{
-		BlockNumber blkno = xlrec->lastBlockVacuumed + 1;
+		BlockNumber blkno;
 
-		for (; blkno < xlrec->block; blkno++)
+		for (blkno = xlrec->lastBlockVacuumed + 1; blkno < xlrec->block; blkno++)
 		{
 			/*
+			 * We use RBM_NORMAL_NO_LOG mode because it's not an error
+			 * condition to see all-zero pages.  The original btvacuumpage
+			 * scan would have skipped over all-zero pages, noting them in FSM
+			 * but not bothering to initialize them just yet; so we mustn't
+			 * throw an error here.  (We could skip acquiring the cleanup lock
+			 * if PageIsNew, but it's probably not worth the cycles to test.)
+			 *
 			 * XXX we don't actually need to read the block, we just need to
 			 * confirm it is unpinned. If we had a special call into the
 			 * buffer manager we could optimise this so that if the block is
 			 * not in shared_buffers we confirm it as unpinned.
-			 *
-			 * Another simple optimization would be to check if there's any
-			 * backends running; if not, we could just skip this.
 			 */
-			buffer = XLogReadBufferExtended(xlrec->node, MAIN_FORKNUM, blkno, RBM_NORMAL);
+			buffer = XLogReadBufferExtended(xlrec->node, MAIN_FORKNUM, blkno,
+											RBM_NORMAL_NO_LOG);
 			if (BufferIsValid(buffer))
 			{
 				LockBufferForCleanup(buffer);
@@ -606,7 +625,7 @@ btree_xlog_delete_get_latestRemovedXid(xl_btree_delete *xlrec)
 
 	/*
 	 * In what follows, we have to examine the previous state of the index
-	 * page, as well as the heap page(s) it points to.	This is only valid if
+	 * page, as well as the heap page(s) it points to.  This is only valid if
 	 * WAL replay has reached a consistent database state; which means that
 	 * the preceding check is not just an optimization, but is *necessary*. We
 	 * won't have let in any user sessions before we reach consistency.
@@ -615,9 +634,9 @@ btree_xlog_delete_get_latestRemovedXid(xl_btree_delete *xlrec)
 		elog(PANIC, "btree_xlog_delete_get_latestRemovedXid: cannot operate with inconsistent data");
 
 	/*
-	 * Get index page.	If the DB is consistent, this should not fail, nor
+	 * Get index page.  If the DB is consistent, this should not fail, nor
 	 * should any of the heap page fetches below.  If one does, we return
-	 * InvalidTransactionId to cancel all HS transactions.	That's probably
+	 * InvalidTransactionId to cancel all HS transactions.  That's probably
 	 * overkill, but it's safe, and certainly better than panicking here.
 	 */
 	ibuffer = XLogReadBuffer(xlrec->node, xlrec->block, false);
@@ -700,11 +719,11 @@ btree_xlog_delete_get_latestRemovedXid(xl_btree_delete *xlrec)
 	UnlockReleaseBuffer(ibuffer);
 
 	/*
-	 * XXX If all heap tuples were LP_DEAD then we will be returning
-	 * InvalidTransactionId here, causing conflict for all HS transactions.
-	 * That should happen very rarely (reasoning please?). Also note that
-	 * caller can't tell the difference between this case and the fast path
-	 * exit above. May need to change that in future.
+	 * If all heap tuples were LP_DEAD then we will be returning
+	 * InvalidTransactionId here, which avoids conflicts. This matches
+	 * existing logic which assumes that LP_DEAD tuples must already be
+	 * older than the latestRemovedXid on the cleanup record that
+	 * set them as LP_DEAD, hence must already have generated a conflict.
 	 */
 	return latestRemovedXid;
 }
@@ -721,7 +740,7 @@ btree_xlog_delete(XLogRecPtr lsn, XLogRecord *record)
 	 * If we have any conflict processing to do, it must happen before we
 	 * update the page.
 	 *
-	 * Btree delete records can conflict with standby queries.	You might
+	 * Btree delete records can conflict with standby queries.  You might
 	 * think that vacuum records would conflict as well, but we've handled
 	 * that already.  XLOG_HEAP2_CLEANUP_INFO records provide the highest xid
 	 * cleaned by the vacuum of the heap and so we can resolve any conflicts
