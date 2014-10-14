@@ -60,6 +60,7 @@ static const ScanKeyword ECPGScanKeywords[] = {
 	{"octet_length", SQL_OCTET_LENGTH, 0},
 	{"open", SQL_OPEN, 0},
 	{"output", SQL_OUTPUT, 0},
+	{"readahead", SQL_READAHEAD, 0},
 	{"reference", SQL_REFERENCE, 0},
 	{"returned_length", SQL_RETURNED_LENGTH, 0},
 	{"returned_octet_length", SQL_RETURNED_OCTET_LENGTH, 0},

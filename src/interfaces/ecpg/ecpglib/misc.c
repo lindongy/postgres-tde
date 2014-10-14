@@ -183,17 +183,154 @@ ECPGtransactionStatus(const char *connection_name)
 	}
 
 	return PQtransactionStatus(con->connection);
-
 }
 
+static void
+raise_xact_error(struct connection *con, int lineno, const char *name)
+{
+	con->client_side_error = true;
+	ecpg_raise(lineno, ECPG_TRANS, ECPG_SQLSTATE_S_E_INVALID_SPECIFICATION,
+					(name ? name : ecpg_gettext("<empty>")));
+}
+
+static bool
+find_subxact(struct connection *con, int lineno, const char *name, bool ignore,
+					struct subxact_descriptor **out)
+{
+	struct subxact_descriptor *desc = con->subxact_desc;
+	bool    found = false;
+
+	if (!name)
+	{
+		raise_xact_error(con, lineno, name);
+		if (out)
+			*out = NULL;
+		return false;
+	}
+
+	while (desc)
+	{
+		int ret = pg_strcasecmp(desc->name, name);
+
+		if (ret == 0)
+		{
+			found = true;
+			break;
+		}
+
+		desc = desc->next;
+	}
+
+	if (!found && !ignore)
+		raise_xact_error(con, lineno, name);
+	if (out)
+		*out = desc;
+	return found;
+}
+
+static void
+add_savepoint(struct connection *con, int lineno, const char *savepoint_name)
+{
+	struct subxact_descriptor *desc, *oldptr;
+
+	oldptr = con->subxact_desc;
+	desc = (struct subxact_descriptor *)
+		ecpg_alloc(sizeof(struct subxact_descriptor), lineno);
+	desc->level = (oldptr ? oldptr->level + 1 : 2);
+	desc->name = ecpg_strdup(savepoint_name, lineno);
+	desc->next = oldptr;
+	con->subxact_desc = desc;
+}
+
+static void
+release_savepoint(struct connection *con, struct subxact_descriptor *ptr, bool rollback)
+{
+	struct subxact_descriptor *desc, *next = NULL;
+
+	desc = con->subxact_desc;
+	while (desc != ptr)
+	{
+		next = desc->next;
+		ecpg_free(desc->name);
+		ecpg_free(desc);
+		desc = next;
+	}
+
+	if (desc)
+	{
+		/* ROLLBACK TO SAVEPOINT leaves the savepoint in place */
+		if (rollback)
+			con->subxact_desc = desc;
+		else
+		{
+			/* RELEASE SAVEPOINT forgets about the savepoint */
+			con->subxact_desc = desc->next;
+			ecpg_free(desc->name);
+			ecpg_free(desc);
+		}
+	}
+	else
+		con->subxact_desc = NULL;
+}
+
+/*
+ * ECPGtrans
+ * Track (sub-)transactions by flags.
+ * Parameters
+ *	connection_name:	connection
+ *	transaction:		the SQL string
+ *	prepared:		prepared transaction or not
+ *	begin:			start or finish transaction
+ *	rollback:		if begin == true: commit or rollback
+ *	savepoint_name:		NULL -> top level transaction,
+ *				subtransaction otherwise
+ *
+ * The following table shows the combination of flags (x is ignored):
+ * prepared | begin | rollback | savepoint_name | command
+ * ---------+-------+----------+----------------+-----------------------
+ *   false  | false |   false  |       NULL     | COMMIT
+ *   false  | false |   false  |  valid pointer | RELEASE SAVEPOINT
+ *   false  | false |   true   |       NULL     | ROLLBACK
+ *   false  | false |   true   |  valid pointer | ROLLBACK TO SAVEPOINT
+ *   false  | true  |     x    |       NULL     | BEGIN
+ *   false  | true  |     x    |  valid pointer | SAVEPOINT
+ *   true   | false |   false  |        x       | COMMIT PREPARED
+ *   true   | false |   true   |        x       | ROLLBACK PREPARED
+ *   true   | true  |     x    |        x       | PREPARE TRANSACTION
+ */
 bool
-ECPGtrans(int lineno, const char *connection_name, const char *transaction)
+ECPGtrans(int lineno, const char *connection_name, const char *transaction,
+				bool prepared, bool begin, bool rollback,
+				const char *savepoint_name)
 {
 	PGresult   *res;
 	struct connection *con = ecpg_get_connection(connection_name);
+	bool		rollback_override = false;
 
 	if (!ecpg_init(con, connection_name, lineno))
 		return (false);
+
+	if (con && (con->client_side_error || PQtransactionStatus(con->connection) == PQTRANS_INERROR))
+	{
+		/*
+		 * Follow the backend behaviour for failed transactions:
+		 * - override PREPARE TRANSACTION and COMMIT as ROLLBACK
+		 *   so they don't fail
+		 * - allow ROLLBACK and ROLLBACK TO SAVEPOINT to get through
+		 * - emit "current transaction is aborted..." for everything else
+		 */
+		if ((prepared && begin) ||
+				(!prepared && !begin && !rollback && savepoint_name == NULL))
+		{
+			transaction = "rollback";
+			rollback_override = true;
+		}
+		else if (!(!prepared && !begin && rollback))
+		{
+			ecpg_raise(lineno, ECPG_TRANS, ECPG_SQLSTATE_IN_FAILED_SQL_TRANSACTION, NULL);
+			return false;
+		}
+	}
 
 	ecpg_log("ECPGtrans on line %d: action \"%s\"; connection \"%s\"\n", lineno, transaction, con ? con->name : "null");
 
@@ -203,21 +340,90 @@ ECPGtrans(int lineno, const char *connection_name, const char *transaction)
 		/*
 		 * If we got a transaction command but have no open transaction, we
 		 * have to start one, unless we are in autocommit, where the
-		 * developers have to take care themselves. However, if the command is
-		 * a begin statement, we just execute it once.
+		 * developers have to take care themselves. However:
+		 * - if the command is a begin statement, we just execute it once
+		 * - the command is COMMIT/ROLLBACK PREPARED, it must be executed
+		 *   outside of a transaction.
 		 */
-		if (PQtransactionStatus(con->connection) == PQTRANS_IDLE && !con->autocommit && strncmp(transaction, "begin", 5) != 0 && strncmp(transaction, "start", 5) != 0)
+		if (PQtransactionStatus(con->connection) == PQTRANS_IDLE && !con->autocommit &&
+			/* exclude BEGIN */
+			!(!prepared && begin && savepoint_name == NULL) &&
+			/* exclude COMMIT/ROLLBACK PREPARED */
+			!(prepared && !begin))
 		{
 			res = PQexec(con->connection, "begin transaction");
 			if (!ecpg_check_PQresult(res, lineno, con->connection, ECPG_COMPAT_PGSQL))
-				return FALSE;
+				return false;
 			PQclear(res);
 		}
 
 		res = PQexec(con->connection, transaction);
 		if (!ecpg_check_PQresult(res, lineno, con->connection, ECPG_COMPAT_PGSQL))
-			return FALSE;
+			return false;
 		PQclear(res);
+	}
+
+	if (con)
+	{
+		struct subxact_descriptor *desc;
+
+		/* Simplify checking rollback conditions for ecpg_commit_cursors() later */
+		if (rollback_override)
+		{
+			prepared = false;
+			begin = false;
+			rollback = true;
+		}
+
+		/*
+		 * We keep track of subtransactions to be able to correctly
+		 * account for transactional cursors as well.
+		 */
+		if (!prepared && savepoint_name)
+		{
+			int	level;
+
+			if (begin)
+			{
+				/* SAVEPOINT nnn */
+				if (find_subxact(con, lineno, savepoint_name, true, &desc))
+				{
+					/*
+					 * SAVEPOINT nnn with an already existing savepoint name
+					 * does an implicit RELEASE SAVEPOINT nnn
+					 */
+					level = desc->level;
+					release_savepoint(con, desc, false);
+					ecpg_commit_cursors(lineno, con, false, level);
+				}
+
+				add_savepoint(con, lineno, savepoint_name);
+			}
+			else
+			{
+				/*
+				 * ROLLBACK TO / RELEASE SAVEPOINT nnn
+				 *
+				 * The above PQexec() already succeeded for savepoint_name
+				 * but check for completeness anyway.
+				 */
+				if (!find_subxact(con, lineno, savepoint_name, false, &desc))
+					return false;
+
+				level = desc->level;
+				release_savepoint(con, desc, rollback);
+				ecpg_commit_cursors(lineno, con, rollback, level);
+			}
+		}
+		/* Toplevel COMMIT / ROLLBACK */
+		else if (!prepared && !begin && savepoint_name == NULL)
+		{
+			release_savepoint(con, NULL, rollback);
+			ecpg_commit_cursors(lineno, con, rollback, 1);
+		}
+
+		/* At this point there's no error anymore. */
+		con->client_side_error = false;
 	}
 
 	return true;

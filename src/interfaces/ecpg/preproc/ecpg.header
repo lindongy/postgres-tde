@@ -35,6 +35,16 @@
 int struct_level = 0;
 int braces_open; /* brace level counter */
 char *current_function;
+char *current_cursor = NULL;
+enum ECPGttype current_cursor_vartype;
+bool current_cursor_move;
+enum ECPG_cursor_direction current_cursor_direction;
+enum ECPG_cursor_scroll current_cursor_scrollable;
+char *current_cursor_amount = NULL;
+bool transact_prepared = false;
+bool transact_start = false;
+bool transact_rollback = false;
+char *transact_name = NULL;
 int ecpg_internal_var = 0;
 char	*connection = NULL;
 char	*input_filename = NULL;
@@ -108,6 +118,25 @@ mmerror(int error_code, enum errortype type, const char *error, ...)
 				fprintf(stderr, _("could not remove output file \"%s\"\n"), output_filename);
 			exit(error_code);
 	}
+}
+
+/*
+ * Find a cursor
+ */
+struct cursor *
+get_cursor(const char *curname)
+{
+	int (* strcmp_fn)(const char *, const char *) = ((curname[0] == ':' || curname[0] == '"') ? strcmp : pg_strcasecmp);
+	struct cursor *ptr;
+
+	for (ptr = cur; ptr != NULL; ptr = ptr->next)
+	{
+		if (strcmp_fn(ptr->name, curname) == 0)
+			break;
+	}
+	if (!ptr)
+		mmerror(PARSE_ERROR, ET_FATAL, "cursor \"%s\" does not exist", curname);
+	return ptr;
 }
 
 /*

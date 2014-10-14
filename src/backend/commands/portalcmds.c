@@ -42,7 +42,8 @@
  */
 void
 PerformCursorOpen(PlannedStmt *stmt, ParamListInfo params,
-				  const char *queryString, bool isTopLevel)
+				  const char *queryString, bool isTopLevel,
+				  bool *scrollable)
 {
 	DeclareCursorStmt *cstmt = (DeclareCursorStmt *) stmt->utilityStmt;
 	Portal		portal;
@@ -117,6 +118,8 @@ PerformCursorOpen(PlannedStmt *stmt, ParamListInfo params,
 		else
 			portal->cursorOptions |= CURSOR_OPT_NO_SCROLL;
 	}
+
+	*scrollable = !!(portal->cursorOptions & CURSOR_OPT_SCROLL);
 
 	/*
 	 * Start execution, inserting parameters if any.

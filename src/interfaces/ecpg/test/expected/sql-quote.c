@@ -41,7 +41,7 @@ int main() {
 #line 14 "quote.pgc"
 
 
-  { ECPGsetcommit(__LINE__, "on", NULL);}
+  { ECPGsetcommit(__LINE__, 1, NULL);}
 #line 16 "quote.pgc"
 
   /* exec sql whenever sql_warning  sqlprint ; */
@@ -149,7 +149,7 @@ if (sqlca.sqlcode < 0) sqlprint();}
 #line 40 "quote.pgc"
 
 
-  { ECPGtrans(__LINE__, NULL, "begin");
+  { ECPGtrans(__LINE__, NULL, "begin", 0, 1, 0, NULL);
 #line 42 "quote.pgc"
 
 if (sqlca.sqlwarn[0] == 'W') sqlprint();
@@ -162,7 +162,7 @@ if (sqlca.sqlcode < 0) sqlprint();}
 #line 43 "quote.pgc"
 
 
-  { ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "declare C cursor for select * from \"My_Table\"", ECPGt_EOIT, ECPGt_EORT);
+  { ECPGopen(__LINE__, 0, 1, NULL, 0, 0, ECPGcs_unspecified, 1, 1, 0, "C", ECPGst_normal, "declare C cursor for select * from \"My_Table\"", ECPGt_EOIT, ECPGt_EORT);
 #line 45 "quote.pgc"
 
 if (sqlca.sqlwarn[0] == 'W') sqlprint();
@@ -178,7 +178,7 @@ if (sqlca.sqlcode < 0) sqlprint();}
 
   while (true)
   {
-  	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "fetch C", ECPGt_EOIT, 
+  	{ ECPGfetch(__LINE__, 0, 1, NULL, 0, ECPGc_forward, "1", 0, "C", ECPGst_normal, "fetch C", ECPGt_EOIT, 
 	ECPGt_int,&(i),(long)1,(long)1,sizeof(int), 
 	ECPGt_NO_INDICATOR, NULL , 0L, 0L, 0L, 
 	ECPGt_char,(var),(long)25,(long)1,(25)*sizeof(char), 
@@ -197,7 +197,7 @@ if (sqlca.sqlcode < 0) sqlprint();}
 	printf("value: %d %s\n", i, var);
   }
 
-  { ECPGtrans(__LINE__, NULL, "rollback");
+  { ECPGtrans(__LINE__, NULL, "rollback", 0, 0, 1, NULL);
 #line 55 "quote.pgc"
 
 if (sqlca.sqlwarn[0] == 'W') sqlprint();

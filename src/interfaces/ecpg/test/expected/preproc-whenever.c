@@ -93,7 +93,7 @@ if (sqlca.sqlwarn[0] == 'W') warn ( );
 if (sqlca.sqlcode < 0) sqlprint();}
 #line 36 "whenever.pgc"
 
-	{ ECPGtrans(__LINE__, NULL, "rollback");
+	{ ECPGtrans(__LINE__, NULL, "rollback", 0, 0, 1, NULL);
 #line 37 "whenever.pgc"
 
 if (sqlca.sqlwarn[0] == 'W') warn ( );
@@ -114,7 +114,7 @@ if (sqlca.sqlwarn[0] == 'W') warn ( );
 if (sqlca.sqlcode < 0) sqlprint();}
 #line 39 "whenever.pgc"
 
-	{ ECPGtrans(__LINE__, NULL, "rollback");
+	{ ECPGtrans(__LINE__, NULL, "rollback", 0, 0, 1, NULL);
 #line 40 "whenever.pgc"
 
 if (sqlca.sqlwarn[0] == 'W') warn ( );
@@ -138,7 +138,7 @@ if (sqlca.sqlwarn[0] == 'W') warn ( );
 if (sqlca.sqlcode < 0) print ( "select" );}
 #line 43 "whenever.pgc"
 
-	{ ECPGtrans(__LINE__, NULL, "rollback");
+	{ ECPGtrans(__LINE__, NULL, "rollback", 0, 0, 1, NULL);
 #line 44 "whenever.pgc"
 
 if (sqlca.sqlwarn[0] == 'W') warn ( );
@@ -162,7 +162,7 @@ if (sqlca.sqlwarn[0] == 'W') warn ( );
 if (sqlca.sqlcode < 0) print2 ( );}
 #line 47 "whenever.pgc"
 
-	{ ECPGtrans(__LINE__, NULL, "rollback");
+	{ ECPGtrans(__LINE__, NULL, "rollback", 0, 0, 1, NULL);
 #line 48 "whenever.pgc"
 
 if (sqlca.sqlwarn[0] == 'W') warn ( );
@@ -183,7 +183,7 @@ if (sqlca.sqlcode < 0) print2 ( );}
 if (sqlca.sqlwarn[0] == 'W') warn ( );}
 #line 51 "whenever.pgc"
 
-	{ ECPGtrans(__LINE__, NULL, "rollback");
+	{ ECPGtrans(__LINE__, NULL, "rollback", 0, 0, 1, NULL);
 #line 52 "whenever.pgc"
 
 if (sqlca.sqlwarn[0] == 'W') warn ( );}
@@ -207,7 +207,7 @@ if (sqlca.sqlcode < 0) goto error;}
 	printf("Should not be reachable\n");
 
 	error:
-	{ ECPGtrans(__LINE__, NULL, "rollback");
+	{ ECPGtrans(__LINE__, NULL, "rollback", 0, 0, 1, NULL);
 #line 59 "whenever.pgc"
 
 if (sqlca.sqlwarn[0] == 'W') warn ( );
@@ -233,7 +233,7 @@ if (sqlca.sqlwarn[0] == 'W') warn ( );
 if (sqlca.sqlcode < 0) exit (1);}
 #line 64 "whenever.pgc"
 
-	{ ECPGtrans(__LINE__, NULL, "rollback");
+	{ ECPGtrans(__LINE__, NULL, "rollback", 0, 0, 1, NULL);
 #line 65 "whenever.pgc"
 
 if (sqlca.sqlwarn[0] == 'W') warn ( );

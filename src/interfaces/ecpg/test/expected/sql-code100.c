@@ -114,7 +114,7 @@ int main()
 #line 20 "code100.pgc"
 
    if (sqlca.sqlcode) printf("%ld:%s\n",sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc);
-   { ECPGtrans(__LINE__, NULL, "commit work");}
+   { ECPGtrans(__LINE__, NULL, "commit work", 0, 0, 0, NULL);}
 #line 22 "code100.pgc"
 
    if (sqlca.sqlcode) printf("%ld:%s\n",sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc);
@@ -127,7 +127,7 @@ int main()
 
       if (sqlca.sqlcode) printf("%ld:%s\n",sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc);
    }
-   { ECPGtrans(__LINE__, NULL, "commit work");}
+   { ECPGtrans(__LINE__, NULL, "commit work", 0, 0, 0, NULL);}
 #line 31 "code100.pgc"
 
    if (sqlca.sqlcode) printf("%ld:%s\n",sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc);
@@ -151,7 +151,7 @@ int main()
 #line 44 "code100.pgc"
 
    if (sqlca.sqlcode) printf("%ld:%s\n",sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc);
-   { ECPGtrans(__LINE__, NULL, "commit work");}
+   { ECPGtrans(__LINE__, NULL, "commit work", 0, 0, 0, NULL);}
 #line 46 "code100.pgc"
 
    if (sqlca.sqlcode) printf("%ld:%s\n",sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc);

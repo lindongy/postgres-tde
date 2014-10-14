@@ -70,7 +70,7 @@ if (sqlca.sqlcode < 0) sqlprint();}
 if (sqlca.sqlcode < 0) sqlprint();}
 #line 25 "oldexec.pgc"
 
-	{ ECPGtrans(__LINE__, NULL, "commit");
+	{ ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);
 #line 26 "oldexec.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint();}
@@ -121,7 +121,7 @@ if (sqlca.sqlcode < 0) sqlprint();}
 
 	printf("Inserted %ld tuples via prepared execute\n", sqlca.sqlerrd[2]);
 
-	{ ECPGtrans(__LINE__, NULL, "commit");
+	{ ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);
 #line 45 "oldexec.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint();}
@@ -140,7 +140,7 @@ if (sqlca.sqlcode < 0) sqlprint();}
 #line 50 "oldexec.pgc"
 
 
-	{ ECPGdo(__LINE__, 0, 1, NULL, 1, ECPGst_normal, "declare CUR cursor for $1", 
+	{ ECPGopen(__LINE__, 0, 1, NULL, 1, 0, ECPGcs_unspecified, 1, 1, 0, "CUR", ECPGst_normal, "declare CUR cursor for $1", 
 	ECPGt_char_variable,(ECPGprepared_statement(NULL, "f", __LINE__)),(long)1,(long)1,(1)*sizeof(char), 
 	ECPGt_NO_INDICATOR, NULL , 0L, 0L, 0L, ECPGt_EOIT, ECPGt_EORT);
 #line 52 "oldexec.pgc"
@@ -148,7 +148,7 @@ if (sqlca.sqlcode < 0) sqlprint();}
 if (sqlca.sqlcode < 0) sqlprint();}
 #line 52 "oldexec.pgc"
 
-	{ ECPGdo(__LINE__, 0, 1, NULL, 1, ECPGst_normal, "fetch 8 in CUR", ECPGt_EOIT, 
+	{ ECPGfetch(__LINE__, 0, 1, NULL, 1, ECPGc_forward, "8", 0, "CUR", ECPGst_normal, "fetch 8 in CUR", ECPGt_EOIT, 
 	ECPGt_char,(name),(long)8,(long)8,(8)*sizeof(char), 
 	ECPGt_NO_INDICATOR, NULL , 0L, 0L, 0L, 
 	ECPGt_int,(amount),(long)1,(long)8,sizeof(int), 
@@ -180,7 +180,7 @@ if (sqlca.sqlcode < 0) sqlprint();}
 		printf("name[%d]=%8.8s\tamount[%d]=%d\tletter[%d]=%c\n", i, n, i, a, i, l);
 	}
 
-	{ ECPGdo(__LINE__, 0, 1, NULL, 1, ECPGst_normal, "close CUR", ECPGt_EOIT, ECPGt_EORT);
+	{ ECPGclose(__LINE__, 0, 1, NULL, 1, "CUR", ECPGst_normal, "close CUR", ECPGt_EOIT, ECPGt_EORT);
 #line 66 "oldexec.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint();}
@@ -199,7 +199,7 @@ if (sqlca.sqlcode < 0) sqlprint();}
 #line 71 "oldexec.pgc"
 
 
-	{ ECPGdo(__LINE__, 0, 1, NULL, 1, ECPGst_normal, "declare CUR3 cursor for $1", 
+	{ ECPGopen(__LINE__, 0, 1, NULL, 1, 0, ECPGcs_unspecified, 1, 1, 0, "CUR3", ECPGst_normal, "declare CUR3 cursor for $1", 
 	ECPGt_char_variable,(ECPGprepared_statement(NULL, "f", __LINE__)),(long)1,(long)1,(1)*sizeof(char), 
 	ECPGt_NO_INDICATOR, NULL , 0L, 0L, 0L, 
 	ECPGt_const,"1",(long)1,(long)1,strlen("1"), 
@@ -209,7 +209,7 @@ if (sqlca.sqlcode < 0) sqlprint();}
 if (sqlca.sqlcode < 0) sqlprint();}
 #line 73 "oldexec.pgc"
 
-	{ ECPGdo(__LINE__, 0, 1, NULL, 1, ECPGst_normal, "fetch in CUR3", ECPGt_EOIT, 
+	{ ECPGfetch(__LINE__, 0, 1, NULL, 1, ECPGc_forward, "1", 0, "CUR3", ECPGst_normal, "fetch in CUR3", ECPGt_EOIT, 
 	ECPGt_char,(name),(long)8,(long)8,(8)*sizeof(char), 
 	ECPGt_NO_INDICATOR, NULL , 0L, 0L, 0L, 
 	ECPGt_int,(amount),(long)1,(long)8,sizeof(int), 
@@ -241,7 +241,7 @@ if (sqlca.sqlcode < 0) sqlprint();}
 		printf("name[%d]=%8.8s\tamount[%d]=%d\tletter[%d]=%c\n", i, n, i, a, i, l);
 	}
 
-	{ ECPGdo(__LINE__, 0, 1, NULL, 1, ECPGst_normal, "close CUR3", ECPGt_EOIT, ECPGt_EORT);
+	{ ECPGclose(__LINE__, 0, 1, NULL, 1, "CUR3", ECPGst_normal, "close CUR3", ECPGt_EOIT, ECPGt_EORT);
 #line 87 "oldexec.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint();}
@@ -253,7 +253,7 @@ if (sqlca.sqlcode < 0) sqlprint();}
 if (sqlca.sqlcode < 0) sqlprint();}
 #line 88 "oldexec.pgc"
 
-	{ ECPGtrans(__LINE__, NULL, "commit");
+	{ ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);
 #line 89 "oldexec.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint();}

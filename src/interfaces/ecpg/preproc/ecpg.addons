@@ -15,7 +15,7 @@ ECPG: stmtClosePortalStmt block
 			}
 		}
 
-		output_statement($1, 0, ECPGst_normal);
+		output_close_statement($1, 0, ECPGst_normal);
 	}
 ECPG: stmtDeallocateStmt block
 	{
@@ -24,13 +24,20 @@ ECPG: stmtDeallocateStmt block
 ECPG: stmtDeclareCursorStmt block
 	{ output_simple_statement($1); }
 ECPG: stmtDiscardStmt block
-ECPG: stmtFetchStmt block
 	{ output_statement($1, 1, ECPGst_normal); }
-ECPG: stmtDeleteStmt block
+ECPG: stmtFetchStmt block
+	{ output_fetch_statement($1, 1, ECPGst_normal, current_cursor_move); }
 ECPG: stmtInsertStmt block
 ECPG: stmtSelectStmt block
-ECPG: stmtUpdateStmt block
 	{ output_statement($1, 1, ECPGst_prepnormal); }
+ECPG: stmtDeleteStmt block
+ECPG: stmtUpdateStmt block
+	{
+		if (current_cursor)
+			output_cursor_dml_statement($1, 1, ECPGst_prepnormal);
+		else
+			output_statement($1, 1, ECPGst_prepnormal);
+	}
 ECPG: stmtExecuteStmt block
 	{ output_statement($1, 1, ECPGst_execute); }
 ECPG: stmtPrepareStmt block
@@ -42,10 +49,93 @@ ECPG: stmtPrepareStmt block
 	}
 ECPG: stmtTransactionStmt block
 	{
-		fprintf(yyout, "{ ECPGtrans(__LINE__, %s, \"%s\");", connection ? connection : "NULL", $1);
+		char *tr_name;
+
+		if (transact_name)
+		{
+			tr_name = mm_alloc(4 + strlen(transact_name));
+			sprintf(tr_name, "\"%s\"", transact_name);
+		}
+		else
+			tr_name = mm_strdup("NULL");
+
+		fprintf(yyout, "{ ECPGtrans(__LINE__, %s, \"%s\", %d, %d, %d, %s);",
+					connection ? connection : "NULL",
+					$1,
+					transact_prepared,
+					transact_start,
+					transact_rollback,
+					tr_name);
+		free(tr_name);
+		free(transact_name);
+		transact_name = NULL;
 		whenever_action(2);
 		free($1);
 	}
+ECPG: TransactionStmtABORT_Popt_transaction addon
+ECPG: TransactionStmtROLLBACKopt_transaction addon
+		transact_prepared = false;
+		transact_start = false;
+		transact_rollback = true;
+		transact_name = NULL;
+ECPG: TransactionStmtBEGIN_Popt_transactiontransaction_mode_list_or_empty addon
+ECPG: TransactionStmtSTARTTRANSACTIONtransaction_mode_list_or_empty addon
+		transact_prepared = false;
+		transact_start = true;
+		transact_rollback = false;
+		transact_name = NULL;
+ECPG: TransactionStmtCOMMITopt_transaction addon
+ECPG: TransactionStmtEND_Popt_transaction addon
+		transact_prepared = false;
+		transact_start = false;
+		transact_rollback = false;
+		transact_name = NULL;
+ECPG: TransactionStmtSAVEPOINTColId addon
+		transact_prepared = false;
+		transact_start = true;
+		transact_rollback = false;
+		transact_name = mm_strdup($2);
+ECPG: TransactionStmtRELEASESAVEPOINTColId addon
+		transact_prepared = false;
+		transact_start = false;
+		transact_rollback = false;
+		transact_name = mm_strdup($3);
+ECPG: TransactionStmtRELEASEColId addon
+		transact_prepared = false;
+		transact_start = false;
+		transact_rollback = false;
+		transact_name = mm_strdup($2);
+ECPG: TransactionStmtROLLBACKopt_transactionTOSAVEPOINTColId addon
+		transact_prepared = false;
+		transact_start = false;
+		transact_rollback = true;
+		transact_name = mm_strdup($5);
+ECPG: TransactionStmtROLLBACKopt_transactionTOColId addon
+		transact_prepared = false;
+		transact_start = false;
+		transact_rollback = true;
+		transact_name = mm_strdup($4);
+ECPG: TransactionStmtPREPARETRANSACTIONSconst addon
+		transact_prepared = true;
+		transact_start = true;
+		transact_rollback = false;
+		transact_name = NULL;
+ECPG: TransactionStmtCOMMITPREPAREDSconst addon
+		transact_prepared = true;
+		transact_start = false;
+		transact_rollback = false;
+		transact_name = NULL;
+ECPG: TransactionStmtROLLBACKPREPAREDSconst addon
+		transact_prepared = true;
+		transact_start = false;
+		transact_rollback = true;
+		transact_name = NULL;
+ECPG: cursor_options addon
+		current_cursor_scrollable = ECPGcs_unspecified;
+ECPG: cursor_optionscursor_optionsNOSCROLL addon
+		current_cursor_scrollable = ECPGcs_no_scroll;
+ECPG: cursor_optionscursor_optionsSCROLL addon
+		current_cursor_scrollable = ECPGcs_scroll;
 ECPG: stmtViewStmt rule
 	| ECPGAllocateDescr
 	{
@@ -132,13 +222,13 @@ ECPG: stmtViewStmt rule
 		if ((ptr = add_additional_variables($1, true)) != NULL)
 		{
 			connection = ptr->connection ? mm_strdup(ptr->connection) : NULL;
-			output_statement(mm_strdup(ptr->command), 0, ECPGst_normal);
+			output_open_statement(mm_strdup(ptr->command), 0, ECPGst_normal);
 			ptr->opened = true;
 		}
 	}
 	| ECPGSetAutocommit
 	{
-		fprintf(yyout, "{ ECPGsetcommit(__LINE__, \"%s\", %s);", $1, connection ? connection : "NULL");
+		fprintf(yyout, "{ ECPGsetcommit(__LINE__, %d, %s);", (strcmp($1, "on") == 0), connection ? connection : "NULL");
 		whenever_action(2);
 		free($1);
 	}
@@ -190,6 +280,16 @@ ECPG: stmtViewStmt rule
 ECPG: where_or_current_clauseWHERECURRENT_POFcursor_name block
 	{
 		char *cursor_marker = $4[0] == ':' ? mm_strdup("$0") : $4;
+		struct cursor *ptr;
+
+		for (ptr = cur; ptr != NULL; ptr = ptr->next)
+		{
+			if (strcmp(ptr->name, $4) == 0)
+				break;
+		}
+		if (!ptr)
+			mmerror(PARSE_ERROR, ET_FATAL, "cursor \"%s\" does not exist", $4);
+
 		$$ = cat_str(2,mm_strdup("where current of"), cursor_marker);
 	}
 ECPG: CopyStmtCOPYopt_binaryqualified_nameopt_column_listopt_oidscopy_fromopt_programcopy_file_namecopy_delimiteropt_withcopy_options addon
@@ -209,6 +309,8 @@ ECPG: fetch_argscursor_name addon
 			free($1);
 			$1 = mm_strdup("$0");
 		}
+		current_cursor_direction = ECPGc_forward;
+		current_cursor_amount = mm_strdup("1");
 ECPG: fetch_argsfrom_incursor_name addon
 		add_additional_variables($2, false);
 		if ($2[0] == ':')
@@ -216,10 +318,44 @@ ECPG: fetch_argsfrom_incursor_name addon
 			free($2);
 			$2 = mm_strdup("$0");
 		}
+		current_cursor_direction = ECPGc_forward;
+		current_cursor_amount = mm_strdup("1");
 ECPG: fetch_argsNEXTopt_from_incursor_name addon
+		add_additional_variables($3, false);
+		if ($3[0] == ':')
+		{
+			free($3);
+			$3 = mm_strdup("$0");
+		}
+		current_cursor_direction = ECPGc_forward;
+		current_cursor_amount = mm_strdup("1");
 ECPG: fetch_argsPRIORopt_from_incursor_name addon
+		add_additional_variables($3, false);
+		if ($3[0] == ':')
+		{
+			free($3);
+			$3 = mm_strdup("$0");
+		}
+		current_cursor_direction = ECPGc_backward;
+		current_cursor_amount = mm_strdup("1"); 
 ECPG: fetch_argsFIRST_Popt_from_incursor_name addon
+		add_additional_variables($3, false);
+		if ($3[0] == ':')
+		{
+			free($3);
+			$3 = mm_strdup("$0");
+		}
+		current_cursor_direction = ECPGc_absolute;
+		current_cursor_amount = mm_strdup("1");
 ECPG: fetch_argsLAST_Popt_from_incursor_name addon
+		add_additional_variables($3, false);
+		if ($3[0] == ':')
+		{
+			free($3);
+			$3 = mm_strdup("$0");
+		}
+		current_cursor_direction = ECPGc_absolute;
+		current_cursor_amount = mm_strdup("-1");
 ECPG: fetch_argsALLopt_from_incursor_name addon
 		add_additional_variables($3, false);
 		if ($3[0] == ':')
@@ -227,6 +363,8 @@ ECPG: fetch_argsALLopt_from_incursor_name addon
 			free($3);
 			$3 = mm_strdup("$0");
 		}
+		current_cursor_direction = ECPGc_forward;
+		current_cursor_amount = mm_strdup("all");
 ECPG: fetch_argsSignedIconstopt_from_incursor_name addon
 		add_additional_variables($3, false);
 		if ($3[0] == ':')
@@ -238,8 +376,23 @@ ECPG: fetch_argsSignedIconstopt_from_incursor_name addon
 		{
 			free($1);
 			$1 = mm_strdup("$0");
+			current_cursor_direction = ECPGc_forward_in_var;
+			current_cursor_amount = NULL;
+		}
+		else
+		{
+			current_cursor_direction = ECPGc_forward;
+			current_cursor_amount = mm_strdup($1);
 		}
 ECPG: fetch_argsFORWARDALLopt_from_incursor_name addon
+		add_additional_variables($4, false);
+		if ($4[0] == ':')
+		{
+			free($4);
+			$4 = mm_strdup("$0");
+		}
+		current_cursor_direction = ECPGc_forward;
+		current_cursor_amount = mm_strdup("all");
 ECPG: fetch_argsBACKWARDALLopt_from_incursor_name addon
 		add_additional_variables($4, false);
 		if ($4[0] == ':')
@@ -247,9 +400,65 @@ ECPG: fetch_argsBACKWARDALLopt_from_incursor_name addon
 			free($4);
 			$4 = mm_strdup("$0");
 		}
+		current_cursor_direction = ECPGc_backward;
+		current_cursor_amount = mm_strdup("all");
 ECPG: fetch_argsABSOLUTE_PSignedIconstopt_from_incursor_name addon
+		add_additional_variables($4, false);
+		if ($4[0] == ':')
+		{
+			free($4);
+			$4 = mm_strdup("$0");
+		}
+		if ($2[0] == '$')
+		{
+			free($2);
+			$2 = mm_strdup("$0");
+			current_cursor_direction = ECPGc_absolute_in_var;
+			current_cursor_amount = NULL;
+		}
+		else
+		{
+			current_cursor_direction = ECPGc_absolute;
+			current_cursor_amount = mm_strdup($2);
+		}
 ECPG: fetch_argsRELATIVE_PSignedIconstopt_from_incursor_name addon
+		add_additional_variables($4, false);
+		if ($4[0] == ':')
+		{
+			free($4);
+			$4 = mm_strdup("$0");
+		}
+		if ($2[0] == '$')
+		{
+			free($2);
+			$2 = mm_strdup("$0");
+			current_cursor_direction = ECPGc_relative_in_var;
+			current_cursor_amount = NULL;
+		}
+		else
+		{
+			current_cursor_direction = ECPGc_relative;
+			current_cursor_amount = mm_strdup($2);
+		}
 ECPG: fetch_argsFORWARDSignedIconstopt_from_incursor_name addon
+		add_additional_variables($4, false);
+		if ($4[0] == ':')
+		{
+			free($4);
+			$4 = mm_strdup("$0");
+		}
+		if ($2[0] == '$')
+		{
+			free($2);
+			$2 = mm_strdup("$0");
+			current_cursor_direction = ECPGc_forward_in_var;
+			current_cursor_amount = NULL;
+		}
+		else
+		{
+			current_cursor_direction = ECPGc_forward;
+			current_cursor_amount = mm_strdup($2);
+		}
 ECPG: fetch_argsBACKWARDSignedIconstopt_from_incursor_name addon
 		add_additional_variables($4, false);
 		if ($4[0] == ':')
@@ -261,14 +470,27 @@ ECPG: fetch_argsBACKWARDSignedIconstopt_from_incursor_name addon
 		{
 			free($2);
 			$2 = mm_strdup("$0");
+			current_cursor_direction = ECPGc_backward_in_var;
+			current_cursor_amount = NULL;
 		}
-ECPG: cursor_namename rule
+		else
+		{
+			current_cursor_direction = ECPGc_backward;
+			current_cursor_amount = mm_strdup($2);
+		}
+ECPG: cursor_namename block
+		{
+			current_cursor = mm_strdup($1);
+			current_cursor_vartype = ECPGt_const;
+			$$ = $1;
+		}
 	| char_civar
 		{
 			char *curname = mm_alloc(strlen($1) + 2);
 			sprintf(curname, ":%s", $1);
 			free($1);
 			$1 = curname;
+			current_cursor = mm_strdup(curname);
 			$$ = $1;
 		}
 ECPG: PrepareStmtPREPAREprepared_nameprep_type_clauseASPreparableStmt block
@@ -285,7 +507,7 @@ ECPG: PrepareStmtPREPAREprepared_nameprep_type_clauseASPreparableStmt block
 	}
 ECPG: ExecuteStmtEXECUTEprepared_nameexecute_param_clauseexecute_rest block
 	{ $$ = $2; }
-ECPG: DeclareCursorStmtDECLAREcursor_namecursor_optionsCURSORopt_holdFORSelectStmt block
+ECPG: DeclareCursorStmtDECLAREcursor_namecursor_optionsopt_readaheadCURSORopt_holdFORSelectStmt block
 	{
 		struct cursor *ptr, *this;
 		char *cursor_marker = $2[0] == ':' ? mm_strdup("$0") : mm_strdup($2);
@@ -310,7 +532,24 @@ ECPG: DeclareCursorStmtDECLAREcursor_namecursor_optionsCURSORopt_holdFORSelectSt
 		this->function = (current_function ? mm_strdup(current_function) : NULL);
 		this->connection = connection;
 		this->opened = false;
-		this->command =  cat_str(7, mm_strdup("declare"), cursor_marker, $3, mm_strdup("cursor"), $5, mm_strdup("for"), $7);
+		this->with_hold = (strncmp($6, "with ", 5) == 0);
+		this->scrollable = current_cursor_scrollable;
+		if (strcmp($4, "default") == 0)
+		{
+			this->allow_ra_override = true;
+			this->fetch_readahead = fetch_readahead;
+		}
+		else
+		{
+			int	this_readahead = atoi($4);
+
+			if (this_readahead < 1)
+				mmerror(PARSE_ERROR, ET_ERROR, "cursor readahead cannot be less than 1");
+			this->allow_ra_override = false;
+			this->fetch_readahead = this_readahead;
+		}
+		this->vartype = current_cursor_vartype;
+		this->command =  cat_str(7, mm_strdup("declare"), cursor_marker, $3, mm_strdup("cursor"), $6, mm_strdup("for"), $8);
 		this->argsinsert = argsinsert;
 		this->argsinsert_oos = NULL;
 		this->argsresult = argsresult;
@@ -407,57 +646,91 @@ ECPG: VariableShowStmtSHOWALL block
 		mmerror(PARSE_ERROR, ET_ERROR, "SHOW ALL is not implemented");
 		$$ = EMPTY;
 	}
-ECPG: FetchStmtMOVEfetch_args rule
+ECPG: FetchStmtFETCHfetch_args block
+	{
+		current_cursor_move = false;
+		$$ = cat_str(2,mm_strdup("fetch"),$2);
+	}
+ECPG: FetchStmtMOVEfetch_args block
+	{
+		current_cursor_move = true;
+		$$ = cat_str(2,mm_strdup("move"),$2);
+	}
 	| FETCH fetch_args ecpg_fetch_into
 	{
+		current_cursor_move = false;
 		$$ = cat2_str(mm_strdup("fetch"), $2);
 	}
 	| FETCH FORWARD cursor_name opt_ecpg_fetch_into
 	{
 		char *cursor_marker = $3[0] == ':' ? mm_strdup("$0") : $3;
 		add_additional_variables($3, false);
+		current_cursor_move = false;
+		current_cursor_direction = ECPGc_forward;
+		current_cursor_amount = mm_strdup("1");
 		$$ = cat_str(2, mm_strdup("fetch forward"), cursor_marker);
 	}
 	| FETCH FORWARD from_in cursor_name opt_ecpg_fetch_into
 	{
 		char *cursor_marker = $4[0] == ':' ? mm_strdup("$0") : $4;
 		add_additional_variables($4, false);
+		current_cursor_move = false;
+		current_cursor_direction = ECPGc_forward;
+		current_cursor_amount = mm_strdup("1");
 		$$ = cat_str(2, mm_strdup("fetch forward from"), cursor_marker);
 	}
 	| FETCH BACKWARD cursor_name opt_ecpg_fetch_into
 	{
 		char *cursor_marker = $3[0] == ':' ? mm_strdup("$0") : $3;
 		add_additional_variables($3, false);
+		current_cursor_move = false;
+		current_cursor_direction = ECPGc_backward;
+		current_cursor_amount = mm_strdup("1");
 		$$ = cat_str(2, mm_strdup("fetch backward"), cursor_marker);
 	}
 	| FETCH BACKWARD from_in cursor_name opt_ecpg_fetch_into
 	{
 		char *cursor_marker = $4[0] == ':' ? mm_strdup("$0") : $4;
 		add_additional_variables($4, false);
+		current_cursor_move = false;
+		current_cursor_direction = ECPGc_backward;
+		current_cursor_amount = mm_strdup("1");
 		$$ = cat_str(2, mm_strdup("fetch backward from"), cursor_marker);
 	}
 	| MOVE FORWARD cursor_name
 	{
 		char *cursor_marker = $3[0] == ':' ? mm_strdup("$0") : $3;
 		add_additional_variables($3, false);
+		current_cursor_move = true;
+		current_cursor_direction = ECPGc_forward;
+		current_cursor_amount = mm_strdup("1");
 		$$ = cat_str(2, mm_strdup("move forward"), cursor_marker);
 	}
 	| MOVE FORWARD from_in cursor_name
 	{
 		char *cursor_marker = $4[0] == ':' ? mm_strdup("$0") : $4;
 		add_additional_variables($4, false);
+		current_cursor_move = true;
+		current_cursor_direction = ECPGc_forward;
+		current_cursor_amount = mm_strdup("1");
 		$$ = cat_str(2, mm_strdup("move forward from"), cursor_marker);
 	}
 	| MOVE BACKWARD cursor_name
 	{
 		char *cursor_marker = $3[0] == ':' ? mm_strdup("$0") : $3;
 		add_additional_variables($3, false);
+		current_cursor_move = true;
+		current_cursor_direction = ECPGc_backward;
+		current_cursor_amount = mm_strdup("1");
 		$$ = cat_str(2, mm_strdup("move backward"), cursor_marker);
 	}
 	| MOVE BACKWARD from_in cursor_name
 	{
 		char *cursor_marker = $4[0] == ':' ? mm_strdup("$0") : $4;
 		add_additional_variables($4, false);
+		current_cursor_move = true;
+		current_cursor_direction = ECPGc_backward;
+		current_cursor_amount = mm_strdup("1");
 		$$ = cat_str(2, mm_strdup("move backward from"), cursor_marker);
 	}
 ECPG: limit_clauseLIMITselect_limit_value','select_offset_value block

@@ -393,7 +393,7 @@ ecpg_set_compat_sqlda(int lineno, struct sqlda_compat ** _sqlda, const PGresult 
 		if (!isnull)
 		{
 			if (set_data)
-				ecpg_get_data(res, row, i, lineno,
+				ecpg_get_data(res, row, i, 0, lineno,
 							  sqlda->sqlvar[i].sqltype, ECPGt_NO_INDICATOR,
 							  sqlda->sqlvar[i].sqldata, NULL, 0, 0, 0,
 							  ECPG_ARRAY_NONE, compat, false);
@@ -578,7 +578,7 @@ ecpg_set_native_sqlda(int lineno, struct sqlda_struct ** _sqlda, const PGresult 
 		if (!isnull)
 		{
 			if (set_data)
-				ecpg_get_data(res, row, i, lineno,
+				ecpg_get_data(res, row, i, 0, lineno,
 							  sqlda->sqlvar[i].sqltype, ECPGt_NO_INDICATOR,
 							  sqlda->sqlvar[i].sqldata, NULL, 0, 0, 0,
 							  ECPG_ARRAY_NONE, compat, false);

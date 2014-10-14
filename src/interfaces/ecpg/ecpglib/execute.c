@@ -19,6 +19,7 @@
 #include <locale.h>
 #include <float.h>
 #include <math.h>
+#include <libpq-fe.h>
 
 #include "pg_type.h"
 
@@ -87,16 +88,11 @@ free_variable(struct variable * var)
 {
 	struct variable *var_next;
 
-	if (var == NULL)
-		return;
-	var_next = var->next;
-	ecpg_free(var);
-
-	while (var_next)
+	while (var)
 	{
-		var = var_next;
 		var_next = var->next;
 		ecpg_free(var);
+		var = var_next;
 	}
 }
 
@@ -109,6 +105,8 @@ free_statement(struct statement * stmt)
 	free_variable(stmt->outlist);
 	ecpg_free(stmt->command);
 	ecpg_free(stmt->name);
+	ecpg_free(stmt->oldlocale);
+	ecpg_free(stmt->cursor_amount);
 	ecpg_free(stmt);
 }
 
@@ -311,12 +309,14 @@ ecpg_is_type_an_array(int type, const struct statement * stmt, const struct vari
 
 
 bool
-ecpg_store_result(const PGresult *results, int act_field,
-				  const struct statement * stmt, struct variable * var)
+ecpg_store_result(const PGresult *results,
+				  int start, int ntuples, int direction,
+				  int act_field,
+				  const struct statement * stmt,
+				  struct variable * var, int var_index)
 {
 	enum ARRAY_TYPE isarray;
-	int			act_tuple,
-				ntuples = PQntuples(results);
+	int			tuples_left, act_tuple, act_index;
 	bool		status = true;
 
 	if ((isarray = ecpg_is_type_an_array(PQftype(results, act_field), stmt, var)) == ECPG_ARRAY_ERROR)
@@ -367,7 +367,7 @@ ecpg_store_result(const PGresult *results, int act_field,
 					if (!var->varcharsize && !var->arrsize)
 					{
 						/* special mode for handling char**foo=0 */
-						for (act_tuple = 0; act_tuple < ntuples; act_tuple++)
+						for (tuples_left = ntuples, act_tuple = start; tuples_left; tuples_left--, act_tuple += direction)
 							len += strlen(PQgetvalue(results, act_tuple, act_field)) + 1;
 						len *= var->offset;		/* should be 1, but YMNK */
 						len += (ntuples + 1) * sizeof(char *);
@@ -376,7 +376,7 @@ ecpg_store_result(const PGresult *results, int act_field,
 					{
 						var->varcharsize = 0;
 						/* check strlen for each tuple */
-						for (act_tuple = 0; act_tuple < ntuples; act_tuple++)
+						for (tuples_left = ntuples, act_tuple = start; tuples_left; tuples_left--, act_tuple += direction)
 						{
 							int			len = strlen(PQgetvalue(results, act_tuple, act_field)) + 1;
 
@@ -397,7 +397,7 @@ ecpg_store_result(const PGresult *results, int act_field,
 		}
 		else
 		{
-			for (act_tuple = 0; act_tuple < ntuples; act_tuple++)
+			for (tuples_left = ntuples, act_tuple = start; tuples_left; tuples_left--, act_tuple += direction)
 				len += PQgetlength(results, act_tuple, act_field);
 		}
 
@@ -433,11 +433,11 @@ ecpg_store_result(const PGresult *results, int act_field,
 		/* storing the data (after the last array element) */
 		char	   *current_data_location = (char *) &current_string[ntuples + 1];
 
-		for (act_tuple = 0; act_tuple < ntuples && status; act_tuple++)
+		for (tuples_left = ntuples, act_tuple = start, act_index = var_index; tuples_left && status; tuples_left--, act_tuple += direction, act_index++)
 		{
 			int			len = strlen(PQgetvalue(results, act_tuple, act_field)) + 1;
 
-			if (!ecpg_get_data(results, act_tuple, act_field, stmt->lineno,
+			if (!ecpg_get_data(results, act_tuple, act_field, act_index, stmt->lineno,
 							 var->type, var->ind_type, current_data_location,
 							   var->ind_value, len, 0, var->ind_offset, isarray, stmt->compat, stmt->force_indicator))
 				status = false;
@@ -454,9 +454,9 @@ ecpg_store_result(const PGresult *results, int act_field,
 	}
 	else
 	{
-		for (act_tuple = 0; act_tuple < ntuples && status; act_tuple++)
+		for (tuples_left = ntuples, act_tuple = start, act_index = var_index; tuples_left && status; tuples_left--, act_tuple += direction, act_index++)
 		{
-			if (!ecpg_get_data(results, act_tuple, act_field, stmt->lineno,
+			if (!ecpg_get_data(results, act_tuple, act_field, act_index, stmt->lineno,
 							   var->type, var->ind_type, var->value,
 							   var->ind_value, var->varcharsize, var->offset, var->ind_offset, isarray, stmt->compat, stmt->force_indicator))
 				status = false;
@@ -1082,18 +1082,20 @@ ecpg_store_input(const int lineno, const bool force_indicator, const struct vari
 	return true;
 }
 
-static void
-free_params(char **paramValues, int nParams, bool print, int lineno)
+void
+ecpg_free_params(struct statement *stmt, bool print)
 {
 	int			n;
 
-	for (n = 0; n < nParams; n++)
+	for (n = 0; n < stmt->nparams; n++)
 	{
 		if (print)
-			ecpg_log("free_params on line %d: parameter %d = %s\n", lineno, n + 1, paramValues[n] ? paramValues[n] : "null");
-		ecpg_free(paramValues[n]);
+			ecpg_log("ecpg_free_params on line %d: parameter %d = %s\n", stmt->lineno, n + 1, stmt->paramvalues[n] ? stmt->paramvalues[n] : "null");
+		ecpg_free(stmt->paramvalues[n]);
 	}
-	ecpg_free(paramValues);
+	ecpg_free(stmt->paramvalues);
+	stmt->nparams = 0;
+	stmt->paramvalues = NULL;
 }
 
 
@@ -1129,20 +1131,17 @@ insert_tobeinserted(int position, int ph_len, struct statement * stmt, char *tob
 	return true;
 }
 
-static bool
-ecpg_execute(struct statement * stmt)
+/*
+ * ecpg_build_params
+ *	Build statement parameters from user variables into
+ *	an array of strings for PQexecParams().
+ */
+bool
+ecpg_build_params(struct statement * stmt, bool first_0_is_cursor_amount)
 {
-	bool		status = false;
-	char	   *cmdstat;
-	PGresult   *results;
-	PGnotify   *notify;
 	struct variable *var;
 	int			desc_counter = 0;
-	char	  **paramValues = NULL;
-	int			nParams = 0;
 	int			position = 0;
-	struct sqlca_t *sqlca = ECPGget_sqlca();
-	bool		clear_result = true;
 
 	/*
 	 * If the type is one of the fill in types then we take the argument and
@@ -1342,7 +1341,7 @@ ecpg_execute(struct statement * stmt)
 			ecpg_raise(stmt->lineno, ECPG_TOO_MANY_ARGUMENTS,
 					   ECPG_SQLSTATE_USING_CLAUSE_DOES_NOT_MATCH_PARAMETERS,
 					   NULL);
-			free_params(paramValues, nParams, false, stmt->lineno);
+			ecpg_free_params(stmt, false);
 			return false;
 		}
 
@@ -1357,7 +1356,7 @@ ecpg_execute(struct statement * stmt)
 
 			if (!insert_tobeinserted(position, ph_len, stmt, tobeinserted))
 			{
-				free_params(paramValues, nParams, false, stmt->lineno);
+				ecpg_free_params(stmt, false);
 				return false;
 			}
 			tobeinserted = NULL;
@@ -1370,23 +1369,37 @@ ecpg_execute(struct statement * stmt)
 		 */
 		else if (stmt->command[position] == '0')
 		{
+			if (first_0_is_cursor_amount)
+			{
+				stmt->cursor_amount = ecpg_strdup(tobeinserted, stmt->lineno);
+				if (stmt->cursor_amount == NULL)
+				{
+					ecpg_free_params(stmt, false);
+					return false;
+				}
+				first_0_is_cursor_amount = false;
+			}
+
 			if (!insert_tobeinserted(position, 2, stmt, tobeinserted))
 			{
-				free_params(paramValues, nParams, false, stmt->lineno);
+				ecpg_free_params(stmt, false);
 				return false;
 			}
 			tobeinserted = NULL;
 		}
 		else
 		{
-			nParams++;
-			if (!(paramValues = (char **) ecpg_realloc(paramValues, sizeof(char *) * nParams, stmt->lineno)))
+			char	  **paramvalues;
+
+			if (!(paramvalues = (char **) ecpg_realloc(stmt->paramvalues, sizeof(char *) * (stmt->nparams + 1), stmt->lineno)))
 			{
-				ecpg_free(paramValues);
+				ecpg_free_params(stmt, false);
 				return false;
 			}
 
-			paramValues[nParams - 1] = tobeinserted;
+			stmt->nparams++;
+			stmt->paramvalues = paramvalues;
+			stmt->paramvalues[stmt->nparams - 1] = tobeinserted;
 
 			/* let's see if this was an old style placeholder */
 			if (stmt->command[position] == '?')
@@ -1397,7 +1410,7 @@ ecpg_execute(struct statement * stmt)
 
 				if (!(tobeinserted = (char *) ecpg_alloc(buffersize, stmt->lineno)))
 				{
-					free_params(paramValues, nParams, false, stmt->lineno);
+					ecpg_free_params(stmt, false);
 					return false;
 				}
 
@@ -1405,7 +1418,7 @@ ecpg_execute(struct statement * stmt)
 
 				if (!insert_tobeinserted(position, 2, stmt, tobeinserted))
 				{
-					free_params(paramValues, nParams, false, stmt->lineno);
+					ecpg_free_params(stmt, false);
 					return false;
 				}
 				tobeinserted = NULL;
@@ -1421,65 +1434,123 @@ ecpg_execute(struct statement * stmt)
 	{
 		ecpg_raise(stmt->lineno, ECPG_TOO_FEW_ARGUMENTS,
 				 ECPG_SQLSTATE_USING_CLAUSE_DOES_NOT_MATCH_PARAMETERS, NULL);
-		free_params(paramValues, nParams, false, stmt->lineno);
+		ecpg_free_params(stmt, false);
 		return false;
 	}
 
-	/* The request has been build. */
+	return true;
+}
 
+/*
+ * ecpg_autostart_transaction
+ *	If we are in non-autocommit mode, automatically start
+ *	a transaction.
+ */
+bool
+ecpg_autostart_transaction(struct statement * stmt)
+{
 	if (PQtransactionStatus(stmt->connection->connection) == PQTRANS_IDLE && !stmt->connection->autocommit)
 	{
-		results = PQexec(stmt->connection->connection, "begin transaction");
-		if (!ecpg_check_PQresult(results, stmt->lineno, stmt->connection->connection, stmt->compat))
+		stmt->results = PQexec(stmt->connection->connection, "begin transaction");
+		if (!ecpg_check_PQresult(stmt->results, stmt->lineno, stmt->connection->connection, stmt->compat))
 		{
-			free_params(paramValues, nParams, false, stmt->lineno);
+			ecpg_free_params(stmt, false);
 			return false;
 		}
-		PQclear(results);
+		PQclear(stmt->results);
+		stmt->results = NULL;
 	}
+	return true;
+}
 
-	ecpg_log("ecpg_execute on line %d: query: %s; with %d parameter(s) on connection %s\n", stmt->lineno, stmt->command, nParams, stmt->connection->name);
+/*
+ * ecpg_execute
+ *	Execute the SQL statement.
+ */
+bool
+ecpg_execute(struct statement * stmt)
+{
+	ecpg_log("ecpg_execute on line %d: query: %s; with %d parameter(s) on connection %s\n", stmt->lineno, stmt->command, stmt->nparams, stmt->connection->name);
 	if (stmt->statement_type == ECPGst_execute)
 	{
-		results = PQexecPrepared(stmt->connection->connection, stmt->name, nParams, (const char *const *) paramValues, NULL, NULL, 0);
+		stmt->results = PQexecPrepared(stmt->connection->connection, stmt->name, stmt->nparams, (const char *const *) stmt->paramvalues, NULL, NULL, 0);
 		ecpg_log("ecpg_execute on line %d: using PQexecPrepared for \"%s\"\n", stmt->lineno, stmt->command);
 	}
 	else
 	{
-		if (nParams == 0)
+		if (stmt->nparams == 0)
 		{
-			results = PQexec(stmt->connection->connection, stmt->command);
+			stmt->results = PQexec(stmt->connection->connection, stmt->command);
 			ecpg_log("ecpg_execute on line %d: using PQexec\n", stmt->lineno);
 		}
 		else
 		{
-			results = PQexecParams(stmt->connection->connection, stmt->command, nParams, NULL, (const char *const *) paramValues, NULL, NULL, 0);
+			stmt->results = PQexecParams(stmt->connection->connection, stmt->command, stmt->nparams, NULL, (const char *const *) stmt->paramvalues, NULL, NULL, 0);
 			ecpg_log("ecpg_execute on line %d: using PQexecParams\n", stmt->lineno);
 		}
 	}
 
-	free_params(paramValues, nParams, true, stmt->lineno);
+	ecpg_free_params(stmt, true);
 
-	if (!ecpg_check_PQresult(results, stmt->lineno, stmt->connection->connection, stmt->compat))
+	if (!ecpg_check_PQresult(stmt->results, stmt->lineno, stmt->connection->connection, stmt->compat))
 		return (false);
 
+	return true;
+}
+
+/*
+ * ecpg_process_output
+ *	Process the statement result and store it into application variables.
+ *	This function can be called repeatedly during the same statement
+ *	in case cursor readahed is used and the application does FETCH N which
+ *	overflows the readahead window.
+ *
+ * Parameters
+ *	stmt:		statement structure holding the PGresult and
+ *			the list of output variables
+ *	start:		start index in PGresult
+ *	ntuples:	number of tuples to process
+ *	direction:	in this direction
+ *	var_index:	start index in the user variable if it's an array
+ *	clear_result:	PQclear() the result upon returning from this function
+ *	append_result:	the user variable is an SQL or SQLDA descriptor,
+ *			may already contain data, append to it.
+ *
+ * Returns success as boolean. Also an SQL error is raised in case of failure.
+ */
+bool
+ecpg_process_output(struct statement * stmt, int start, int ntuples, int direction, int var_index, bool clear_result, bool append_result)
+{
+	struct variable *var;
+	bool		status = false;
+	char	   *cmdstat;
+	PGnotify   *notify;
+	struct sqlca_t *sqlca = ECPGget_sqlca();
+
+	if (stmt->results == NULL)
+	{
+		ecpg_log("ecpg_process_output on line %d: stmt->results is NULL, ignoring\n", stmt->lineno);
+		return true;
+	}
+
 	var = stmt->outlist;
-	switch (PQresultStatus(results))
+	switch (PQresultStatus(stmt->results))
 	{
 			int			nfields,
-						ntuples,
+						tuples_left,
+						act_tuple,
 						act_field;
 
 		case PGRES_TUPLES_OK:
-			nfields = PQnfields(results);
-			sqlca->sqlerrd[2] = ntuples = PQntuples(results);
-			ecpg_log("ecpg_execute on line %d: correctly got %d tuples with %d fields\n", stmt->lineno, ntuples, nfields);
+			nfields = PQnfields(stmt->results);
+			sqlca->sqlerrd[2] = ntuples;
+			ecpg_log("ecpg_process_output on line %d: correctly got %d tuples with %d fields\n", stmt->lineno, ntuples, nfields);
 			status = true;
 
 			if (ntuples < 1)
 			{
 				if (ntuples)
-					ecpg_log("ecpg_execute on line %d: incorrect number of matches (%d)\n",
+					ecpg_log("ecpg_process_output on line %d: incorrect number of matches (%d)\n",
 							 stmt->lineno, ntuples);
 				ecpg_raise(stmt->lineno, ECPG_NOT_FOUND, ECPG_SQLSTATE_NO_DATA, NULL);
 				status = false;
@@ -1494,12 +1565,54 @@ ecpg_execute(struct statement * stmt)
 					status = false;
 				else
 				{
-					if (desc->result)
-						PQclear(desc->result);
-					desc->result = results;
-					clear_result = false;
-					ecpg_log("ecpg_execute on line %d: putting result (%d tuples) into descriptor %s\n",
-							 stmt->lineno, PQntuples(results), (const char *) var->pointer);
+					if (append_result && desc->result)
+					{
+						int		row = PQntuples(desc->result);
+
+						for (tuples_left = ntuples, act_tuple = start; tuples_left; tuples_left--, act_tuple += direction, row++)
+							for (act_field = 0; act_field < nfields; act_field++)
+							{
+								bool	isnull = PQgetisnull(stmt->results, act_tuple, act_field);
+
+								if (!PQsetvalue(desc->result, row, act_field,
+										isnull ? NULL : PQgetvalue(stmt->results, act_tuple, act_field),
+										isnull ? -1 : PQgetlength(stmt->results, act_tuple, act_field)))
+								{
+									ecpg_raise(stmt->lineno, ECPG_OUT_OF_MEMORY, ECPG_SQLSTATE_ECPG_OUT_OF_MEMORY, NULL);
+									status = false;
+									break;
+								}
+							}
+						ecpg_log("ecpg_process_output on line %d: appending result (%d tuples) to descriptor %s\n",
+								 stmt->lineno, ntuples, (const char *) var->pointer);
+					}
+					else
+					{
+						if (desc->result)
+							PQclear(desc->result);
+						/*
+						 * Copy the SQL DESCRIPTOR's new results
+						 * from the current one. This allows data
+						 * in the descriptor to survive changes
+						 * in the cursor readahead cache and to
+						 * avoid overriding "clear_result".
+						 */
+						desc->result = PQcopyResult(stmt->results,
+										PG_COPYRES_ATTRS |
+										PG_COPYRES_TUPLES |
+										PG_COPYRES_EVENTS |
+										PG_COPYRES_NOTICEHOOKS);
+						if (desc->result == NULL)
+						{
+							ecpg_raise(stmt->lineno, ECPG_OUT_OF_MEMORY,
+										ECPG_SQLSTATE_ECPG_OUT_OF_MEMORY,
+										NULL);
+							status = false;
+							break;
+						}
+						ecpg_log("ecpg_process_output on line %d: putting result (%d tuples) into descriptor %s\n",
+								 stmt->lineno, ntuples, (const char *) var->pointer);
+					}
 				}
 				var = var->next;
 			}
@@ -1509,27 +1622,40 @@ ecpg_execute(struct statement * stmt)
 				{
 					struct sqlda_compat **_sqlda = (struct sqlda_compat **) var->pointer;
 					struct sqlda_compat *sqlda = *_sqlda;
+					struct sqlda_compat *sqlda_last;
 					struct sqlda_compat *sqlda_new;
-					int			i;
 
-					/*
-					 * If we are passed in a previously existing sqlda (chain)
-					 * then free it.
-					 */
-					while (sqlda)
+					if (append_result)
 					{
-						sqlda_new = sqlda->desc_next;
-						free(sqlda);
-						sqlda = sqlda_new;
+						sqlda_last = sqlda;
+						while (sqlda_last && sqlda_last->desc_next)
+							sqlda_last = sqlda_last->desc_next;
+						ecpg_log("ecpg_process_output on line %d: appending to compat SQLDA chain\n",
+								 stmt->lineno);
 					}
-					*_sqlda = sqlda = sqlda_new = NULL;
-					for (i = ntuples - 1; i >= 0; i--)
+					else
+					{
+						/*
+						 * If we are passed in a previously existing sqlda (chain)
+						 * then free it.
+						 */
+						while (sqlda)
+						{
+							sqlda_new = sqlda->desc_next;
+							free(sqlda);
+							sqlda = sqlda_new;
+						}
+						*_sqlda = sqlda = sqlda_last = NULL;
+						ecpg_log("ecpg_process_output on line %d: old compat SQLDA chain freed, creating new\n",
+								 stmt->lineno);
+					}
+					for (tuples_left = ntuples, act_tuple = start; tuples_left; tuples_left--, act_tuple += direction)
 					{
 						/*
 						 * Build a new sqlda structure. Note that only
 						 * fetching 1 record is supported
 						 */
-						sqlda_new = ecpg_build_compat_sqlda(stmt->lineno, results, i, stmt->compat);
+						sqlda_new = ecpg_build_compat_sqlda(stmt->lineno, stmt->results, act_tuple, stmt->compat);
 
 						if (!sqlda_new)
 						{
@@ -1542,22 +1668,27 @@ ecpg_execute(struct statement * stmt)
 							}
 							*_sqlda = NULL;
 
-							ecpg_log("ecpg_execute on line %d: out of memory allocating a new sqlda\n", stmt->lineno);
+							ecpg_log("ecpg_process_output on line %d: out of memory allocating a new sqlda\n", stmt->lineno);
 							status = false;
 							break;
 						}
 						else
 						{
-							ecpg_log("ecpg_execute on line %d: new sqlda was built\n", stmt->lineno);
+							ecpg_log("ecpg_process_output on line %d: new sqlda was built\n", stmt->lineno);
 
-							*_sqlda = sqlda_new;
+							if (sqlda_last)
+							{
+								sqlda_last->desc_next = sqlda_new;
+								sqlda_last = sqlda_new;
+							}
+							else
+							{
+								*_sqlda = sqlda = sqlda_last = sqlda_new;
+							}
 
-							ecpg_set_compat_sqlda(stmt->lineno, _sqlda, results, i, stmt->compat);
-							ecpg_log("ecpg_execute on line %d: putting result (1 tuple %d fields) into sqlda descriptor\n",
-									 stmt->lineno, PQnfields(results));
-
-							sqlda_new->desc_next = sqlda;
-							sqlda = sqlda_new;
+							ecpg_set_compat_sqlda(stmt->lineno, &sqlda_new, stmt->results, act_tuple, stmt->compat);
+							ecpg_log("ecpg_process_output on line %d: putting result (1 tuple %d fields) into sqlda descriptor\n",
+									 stmt->lineno, PQnfields(stmt->results));
 						}
 					}
 				}
@@ -1565,27 +1696,40 @@ ecpg_execute(struct statement * stmt)
 				{
 					struct sqlda_struct **_sqlda = (struct sqlda_struct **) var->pointer;
 					struct sqlda_struct *sqlda = *_sqlda;
+					struct sqlda_struct *sqlda_last;
 					struct sqlda_struct *sqlda_new;
-					int			i;
 
-					/*
-					 * If we are passed in a previously existing sqlda (chain)
-					 * then free it.
-					 */
-					while (sqlda)
+					if (append_result)
 					{
-						sqlda_new = sqlda->desc_next;
-						free(sqlda);
-						sqlda = sqlda_new;
+						sqlda_last = sqlda;
+						while (sqlda_last && sqlda_last->desc_next)
+							sqlda_last = sqlda_last->desc_next;
+						ecpg_log("ecpg_process_output on line %d: appending to native SQLDA chain\n",
+								 stmt->lineno);
 					}
-					*_sqlda = sqlda = sqlda_new = NULL;
-					for (i = ntuples - 1; i >= 0; i--)
+					else
+					{
+						/*
+						 * If we are passed in a previously existing sqlda (chain)
+						 * then free it.
+						 */
+						while (sqlda)
+						{
+							sqlda_new = sqlda->desc_next;
+							free(sqlda);
+							sqlda = sqlda_new;
+						}
+						*_sqlda = sqlda = sqlda_last = NULL;
+						ecpg_log("ecpg_process_output on line %d: old native SQLDA chain freed, creating new\n",
+								 stmt->lineno);
+					}
+					for (tuples_left = ntuples, act_tuple = start; tuples_left; tuples_left--, act_tuple += direction)
 					{
 						/*
 						 * Build a new sqlda structure. Note that only
 						 * fetching 1 record is supported
 						 */
-						sqlda_new = ecpg_build_native_sqlda(stmt->lineno, results, i, stmt->compat);
+						sqlda_new = ecpg_build_native_sqlda(stmt->lineno, stmt->results, act_tuple, stmt->compat);
 
 						if (!sqlda_new)
 						{
@@ -1598,22 +1742,27 @@ ecpg_execute(struct statement * stmt)
 							}
 							*_sqlda = NULL;
 
-							ecpg_log("ecpg_execute on line %d: out of memory allocating a new sqlda\n", stmt->lineno);
+							ecpg_log("ecpg_process_output on line %d: out of memory allocating a new sqlda\n", stmt->lineno);
 							status = false;
 							break;
 						}
 						else
 						{
-							ecpg_log("ecpg_execute on line %d: new sqlda was built\n", stmt->lineno);
+							ecpg_log("ecpg_process_output on line %d: new sqlda was built\n", stmt->lineno);
 
-							*_sqlda = sqlda_new;
+							if (sqlda_last)
+							{
+								sqlda_last->desc_next = sqlda_new;
+								sqlda_last = sqlda_new;
+							}
+							else
+							{
+								*_sqlda = sqlda = sqlda_last = sqlda_new;
+							}
 
-							ecpg_set_native_sqlda(stmt->lineno, _sqlda, results, i, stmt->compat);
-							ecpg_log("ecpg_execute on line %d: putting result (1 tuple %d fields) into sqlda descriptor\n",
-									 stmt->lineno, PQnfields(results));
-
-							sqlda_new->desc_next = sqlda;
-							sqlda = sqlda_new;
+							ecpg_set_native_sqlda(stmt->lineno, &sqlda_new, stmt->results, act_tuple, stmt->compat);
+							ecpg_log("ecpg_process_output on line %d: putting result (1 tuple %d fields) into sqlda descriptor\n",
+									 stmt->lineno, PQnfields(stmt->results));
 						}
 					}
 				}
@@ -1625,7 +1774,7 @@ ecpg_execute(struct statement * stmt)
 				{
 					if (var != NULL)
 					{
-						status = ecpg_store_result(results, act_field, stmt, var);
+						status = ecpg_store_result(stmt->results, start, ntuples, direction, act_field, stmt, var, var_index);
 						var = var->next;
 					}
 					else if (!INFORMIX_MODE(stmt->compat))
@@ -1644,10 +1793,10 @@ ecpg_execute(struct statement * stmt)
 			break;
 		case PGRES_COMMAND_OK:
 			status = true;
-			cmdstat = PQcmdStatus(results);
-			sqlca->sqlerrd[1] = PQoidValue(results);
-			sqlca->sqlerrd[2] = atol(PQcmdTuples(results));
-			ecpg_log("ecpg_execute on line %d: OK: %s\n", stmt->lineno, cmdstat);
+			cmdstat = PQcmdStatus(stmt->results);
+			sqlca->sqlerrd[1] = PQoidValue(stmt->results);
+			sqlca->sqlerrd[2] = atol(PQcmdTuples(stmt->results));
+			ecpg_log("ecpg_process_output on line %d: OK: %s\n", stmt->lineno, cmdstat);
 			if (stmt->compat != ECPG_COMPAT_INFORMIX_SE &&
 				!sqlca->sqlerrd[2] &&
 				(strncmp(cmdstat, "UPDATE", 6) == 0
@@ -1660,7 +1809,7 @@ ecpg_execute(struct statement * stmt)
 				char	   *buffer;
 				int			res;
 
-				ecpg_log("ecpg_execute on line %d: COPY OUT data transfer in progress\n", stmt->lineno);
+				ecpg_log("ecpg_process_output on line %d: COPY OUT data transfer in progress\n", stmt->lineno);
 				while ((res = PQgetCopyData(stmt->connection->connection,
 											&buffer, 0)) > 0)
 				{
@@ -1670,12 +1819,12 @@ ecpg_execute(struct statement * stmt)
 				if (res == -1)
 				{
 					/* COPY done */
-					PQclear(results);
-					results = PQgetResult(stmt->connection->connection);
-					if (PQresultStatus(results) == PGRES_COMMAND_OK)
-						ecpg_log("ecpg_execute on line %d: got PGRES_COMMAND_OK after PGRES_COPY_OUT\n", stmt->lineno);
+					PQclear(stmt->results);
+					stmt->results = PQgetResult(stmt->connection->connection);
+					if (PQresultStatus(stmt->results) == PGRES_COMMAND_OK)
+						ecpg_log("ecpg_process_output on line %d: got PGRES_COMMAND_OK after PGRES_COPY_OUT\n", stmt->lineno);
 					else
-						ecpg_log("ecpg_execute on line %d: got error after PGRES_COPY_OUT: %s", stmt->lineno, PQresultErrorMessage(results));
+						ecpg_log("ecpg_process_output on line %d: got error after PGRES_COPY_OUT: %s", stmt->lineno, PQresultErrorMessage(stmt->results));
 				}
 				break;
 			}
@@ -1685,20 +1834,23 @@ ecpg_execute(struct statement * stmt)
 			 * execution should never reach this code because it is already
 			 * handled in ECPGcheck_PQresult()
 			 */
-			ecpg_log("ecpg_execute on line %d: unknown execution status type\n",
+			ecpg_log("ecpg_process_output on line %d: unknown execution status type\n",
 					 stmt->lineno);
-			ecpg_raise_backend(stmt->lineno, results, stmt->connection->connection, stmt->compat);
+			ecpg_raise_backend(stmt->lineno, stmt->results, stmt->connection->connection, stmt->compat);
 			status = false;
 			break;
 	}
 	if (clear_result)
-		PQclear(results);
+	{
+		PQclear(stmt->results);
+		stmt->results = NULL;
+	}
 
 	/* check for asynchronous returns */
 	notify = PQnotifies(stmt->connection->connection);
 	if (notify)
 	{
-		ecpg_log("ecpg_execute on line %d: asynchronous notification of \"%s\" from backend PID %d received\n",
+		ecpg_log("ecpg_process_output on line %d: asynchronous notification of \"%s\" from backend PID %d received\n",
 				 stmt->lineno, notify->relname, notify->be_pid);
 		PQfreemem(notify);
 	}
@@ -1706,18 +1858,27 @@ ecpg_execute(struct statement * stmt)
 	return status;
 }
 
+/*
+ * ecpg_do_prologue
+ * Initialize various infrastructure elements for executing the statement:
+ *	- create the statement structure
+ *	- set the C locale for communicating with the backend
+ *	- preprocess the variable list of input/output parameters into
+ *	  linked lists
+ */
 bool
-ECPGdo(const int lineno, const int compat, const int force_indicator, const char *connection_name, const bool questionmarks, const int st, const char *query,...)
+ecpg_do_prologue(int lineno, const int compat, const int force_indicator,
+		 const char *connection_name, const bool questionmarks,
+		 enum ECPG_statement_type statement_type, const char *query,
+		 va_list args, struct statement **stmt_out)
 {
-	va_list		args;
 	struct statement *stmt;
 	struct connection *con;
-	bool		status;
-	char	   *oldlocale;
 	enum ECPGttype type;
 	struct variable **list;
-	enum ECPG_statement_type statement_type = (enum ECPG_statement_type) st;
 	char	   *prepname;
+
+	*stmt_out = NULL;
 
 	if (!query)
 	{
@@ -1725,9 +1886,19 @@ ECPGdo(const int lineno, const int compat, const int force_indicator, const char
 		return (false);
 	}
 
+	if (!(stmt = (struct statement *) ecpg_alloc(sizeof(struct statement), lineno)))
+		return false;
+
+	memset(stmt, 0, sizeof(struct statement));
+
 	/* Make sure we do NOT honor the locale for numeric input/output */
 	/* since the database wants the standard decimal point */
-	oldlocale = ecpg_strdup(setlocale(LC_NUMERIC, NULL), lineno);
+	stmt->oldlocale = ecpg_strdup(setlocale(LC_NUMERIC, NULL), lineno);
+	if (stmt->oldlocale == NULL)
+	{
+		ecpg_do_epilogue(stmt);
+		return false;
+	}
 	setlocale(LC_NUMERIC, "C");
 
 #ifdef ENABLE_THREAD_SAFETY
@@ -1738,13 +1909,16 @@ ECPGdo(const int lineno, const int compat, const int force_indicator, const char
 
 	if (!ecpg_init(con, connection_name, lineno))
 	{
-		setlocale(LC_NUMERIC, oldlocale);
-		ecpg_free(oldlocale);
+		ecpg_do_epilogue(stmt);
 		return (false);
 	}
 
-	/* construct statement in our own structure */
-	va_start(args, query);
+	if (con->client_side_error || PQtransactionStatus(con->connection) == PQTRANS_INERROR)
+	{
+		ecpg_do_epilogue(stmt);
+		ecpg_raise(lineno, ECPG_TRANS, ECPG_SQLSTATE_IN_FAILED_SQL_TRANSACTION, NULL);
+		return false;
+	}
 
 	/*
 	 * create a list of variables The variables are listed with input
@@ -1758,13 +1932,6 @@ ECPGdo(const int lineno, const int compat, const int force_indicator, const char
 	 * - pointer to indicator variable ind_varcharsize - empty ind_arraysize -
 	 * arraysize of indicator array ind_offset - indicator offset
 	 */
-	if (!(stmt = (struct statement *) ecpg_alloc(sizeof(struct statement), lineno)))
-	{
-		setlocale(LC_NUMERIC, oldlocale);
-		ecpg_free(oldlocale);
-		va_end(args);
-		return false;
-	}
 
 	/*
 	 * If statement type is ECPGst_prepnormal we are supposed to prepare the
@@ -1774,10 +1941,7 @@ ECPGdo(const int lineno, const int compat, const int force_indicator, const char
 	{
 		if (!ecpg_auto_prepare(lineno, connection_name, compat, &prepname, query))
 		{
-			setlocale(LC_NUMERIC, oldlocale);
-			ecpg_free(oldlocale);
-			free_statement(stmt);
-			va_end(args);
+			ecpg_do_epilogue(stmt);
 			return (false);
 		}
 
@@ -1806,10 +1970,7 @@ ECPGdo(const int lineno, const int compat, const int force_indicator, const char
 		else
 		{
 			ecpg_raise(lineno, ECPG_INVALID_STMT, ECPG_SQLSTATE_INVALID_SQL_STATEMENT_NAME, stmt->command);
-			setlocale(LC_NUMERIC, oldlocale);
-			ecpg_free(oldlocale);
-			free_statement(stmt);
-			va_end(args);
+			ecpg_do_epilogue(stmt);
 			return (false);
 		}
 	}
@@ -1836,10 +1997,7 @@ ECPGdo(const int lineno, const int compat, const int force_indicator, const char
 
 			if (!(var = (struct variable *) ecpg_alloc(sizeof(struct variable), lineno)))
 			{
-				setlocale(LC_NUMERIC, oldlocale);
-				ecpg_free(oldlocale);
-				free_statement(stmt);
-				va_end(args);
+				ecpg_do_epilogue(stmt);
 				return false;
 			}
 
@@ -1894,10 +2052,7 @@ ECPGdo(const int lineno, const int compat, const int force_indicator, const char
 			{
 				ecpg_raise(lineno, ECPG_INVALID_STMT, ECPG_SQLSTATE_INVALID_SQL_STATEMENT_NAME, NULL);
 				ecpg_free(var);
-				setlocale(LC_NUMERIC, oldlocale);
-				ecpg_free(oldlocale);
-				free_statement(stmt);
-				va_end(args);
+				ecpg_do_epilogue(stmt);
 				return false;
 			}
 
@@ -1912,29 +2067,100 @@ ECPGdo(const int lineno, const int compat, const int force_indicator, const char
 		type = va_arg(args, enum ECPGttype);
 	}
 
-	va_end(args);
-
 	/* are we connected? */
 	if (con == NULL || con->connection == NULL)
 	{
-		free_statement(stmt);
 		ecpg_raise(lineno, ECPG_NOT_CONN, ECPG_SQLSTATE_ECPG_INTERNAL_ERROR, (con) ? con->name : ecpg_gettext("<empty>"));
-		setlocale(LC_NUMERIC, oldlocale);
-		ecpg_free(oldlocale);
+		ecpg_do_epilogue(stmt);
 		return false;
 	}
 
 	/* initialize auto_mem struct */
 	ecpg_clear_auto_mem();
 
-	status = ecpg_execute(stmt);
+	*stmt_out = stmt;
+
+	return true;
+}
+
+/*
+ * ecpg_do_epilogue
+ *    Restore the application locale and free the statement structure.
+ */
+void
+ecpg_do_epilogue(struct statement *stmt)
+{
+	if (stmt == NULL)
+		return;
+
+	setlocale(LC_NUMERIC, stmt->oldlocale);
 	free_statement(stmt);
+}
 
-	/* and reset locale value so our application is not affected */
-	setlocale(LC_NUMERIC, oldlocale);
-	ecpg_free(oldlocale);
+/*
+ * Execute SQL statements in the backend.
+ * The input/output parameters (variable argument list) are passed
+ * in a va_list, so other functions can use this interface.
+ */
+bool
+ecpg_do(const int lineno, const int compat, const int force_indicator, const char *connection_name, const bool questionmarks, const int st, const char *query, va_list args)
+{
+	struct statement   *stmt;
 
-	return (status);
+	if (!ecpg_do_prologue(lineno, compat, force_indicator,
+				connection_name, questionmarks,
+				(enum ECPG_statement_type) st,
+				query, args, &stmt))
+	{
+		ecpg_do_epilogue(stmt);
+		return false;
+	}
+
+	if (!ecpg_build_params(stmt, false))
+	{
+		ecpg_do_epilogue(stmt);
+		return false;
+	}
+
+	if (!ecpg_autostart_transaction(stmt))
+	{
+		ecpg_do_epilogue(stmt);
+		return false;
+	}
+
+	if (!ecpg_execute(stmt))
+	{
+		ecpg_do_epilogue(stmt);
+		return false;
+	}
+
+	if (!ecpg_process_output(stmt, 0, PQntuples(stmt->results), LOOP_FORWARD, 0, true, false))
+	{
+		ecpg_do_epilogue(stmt);
+		return false;
+	}
+
+	ecpg_do_epilogue(stmt);
+
+	return true;
+}
+
+/*
+ * Execute SQL statements in the backend.
+ * The input/output parameters are passed as variable-length argument list.
+ */
+bool
+ECPGdo(const int lineno, const int compat, const int force_indicator, const char *connection_name, const bool questionmarks, const int st, const char *query,...)
+{
+	va_list		args;
+	bool		ret;
+
+	va_start(args, query);
+	ret = ecpg_do(lineno, compat, force_indicator, connection_name,
+							questionmarks,
+							st, query, args);
+	va_end(args);
+	return ret;
 }
 
 /* old descriptor interface */

@@ -287,7 +287,7 @@ prepared_name: name
  * Declare a prepared cursor. The syntax is different from the standard
  * declare statement, so we create a new rule.
  */
-ECPGCursorStmt:  DECLARE cursor_name cursor_options CURSOR opt_hold FOR prepared_name
+ECPGCursorStmt:	DECLARE cursor_name cursor_options opt_readahead CURSOR opt_hold FOR prepared_name
 		{
 			struct cursor *ptr, *this;
 			char *cursor_marker = $2[0] == ':' ? mm_strdup("$0") : mm_strdup($2);
@@ -315,15 +315,33 @@ ECPGCursorStmt:  DECLARE cursor_name cursor_options CURSOR opt_hold FOR prepared
 			this->name = $2;
 			this->function = (current_function ? mm_strdup(current_function) : NULL);
 			this->connection = connection;
-			this->command =  cat_str(6, mm_strdup("declare"), cursor_marker, $3, mm_strdup("cursor"), $5, mm_strdup("for $1"));
+			this->opened = false;
+			this->with_hold = (strncmp($6, "with ", 5) == 0);
+			this->scrollable = current_cursor_scrollable;
+			if (strcmp($4, "default") == 0)
+			{
+				this->allow_ra_override = true;
+				this->fetch_readahead = fetch_readahead;
+			}
+			else
+			{
+				int	this_readahead = atoi($4);
+
+				if (this_readahead < 1)
+					mmerror(PARSE_ERROR, ET_ERROR, "cursor readahead cannot be less than 1");
+				this->allow_ra_override = false;
+				this->fetch_readahead = this_readahead;
+			}
+			this->vartype = current_cursor_vartype;
+			this->command =  cat_str(6, mm_strdup("declare"), cursor_marker, $3, mm_strdup("cursor"), $6, mm_strdup("for $1"));
 			this->argsresult = NULL;
 			this->argsresult_oos = NULL;
 
 			thisquery->type = &ecpg_query;
 			thisquery->brace_level = 0;
 			thisquery->next = NULL;
-			thisquery->name = (char *) mm_alloc(sizeof("ECPGprepared_statement(, , __LINE__)") + strlen(con) + strlen($7));
-			sprintf(thisquery->name, "ECPGprepared_statement(%s, %s, __LINE__)", con, $7);
+			thisquery->name = (char *) mm_alloc(sizeof("ECPGprepared_statement(, , __LINE__)") + strlen(con) + strlen($8));
+			sprintf(thisquery->name, "ECPGprepared_statement(%s, %s, __LINE__)", con, $8);
 
 			this->argsinsert = NULL;
 			this->argsinsert_oos = NULL;
@@ -346,6 +364,10 @@ ECPGCursorStmt:  DECLARE cursor_name cursor_options CURSOR opt_hold FOR prepared
 			else
 				$$ = cat2_str(adjust_outofscope_cursor_vars(this), comment);
 		}
+		;
+
+opt_readahead:	SQL_READAHEAD Iconst				{ $$ = $2; }
+		| /* EMPTY */					{ $$ = mm_strdup("default"); }
 		;
 
 ECPGExecuteImmediateStmt: EXECUTE IMMEDIATE execstring
@@ -1662,7 +1684,12 @@ char_civar: char_variable
 			char *ptr = strstr($1, ".arr");
 
 			if (ptr) /* varchar, we need the struct name here, not the struct element */
+			{
 				*ptr = '\0';
+				current_cursor_vartype = ECPGt_varchar;
+			}
+			else
+				current_cursor_vartype = ECPGt_char;
 			add_variable_to_head(&argsinsert, find_variable($1), &no_indicator);
 			$$ = $1;
 		}

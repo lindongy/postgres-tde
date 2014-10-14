@@ -48,11 +48,11 @@ extern		"C"
 
 void		ECPGdebug(int, FILE *);
 bool		ECPGstatus(int, const char *);
-bool		ECPGsetcommit(int, const char *, const char *);
+bool		ECPGsetcommit(int, const bool, const char *);
 bool		ECPGsetconn(int, const char *);
 bool		ECPGconnect(int, int, const char *, const char *, const char *, const char *, int);
 bool		ECPGdo(const int, const int, const int, const char *, const bool, const int, const char *,...);
-bool		ECPGtrans(int, const char *, const char *);
+bool		ECPGtrans(int, const char *, const char *, bool, bool, bool, const char *);
 bool		ECPGdisconnect(int, const char *);
 bool		ECPGprepare(int, const char *, const bool, const char *, const char *);
 bool		ECPGdeallocate(int, int, const char *, const char *);
@@ -62,6 +62,18 @@ PGconn	   *ECPGget_PGconn(const char *);
 PGTransactionStatusType ECPGtransactionStatus(const char *);
 
 char	   *ECPGerrmsg(void);
+
+/* Cursor functions */
+bool		ECPGopen(const int, const int, const int, const char *, const bool, const bool,
+				enum ECPG_cursor_scroll, long, const bool, const bool,
+				const char *, const int, const char *, ...);
+bool		ECPGfetch(const int, const int, const int, const char *, const bool,
+				enum ECPG_cursor_direction, const char *, bool,
+				const char *, const int, const char *, ...);
+bool		ECPGcursor_dml(const int, const int, const int, const char *, const bool,
+				const char *, const int, const char *, ...);
+bool		ECPGclose(const int, const int, const int, const char *, const bool,
+				const char *, const int, const char *, ...);
 
  /* print an error message */
 void		sqlprint(void);

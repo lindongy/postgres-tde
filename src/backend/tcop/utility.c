@@ -505,11 +505,14 @@ standard_ProcessUtility(Node *parsetree,
 		case T_PlannedStmt:
 			{
 				PlannedStmt *stmt = (PlannedStmt *) parsetree;
+				bool		scrollable;
 
 				if (stmt->utilityStmt == NULL ||
 					!IsA(stmt->utilityStmt, DeclareCursorStmt))
 					elog(ERROR, "non-DECLARE CURSOR PlannedStmt passed to ProcessUtility");
-				PerformCursorOpen(stmt, params, queryString, isTopLevel);
+				PerformCursorOpen(stmt, params, queryString, isTopLevel, &scrollable);
+				if (completionTag)
+					sprintf(completionTag, "DECLARE CURSOR %u", scrollable);
 			}
 			break;
 

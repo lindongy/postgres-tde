@@ -111,14 +111,14 @@ int main()
 	{ ECPGconnect(__LINE__, 0, "regress1" , NULL, NULL , NULL, 0); }
 #line 15 "indicators.pgc"
 
-	{ ECPGsetcommit(__LINE__, "off", NULL);}
+	{ ECPGsetcommit(__LINE__, 0, NULL);}
 #line 16 "indicators.pgc"
 
 
 	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "create table indicator_test ( \"id\" int primary key , \"str\" text not null , val int null )", ECPGt_EOIT, ECPGt_EORT);}
 #line 21 "indicators.pgc"
 
-	{ ECPGtrans(__LINE__, NULL, "commit work");}
+	{ ECPGtrans(__LINE__, NULL, "commit work", 0, 0, 0, NULL);}
 #line 22 "indicators.pgc"
 
 
@@ -138,7 +138,7 @@ int main()
 	ECPGt_int,&(nullind),(long)1,(long)1,sizeof(int), ECPGt_EOIT, ECPGt_EORT);}
 #line 29 "indicators.pgc"
 
-	{ ECPGtrans(__LINE__, NULL, "commit work");}
+	{ ECPGtrans(__LINE__, NULL, "commit work", 0, 0, 0, NULL);}
 #line 30 "indicators.pgc"
 
 
@@ -178,7 +178,7 @@ int main()
 	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "drop table indicator_test", ECPGt_EOIT, ECPGt_EORT);}
 #line 45 "indicators.pgc"
 
-	{ ECPGtrans(__LINE__, NULL, "commit work");}
+	{ ECPGtrans(__LINE__, NULL, "commit work", 0, 0, 0, NULL);}
 #line 46 "indicators.pgc"
 
 

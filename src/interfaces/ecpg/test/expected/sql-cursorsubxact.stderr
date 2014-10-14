@@ -1,0 +1,277 @@
+[NO_PID]: ECPGdebug: set to 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGconnect: opening database regress1 on <DEFAULT> port <DEFAULT>  
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 26: query: create table t1 ( id serial primary key , t text ); with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 26: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 26: OK: CREATE TABLE
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 27: query: insert into t1 ( t ) values ( 'a' ) , ( 'b' ) , ( 'c' ); with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 27: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 27: OK: INSERT 0 3
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGtrans on line 28: action "commit"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 41: query: declare MyCur cursor for select id , t from t1; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 41: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 41: OK: DECLARE CURSOR 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 49: query: close myCur; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 49: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 49: OK: CLOSE CURSOR
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 64: query: declare "MyCur" cursor for select id , t from t1; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 64: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 64: OK: DECLARE CURSOR 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: raising sqlcode -231 on line 73: invalid cursorname ""myCur"" on line 73
+[NO_PID]: sqlca: code: -231, state: 34000
+SQL error: invalid cursorname ""myCur"" on line 73
+[NO_PID]: raising sqlcode -401 on line 81: current transaction is aborted, commands ignored until end of transaction block on line 81
+[NO_PID]: sqlca: code: -401, state: 25P02
+SQL error: current transaction is aborted, commands ignored until end of transaction block on line 81
+[NO_PID]: ECPGtrans on line 87: action "rollback"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGtrans on line 98: action "savepoint a"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 100: query: declare "MyCur" cursor for select id , t from t1; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 100: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 100: OK: DECLARE CURSOR 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGtrans on line 107: action "rollback to a"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: raising sqlcode -231 on line 110: invalid cursorname ""MyCur"" on line 110
+[NO_PID]: sqlca: code: -231, state: 34000
+SQL error: invalid cursorname ""MyCur"" on line 110
+[NO_PID]: ECPGtrans on line 116: action "rollback"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGtrans on line 124: action "savepoint a"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 130: query: declare "MyCur" cursor for select id , t from t1; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 130: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 130: OK: DECLARE CURSOR 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGtrans on line 136: action "savepoint b"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGtrans on line 144: action "rollback to c"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_check_PQresult on line 144: bad response - ERROR:  no such savepoint
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: raising sqlstate 3B001 (sqlcode -400): no such savepoint on line 144
+[NO_PID]: sqlca: code: -400, state: 3B001
+SQL error: no such savepoint on line 144
+[NO_PID]: ECPGtrans on line 152: action "rollback to a"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGtrans on line 159: action "rollback to b"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_check_PQresult on line 159: bad response - ERROR:  no such savepoint
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: raising sqlstate 3B001 (sqlcode -400): no such savepoint on line 159
+[NO_PID]: sqlca: code: -400, state: 3B001
+SQL error: no such savepoint on line 159
+[NO_PID]: ECPGtrans on line 167: action "rollback to a"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: raising sqlcode -231 on line 175: invalid cursorname ""MyCur"" on line 175
+[NO_PID]: sqlca: code: -231, state: 34000
+SQL error: invalid cursorname ""MyCur"" on line 175
+[NO_PID]: ECPGtrans on line 183: action "rollback to a"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGtrans on line 191: action "release savepoint a"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGtrans on line 199: action "rollback to a"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_check_PQresult on line 199: bad response - ERROR:  no such savepoint
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: raising sqlstate 3B001 (sqlcode -400): no such savepoint on line 199
+[NO_PID]: sqlca: code: -400, state: 3B001
+SQL error: no such savepoint on line 199
+[NO_PID]: ECPGtrans on line 205: action "rollback"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGtrans on line 214: action "savepoint a"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 220: query: declare "MyCur" cursor for select id , t from t1; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 220: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 220: OK: DECLARE CURSOR 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 226: fetch/move amount: "1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 226: query: fetch from $0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 226: ECPGc_forward 1 fetchall 0 current positions: pos 0 atstart 1 atend 0 backend_pos 0 bkatstart 1 bkatend 0 mkbpos_is_last 0 mkbpos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 226: ECPGc_forward/ECPGc_backward 1 backward 0 fetchall 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 226: ECPGc_forward 1 (-1) current positions: pos 0 atstart 1 atend 0 backend_pos 0 bkatstart 1 bkatend 0 mkbpos_is_last 0 mkbpos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 226: ECPGc_forward set wanted_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 226: ECPGc_forward 1 (-1) prediction wanted_pos 1 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 226: ECPGc_forward new position is beyond known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 226: current positions: pos 0 atstart 1 atend 0 backend_pos 0 bkatstart 1 bkatend 0 mkbpos_is_last 0 mkbpos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 226: next position: next_pos 1 next_atstart 0 next_atend 0 backward 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 226: do_fetch bkatstart 1 bkatend 0 backend_pos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 226: query: fetch forward 1 from "MyCur"; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 226: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 226: after fetch ntuples 1 backward 0 bkatstart 1 bkatend 0 backend_pos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 226: mkbpos set 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 226: cache populated start_pos 1 ntuples 1 backward 0 mkbpos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 226: ECPGc_forward 1 fetchall 0 current positions: pos 0 atstart 1 atend 0 backend_pos 1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 226: ECPGc_forward 1 (-1) current positions: pos 0 atstart 1 atend 0 backend_pos 1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 226: ECPGc_forward set wanted_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 226: ECPGc_forward 1 (-1) prediction wanted_pos 1 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 226: ECPGc_forward new position is in known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 226: final positions: pos 1 atstart 0 atend 0 backend_pos 1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1 return_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 226: before ecpg_process_output pos 1 backend_pos 1 cache_start_pos 1 start_idx 0 end_pos 1 cur_amount 1 step 1 cache_step 1 output_step 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 226: correctly got 1 tuples with 2 fields
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_get_data on line 226: RESULT: 1 offset: -1; array: no
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_get_data on line 226: RESULT: a offset: -1; array: no
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 226: ECPGc_forward 0 fetchall 0 current positions: pos 1 atstart 0 atend 0 backend_pos 1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 226: ECPGc_forward 0 (-1) current positions: pos 1 atstart 0 atend 0 backend_pos 1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 226: ECPGc_forward set wanted_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 226: ECPGc_forward 0 (-1) prediction wanted_pos 1 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 226: ECPGc_forward new position is in known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 226: final positions: pos 1 atstart 0 atend 0 backend_pos 1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1 return_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 226: ECPGc_forward return 1 tuples
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 226: final positions: pos 1 atstart 0 atend 0 backend_pos 1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGtrans on line 232: action "rollback to a"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: raising sqlcode -231 on line 240: invalid cursorname ""MyCur"" on line 240
+[NO_PID]: sqlca: code: -231, state: 34000
+SQL error: invalid cursorname ""MyCur"" on line 240
+[NO_PID]: raising sqlcode -401 on line 246: current transaction is aborted, commands ignored until end of transaction block on line 246
+[NO_PID]: sqlca: code: -401, state: 25P02
+SQL error: current transaction is aborted, commands ignored until end of transaction block on line 246
+[NO_PID]: ECPGtrans on line 252: action "rollback to a"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 258: query: declare "MyCur" cursor for select id , t from t1; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 258: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 258: OK: DECLARE CURSOR 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGtrans on line 264: action "release savepoint a"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 272: fetch/move amount: "1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 272: query: fetch from $0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 272: ECPGc_forward 1 fetchall 0 current positions: pos 0 atstart 1 atend 0 backend_pos 0 bkatstart 1 bkatend 0 mkbpos_is_last 0 mkbpos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 272: ECPGc_forward/ECPGc_backward 1 backward 0 fetchall 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 272: ECPGc_forward 1 (-1) current positions: pos 0 atstart 1 atend 0 backend_pos 0 bkatstart 1 bkatend 0 mkbpos_is_last 0 mkbpos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 272: ECPGc_forward set wanted_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 272: ECPGc_forward 1 (-1) prediction wanted_pos 1 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 272: ECPGc_forward new position is beyond known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 272: current positions: pos 0 atstart 1 atend 0 backend_pos 0 bkatstart 1 bkatend 0 mkbpos_is_last 0 mkbpos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 272: next position: next_pos 1 next_atstart 0 next_atend 0 backward 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 272: do_fetch bkatstart 1 bkatend 0 backend_pos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 272: query: fetch forward 1 from "MyCur"; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 272: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 272: after fetch ntuples 1 backward 0 bkatstart 1 bkatend 0 backend_pos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 272: mkbpos set 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 272: cache populated start_pos 1 ntuples 1 backward 0 mkbpos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 272: ECPGc_forward 1 fetchall 0 current positions: pos 0 atstart 1 atend 0 backend_pos 1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 272: ECPGc_forward 1 (-1) current positions: pos 0 atstart 1 atend 0 backend_pos 1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 272: ECPGc_forward set wanted_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 272: ECPGc_forward 1 (-1) prediction wanted_pos 1 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 272: ECPGc_forward new position is in known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 272: final positions: pos 1 atstart 0 atend 0 backend_pos 1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1 return_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 272: before ecpg_process_output pos 1 backend_pos 1 cache_start_pos 1 start_idx 0 end_pos 1 cur_amount 1 step 1 cache_step 1 output_step 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 272: correctly got 1 tuples with 2 fields
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_get_data on line 272: RESULT: 1 offset: -1; array: no
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_get_data on line 272: RESULT: a offset: -1; array: no
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 272: ECPGc_forward 0 fetchall 0 current positions: pos 1 atstart 0 atend 0 backend_pos 1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 272: ECPGc_forward 0 (-1) current positions: pos 1 atstart 0 atend 0 backend_pos 1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 272: ECPGc_forward set wanted_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 272: ECPGc_forward 0 (-1) prediction wanted_pos 1 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 272: ECPGc_forward new position is in known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 272: final positions: pos 1 atstart 0 atend 0 backend_pos 1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1 return_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 272: ECPGc_forward return 1 tuples
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 272: final positions: pos 1 atstart 0 atend 0 backend_pos 1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGtrans on line 278: action "rollback"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 282: query: drop table t1; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 282: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 282: OK: DROP TABLE
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGtrans on line 283: action "commit"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_finish: connection regress1 closed
+[NO_PID]: sqlca: code: 0, state: 00000

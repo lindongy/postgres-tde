@@ -31,6 +31,10 @@ test: sql/array
 test: sql/binary
 test: sql/code100
 test: sql/copystdout
+test: sql/cursor-ra-fetch
+test: sql/cursor-ra-move
+test: sql/cursor-ra-swdir
+test: sql/cursorsubxact
 test: sql/define
 test: sql/desc
 test: sql/sqlda

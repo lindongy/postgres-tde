@@ -8,19 +8,19 @@
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_execute on line 20: using PQexec
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ecpg_execute on line 20: OK: CREATE TABLE
+[NO_PID]: ecpg_process_output on line 20: OK: CREATE TABLE
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_execute on line 22: query: set standard_conforming_strings to off; with 0 parameter(s) on connection regress1
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_execute on line 22: using PQexec
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ecpg_execute on line 22: OK: SET
+[NO_PID]: ecpg_process_output on line 22: OK: SET
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_execute on line 24: query: show standard_conforming_strings; with 0 parameter(s) on connection regress1
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_execute on line 24: using PQexec
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ecpg_execute on line 24: correctly got 1 tuples with 1 fields
+[NO_PID]: ecpg_process_output on line 24: correctly got 1 tuples with 1 fields
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_get_data on line 24: RESULT: off offset: -1; array: no
 [NO_PID]: sqlca: code: 0, state: 00000
@@ -32,26 +32,26 @@
 [NO_PID]: sqlca: code: 0, state: 22P06
 [NO_PID]: ecpg_execute on line 28: using PQexec
 [NO_PID]: sqlca: code: 0, state: 22P06
-[NO_PID]: ecpg_execute on line 28: OK: INSERT 0 1
+[NO_PID]: ecpg_process_output on line 28: OK: INSERT 0 1
 [NO_PID]: sqlca: code: 0, state: 22P06
 SQL error: nonstandard use of \\ in a string literal
 [NO_PID]: ecpg_execute on line 30: query: insert into "My_Table" values ( 1 , E'a\\\\b' ); with 0 parameter(s) on connection regress1
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_execute on line 30: using PQexec
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ecpg_execute on line 30: OK: INSERT 0 1
+[NO_PID]: ecpg_process_output on line 30: OK: INSERT 0 1
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_execute on line 32: query: set standard_conforming_strings to on; with 0 parameter(s) on connection regress1
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_execute on line 32: using PQexec
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ecpg_execute on line 32: OK: SET
+[NO_PID]: ecpg_process_output on line 32: OK: SET
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_execute on line 34: query: show standard_conforming_strings; with 0 parameter(s) on connection regress1
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_execute on line 34: using PQexec
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ecpg_execute on line 34: correctly got 1 tuples with 1 fields
+[NO_PID]: ecpg_process_output on line 34: correctly got 1 tuples with 1 fields
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_get_data on line 34: RESULT: on offset: -1; array: no
 [NO_PID]: sqlca: code: 0, state: 00000
@@ -59,13 +59,13 @@ SQL error: nonstandard use of \\ in a string literal
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_execute on line 38: using PQexec
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ecpg_execute on line 38: OK: INSERT 0 1
+[NO_PID]: ecpg_process_output on line 38: OK: INSERT 0 1
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_execute on line 40: query: insert into "My_Table" values ( 2 , E'a\\\\b' ); with 0 parameter(s) on connection regress1
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_execute on line 40: using PQexec
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ecpg_execute on line 40: OK: INSERT 0 1
+[NO_PID]: ecpg_process_output on line 40: OK: INSERT 0 1
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ECPGtrans on line 42: action "begin"; connection "regress1"
 [NO_PID]: sqlca: code: 0, state: 00000
@@ -73,53 +73,335 @@ SQL error: nonstandard use of \\ in a string literal
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_execute on line 45: using PQexec
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ecpg_execute on line 45: OK: DECLARE CURSOR
+[NO_PID]: ecpg_process_output on line 45: OK: DECLARE CURSOR 1
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ecpg_execute on line 51: query: fetch C; with 0 parameter(s) on connection regress1
+[NO_PID]: ECPGfetch on line 51: fetch/move amount: "1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 51: query: fetch C
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 51: ECPGc_forward 1 fetchall 0 current positions: pos 0 atstart 1 atend 0 backend_pos 0 bkatstart 1 bkatend 0 mkbpos_is_last 0 mkbpos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 51: ECPGc_forward/ECPGc_backward 1 backward 0 fetchall 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 1 (-1) current positions: pos 0 atstart 1 atend 0 backend_pos 0 bkatstart 1 bkatend 0 mkbpos_is_last 0 mkbpos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward set wanted_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 1 (-1) prediction wanted_pos 1 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward new position is beyond known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: current positions: pos 0 atstart 1 atend 0 backend_pos 0 bkatstart 1 bkatend 0 mkbpos_is_last 0 mkbpos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: next position: next_pos 1 next_atstart 0 next_atend 0 backward 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: do_fetch bkatstart 1 bkatend 0 backend_pos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 51: query: fetch forward 1 from C; with 0 parameter(s) on connection regress1
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_execute on line 51: using PQexec
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ecpg_execute on line 51: correctly got 1 tuples with 2 fields
+[NO_PID]: ecpg_cursor_execute on line 51: after fetch ntuples 1 backward 0 bkatstart 1 bkatend 0 backend_pos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: mkbpos set 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: cache populated start_pos 1 ntuples 1 backward 0 mkbpos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 51: ECPGc_forward 1 fetchall 0 current positions: pos 0 atstart 1 atend 0 backend_pos 1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 1 (-1) current positions: pos 0 atstart 1 atend 0 backend_pos 1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward set wanted_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 1 (-1) prediction wanted_pos 1 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward new position is in known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 51: final positions: pos 1 atstart 0 atend 0 backend_pos 1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1 return_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 51: before ecpg_process_output pos 1 backend_pos 1 cache_start_pos 1 start_idx 0 end_pos 1 cur_amount 1 step 1 cache_step 1 output_step 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 51: correctly got 1 tuples with 2 fields
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_get_data on line 51: RESULT: 1 offset: -1; array: no
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_get_data on line 51: RESULT: a\\b offset: -1; array: no
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ecpg_execute on line 51: query: fetch C; with 0 parameter(s) on connection regress1
+[NO_PID]: ecpg_cursor_move on line 51: ECPGc_forward 0 fetchall 0 current positions: pos 1 atstart 0 atend 0 backend_pos 1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 0 (-1) current positions: pos 1 atstart 0 atend 0 backend_pos 1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward set wanted_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 0 (-1) prediction wanted_pos 1 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward new position is in known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 51: final positions: pos 1 atstart 0 atend 0 backend_pos 1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1 return_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 51: ECPGc_forward return 1 tuples
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 51: final positions: pos 1 atstart 0 atend 0 backend_pos 1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 51: fetch/move amount: "1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 51: query: fetch C
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 51: ECPGc_forward 1 fetchall 0 current positions: pos 1 atstart 0 atend 0 backend_pos 1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 51: ECPGc_forward/ECPGc_backward 1 backward 0 fetchall 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 1 (-1) current positions: pos 1 atstart 0 atend 0 backend_pos 1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward set wanted_pos 2
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 1 (-1) prediction wanted_pos 2 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward new position is beyond known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: current positions: pos 1 atstart 0 atend 0 backend_pos 1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: next position: next_pos 2 next_atstart 0 next_atend 0 backward 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: start_pos 1 end_pos 1 cur->backward 0 next_pos 2 next_atstart 0 next_atend 0 backward 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: do_fetch bkatstart 0 bkatend 0 backend_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 51: query: fetch forward 1 from C; with 0 parameter(s) on connection regress1
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_execute on line 51: using PQexec
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ecpg_execute on line 51: correctly got 1 tuples with 2 fields
+[NO_PID]: ecpg_cursor_execute on line 51: after fetch ntuples 1 backward 0 bkatstart 0 bkatend 0 backend_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: mkbpos set 2
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: cache populated start_pos 2 ntuples 1 backward 0 mkbpos 2
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 51: ECPGc_forward 1 fetchall 0 current positions: pos 1 atstart 0 atend 0 backend_pos 2 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 2
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 1 (-1) current positions: pos 1 atstart 0 atend 0 backend_pos 2 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 2
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward set wanted_pos 2
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 1 (-1) prediction wanted_pos 2 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward new position is in known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 51: final positions: pos 2 atstart 0 atend 0 backend_pos 2 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 2 return_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 51: before ecpg_process_output pos 2 backend_pos 2 cache_start_pos 2 start_idx 0 end_pos 2 cur_amount 1 step 1 cache_step 1 output_step 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 51: correctly got 1 tuples with 2 fields
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_get_data on line 51: RESULT: 1 offset: -1; array: no
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_get_data on line 51: RESULT: a\\b offset: -1; array: no
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ecpg_execute on line 51: query: fetch C; with 0 parameter(s) on connection regress1
+[NO_PID]: ecpg_cursor_move on line 51: ECPGc_forward 0 fetchall 0 current positions: pos 2 atstart 0 atend 0 backend_pos 2 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 2
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 0 (-1) current positions: pos 2 atstart 0 atend 0 backend_pos 2 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 2
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward set wanted_pos 2
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 0 (-1) prediction wanted_pos 2 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward new position is in known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 51: final positions: pos 2 atstart 0 atend 0 backend_pos 2 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 2 return_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 51: ECPGc_forward return 1 tuples
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 51: final positions: pos 2 atstart 0 atend 0 backend_pos 2 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 2
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 51: fetch/move amount: "1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 51: query: fetch C
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 51: ECPGc_forward 1 fetchall 0 current positions: pos 2 atstart 0 atend 0 backend_pos 2 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 2
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 51: ECPGc_forward/ECPGc_backward 1 backward 0 fetchall 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 1 (-1) current positions: pos 2 atstart 0 atend 0 backend_pos 2 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 2
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward set wanted_pos 3
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 1 (-1) prediction wanted_pos 3 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward new position is beyond known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: current positions: pos 2 atstart 0 atend 0 backend_pos 2 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 2
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: next position: next_pos 3 next_atstart 0 next_atend 0 backward 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: start_pos 2 end_pos 2 cur->backward 0 next_pos 3 next_atstart 0 next_atend 0 backward 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: do_fetch bkatstart 0 bkatend 0 backend_pos 2
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 51: query: fetch forward 1 from C; with 0 parameter(s) on connection regress1
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_execute on line 51: using PQexec
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ecpg_execute on line 51: correctly got 1 tuples with 2 fields
+[NO_PID]: ecpg_cursor_execute on line 51: after fetch ntuples 1 backward 0 bkatstart 0 bkatend 0 backend_pos 2
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: mkbpos set 3
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: cache populated start_pos 3 ntuples 1 backward 0 mkbpos 3
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 51: ECPGc_forward 1 fetchall 0 current positions: pos 2 atstart 0 atend 0 backend_pos 3 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 3
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 1 (-1) current positions: pos 2 atstart 0 atend 0 backend_pos 3 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 3
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward set wanted_pos 3
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 1 (-1) prediction wanted_pos 3 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward new position is in known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 51: final positions: pos 3 atstart 0 atend 0 backend_pos 3 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 3 return_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 51: before ecpg_process_output pos 3 backend_pos 3 cache_start_pos 3 start_idx 0 end_pos 3 cur_amount 1 step 1 cache_step 1 output_step 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 51: correctly got 1 tuples with 2 fields
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_get_data on line 51: RESULT: 2 offset: -1; array: no
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_get_data on line 51: RESULT: a\\\\b offset: -1; array: no
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ecpg_execute on line 51: query: fetch C; with 0 parameter(s) on connection regress1
+[NO_PID]: ecpg_cursor_move on line 51: ECPGc_forward 0 fetchall 0 current positions: pos 3 atstart 0 atend 0 backend_pos 3 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 3
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 0 (-1) current positions: pos 3 atstart 0 atend 0 backend_pos 3 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 3
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward set wanted_pos 3
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 0 (-1) prediction wanted_pos 3 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward new position is in known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 51: final positions: pos 3 atstart 0 atend 0 backend_pos 3 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 3 return_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 51: ECPGc_forward return 1 tuples
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 51: final positions: pos 3 atstart 0 atend 0 backend_pos 3 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 3
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 51: fetch/move amount: "1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 51: query: fetch C
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 51: ECPGc_forward 1 fetchall 0 current positions: pos 3 atstart 0 atend 0 backend_pos 3 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 3
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 51: ECPGc_forward/ECPGc_backward 1 backward 0 fetchall 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 1 (-1) current positions: pos 3 atstart 0 atend 0 backend_pos 3 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 3
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward set wanted_pos 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 1 (-1) prediction wanted_pos 4 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward new position is beyond known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: current positions: pos 3 atstart 0 atend 0 backend_pos 3 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 3
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: next position: next_pos 4 next_atstart 0 next_atend 0 backward 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: start_pos 3 end_pos 3 cur->backward 0 next_pos 4 next_atstart 0 next_atend 0 backward 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: do_fetch bkatstart 0 bkatend 0 backend_pos 3
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 51: query: fetch forward 1 from C; with 0 parameter(s) on connection regress1
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_execute on line 51: using PQexec
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ecpg_execute on line 51: correctly got 1 tuples with 2 fields
+[NO_PID]: ecpg_cursor_execute on line 51: after fetch ntuples 1 backward 0 bkatstart 0 bkatend 0 backend_pos 3
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: mkbpos set 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: cache populated start_pos 4 ntuples 1 backward 0 mkbpos 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 51: ECPGc_forward 1 fetchall 0 current positions: pos 3 atstart 0 atend 0 backend_pos 4 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 1 (-1) current positions: pos 3 atstart 0 atend 0 backend_pos 4 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward set wanted_pos 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 1 (-1) prediction wanted_pos 4 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward new position is in known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 51: final positions: pos 4 atstart 0 atend 0 backend_pos 4 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 4 return_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 51: before ecpg_process_output pos 4 backend_pos 4 cache_start_pos 4 start_idx 0 end_pos 4 cur_amount 1 step 1 cache_step 1 output_step 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 51: correctly got 1 tuples with 2 fields
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_get_data on line 51: RESULT: 2 offset: -1; array: no
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_get_data on line 51: RESULT: a\\b offset: -1; array: no
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ecpg_execute on line 51: query: fetch C; with 0 parameter(s) on connection regress1
+[NO_PID]: ecpg_cursor_move on line 51: ECPGc_forward 0 fetchall 0 current positions: pos 4 atstart 0 atend 0 backend_pos 4 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 0 (-1) current positions: pos 4 atstart 0 atend 0 backend_pos 4 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward set wanted_pos 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 0 (-1) prediction wanted_pos 4 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward new position is in known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 51: final positions: pos 4 atstart 0 atend 0 backend_pos 4 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 4 return_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 51: ECPGc_forward return 1 tuples
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 51: final positions: pos 4 atstart 0 atend 0 backend_pos 4 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 51: fetch/move amount: "1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 51: query: fetch C
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 51: ECPGc_forward 1 fetchall 0 current positions: pos 4 atstart 0 atend 0 backend_pos 4 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 51: ECPGc_forward/ECPGc_backward 1 backward 0 fetchall 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 1 (-1) current positions: pos 4 atstart 0 atend 0 backend_pos 4 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward set wanted_pos 5
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 1 (-1) prediction wanted_pos 5 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward new position is beyond known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: current positions: pos 4 atstart 0 atend 0 backend_pos 4 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: next position: next_pos 5 next_atstart 0 next_atend 0 backward 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: start_pos 4 end_pos 4 cur->backward 0 next_pos 5 next_atstart 0 next_atend 0 backward 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: do_fetch bkatstart 0 bkatend 0 backend_pos 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 51: query: fetch forward 1 from C; with 0 parameter(s) on connection regress1
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_execute on line 51: using PQexec
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ecpg_execute on line 51: correctly got 0 tuples with 2 fields
+[NO_PID]: ecpg_cursor_execute on line 51: after fetch ntuples 0 backward 0 bkatstart 0 bkatend 0 backend_pos 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: mkbpos set 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: mkbpos_is_last is set
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_execute on line 51: cache populated start_pos 5 ntuples 0 backward 0 mkbpos 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 51: ECPGc_forward 1 fetchall 0 current positions: pos 4 atstart 0 atend 0 backend_pos 5 bkatstart 0 bkatend 1 mkbpos_is_last 1 mkbpos 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 1 (-1) current positions: pos 4 atstart 0 atend 0 backend_pos 5 bkatstart 0 bkatend 1 mkbpos_is_last 1 mkbpos 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward set wanted_pos 5
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward 1 (-1) prediction wanted_pos 5 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 51: ECPGc_forward new position is known last position
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 51: final positions: pos 5 atstart 0 atend 1 backend_pos 5 bkatstart 0 bkatend 1 mkbpos_is_last 1 mkbpos 4 return_pos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_fetch on line 51: ECPGc_forward return 0 tuples
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: raising sqlcode 100 on line 51: no data found on line 51
 [NO_PID]: sqlca: code: 100, state: 02000
@@ -129,7 +411,7 @@ SQL error: nonstandard use of \\ in a string literal
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_execute on line 56: using PQexec
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ecpg_execute on line 56: OK: DROP TABLE
+[NO_PID]: ecpg_process_output on line 56: OK: DROP TABLE
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_finish: connection regress1 closed
 [NO_PID]: sqlca: code: 0, state: 00000

@@ -18,7 +18,9 @@ bool		autocommit = false,
 			force_indicator = true,
 			questionmarks = false,
 			regression_mode = false,
-			auto_prepare = false;
+			auto_prepare = false,
+			cursor_rssz = false;
+long		fetch_readahead = 1; /* No readahead by default */
 
 char	   *output_filename;
 
@@ -51,7 +53,8 @@ help(const char *progname)
 	printf(_("  -I DIRECTORY   search DIRECTORY for include files\n"));
 	printf(_("  -o OUTFILE     write result to OUTFILE\n"));
 	printf(_("  -r OPTION      specify run-time behavior; OPTION can be:\n"
-	 "                 \"no_indicator\", \"prepare\", \"questionmarks\"\n"));
+	 "                 \"no_indicator\", \"prepare\", \"questionmarks\",\n"
+	 "                 \"readahead=number\", \"detect-cursor-resultset-size\"\n"));
 	printf(_("  --regression   run in regression testing mode\n"));
 	printf(_("  -t             turn on autocommit of transactions\n"));
 	printf(_("  --version      output version information, then exit\n"));
@@ -131,6 +134,7 @@ main(int argc, char *const argv[])
 				header_mode = false;
 	struct _include_path *ip;
 	const char *progname;
+	char	   *endptr;
 	char		my_exec_path[MAXPGPATH];
 	char		include_path[MAXPGPATH];
 
@@ -229,6 +233,23 @@ main(int argc, char *const argv[])
 					auto_prepare = true;
 				else if (strcmp(optarg, "questionmarks") == 0)
 					questionmarks = true;
+				else if (strncmp(optarg, "readahead=", strlen("readahead=")) == 0)
+				{
+					fetch_readahead = strtoul(optarg + strlen("readahead="), &endptr, 10);
+					if (*endptr)
+					{
+						fprintf(stderr, _("\"%s\" is not an integer number\n"), optarg + strlen("readahead="));
+						fprintf(stderr, _("Try \"%s --help\" for more information.\n"), argv[0]);
+						return ILLEGAL_OPTION;
+					}
+					if (fetch_readahead < 1)
+					{
+						fprintf(stderr, _("argument to readahead= cannot be less than 1\n"));
+						return ILLEGAL_OPTION;
+					}
+				}
+				else if (strcmp(optarg, "detect-cursor-resultset-size") == 0)
+					cursor_rssz = true;
 				else
 				{
 					fprintf(stderr, _("Try \"%s --help\" for more information.\n"), argv[0]);

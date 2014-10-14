@@ -99,6 +99,25 @@ enum ECPG_statement_type
 	ECPGst_prepnormal
 };
 
+enum ECPG_cursor_direction
+{
+	ECPGc_absolute,
+	ECPGc_relative,
+	ECPGc_forward,
+	ECPGc_backward,
+	ECPGc_absolute_in_var,
+	ECPGc_relative_in_var,
+	ECPGc_forward_in_var,
+	ECPGc_backward_in_var
+};
+
+enum ECPG_cursor_scroll
+{
+	ECPGcs_unspecified,
+	ECPGcs_no_scroll,
+	ECPGcs_scroll
+};
+
 #ifdef __cplusplus
 }
 #endif

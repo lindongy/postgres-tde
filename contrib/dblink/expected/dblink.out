@@ -442,9 +442,9 @@ SELECT dblink_close('myconn','rmt_foo_cursor');
 
 -- this should succeed because we have an open transaction
 SELECT dblink_exec('myconn','DECLARE xact_test CURSOR FOR SELECT * FROM foo');
-  dblink_exec   
-----------------
- DECLARE CURSOR
+   dblink_exec    
+------------------
+ DECLARE CURSOR 1
 (1 row)
 
 -- commit remote transaction
@@ -477,9 +477,9 @@ SELECT dblink_close('myconn','rmt_foo_cursor2');
 
 -- this should succeed because we have an open transaction
 SELECT dblink_exec('myconn','DECLARE xact_test CURSOR FOR SELECT * FROM foo');
-  dblink_exec   
-----------------
- DECLARE CURSOR
+   dblink_exec    
+------------------
+ DECLARE CURSOR 1
 (1 row)
 
 -- this should commit the transaction

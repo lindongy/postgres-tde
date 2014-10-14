@@ -85,6 +85,7 @@
 %type <str> opt_output
 %type <str> opt_pointer
 %type <str> opt_port
+%type <str> opt_readahead
 %type <str> opt_reference
 %type <str> opt_scale
 %type <str> opt_server

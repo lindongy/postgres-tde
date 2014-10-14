@@ -24,12 +24,20 @@ extern bool autocommit,
 			force_indicator,
 			questionmarks,
 			regression_mode,
-			auto_prepare;
+			auto_prepare,
+			cursor_rssz;
+extern long	fetch_readahead;
 extern int	braces_open,
 			ret_value,
 			struct_level,
 			ecpg_internal_var;
 extern char *current_function;
+extern char *current_cursor;
+extern enum ECPGttype current_cursor_vartype;
+extern bool current_cursor_move;
+extern enum ECPG_cursor_direction current_cursor_direction;
+extern enum ECPG_cursor_scroll current_cursor_scrollable;
+extern char *current_cursor_amount;
 extern char *descriptor_index;
 extern char *descriptor_name;
 extern char *connection;
@@ -67,6 +75,10 @@ extern void output_statement(char *, int, enum ECPG_statement_type);
 extern void output_prepare_statement(char *, char *);
 extern void output_deallocate_prepare_statement(char *);
 extern void output_simple_statement(char *);
+extern void output_open_statement(char *, int, enum ECPG_statement_type);
+extern void output_fetch_statement(char *, int, enum ECPG_statement_type, bool);
+extern void output_cursor_dml_statement(char *, int, enum ECPG_statement_type);
+extern void output_close_statement(char *, int, enum ECPG_statement_type);
 extern char *hashline_number(void);
 extern int	base_yyparse(void);
 extern int	base_yylex(void);
@@ -106,6 +118,7 @@ extern void scanner_init(const char *);
 extern void parser_init(void);
 extern void scanner_finish(void);
 extern int	filtered_base_yylex(void);
+extern struct cursor *get_cursor(const char *);
 
 /* return codes */
 

@@ -125,10 +125,45 @@ static char *ecpg_statement_type_name[] = {
 	"ECPGst_prepnormal"
 };
 
-void
-output_statement(char *stmt, int whenever_mode, enum ECPG_statement_type st)
+static char *ecpg_cursor_direction_name[] = {
+	"ECPGc_absolute",
+	"ECPGc_relative",
+	"ECPGc_forward",
+	"ECPGc_backward",
+	"ECPGc_absolute_in_var",
+	"ECPGc_relative_in_var",
+	"ECPGc_forward_in_var",
+	"ECPGc_backward_in_var"
+};
+
+static char *ecpg_cursor_scroll_name[] = {
+	"ECPGcs_unspecified",
+	"ECPGcs_no_scroll",
+	"ECPGcs_scroll"
+};
+
+static void output_cursor_name(struct cursor *ptr)
 {
-	fprintf(yyout, "{ ECPGdo(__LINE__, %d, %d, %s, %d, ", compat, force_indicator, connection ? connection : "NULL", questionmarks);
+	if (current_cursor[0] == ':')
+	{
+		char *curname = current_cursor + 1;
+
+		fputs(curname, yyout);
+		if (ptr->vartype == ECPGt_varchar)
+			fputs(".arr", yyout);
+		fputs(", ", yyout);
+	}
+	else
+	{
+		fputs("\"", yyout);
+		output_escaped_str(current_cursor, false);
+		fputs("\", ", yyout);
+	}
+}
+
+static void
+output_statement_epilogue(char *stmt, int whenever_mode, enum ECPG_statement_type st)
+{
 	if (st == ECPGst_execute || st == ECPGst_exec_immediate)
 	{
 		fprintf(yyout, "%s, %s, ", ecpg_statement_type_name[st], stmt);
@@ -153,8 +188,20 @@ output_statement(char *stmt, int whenever_mode, enum ECPG_statement_type st)
 
 	whenever_action(whenever_mode | 2);
 	free(stmt);
+	if (current_cursor)
+	{
+		free(current_cursor);
+		current_cursor = NULL;
+	}
 	if (connection != NULL)
 		free(connection);
+}
+
+void
+output_statement(char *stmt, int whenever_mode, enum ECPG_statement_type st)
+{
+	fprintf(yyout, "{ ECPGdo(__LINE__, %d, %d, %s, %d, ", compat, force_indicator, connection ? connection : "NULL", questionmarks);
+	output_statement_epilogue(stmt, whenever_mode, st);
 }
 
 void
@@ -189,6 +236,63 @@ output_deallocate_prepare_statement(char *name)
 	free(name);
 	if (connection != NULL)
 		free(connection);
+}
+
+void
+output_open_statement(char *stmt, int whenever_mode, enum ECPG_statement_type st)
+{
+	struct cursor *ptr = get_cursor(current_cursor);
+
+	fprintf(yyout, "{ ECPGopen(__LINE__, %d, %d, %s, %d, %d, %s, %ld, %d, %d, ",
+						compat, force_indicator, connection ? connection : "NULL", questionmarks,
+						ptr->with_hold, ecpg_cursor_scroll_name[ptr->scrollable],
+						ptr->fetch_readahead, ptr->allow_ra_override, cursor_rssz);
+	output_cursor_name(ptr);
+	output_statement_epilogue(stmt, whenever_mode, st);
+}
+
+void
+output_fetch_statement(char *stmt, int whenever_mode, enum ECPG_statement_type st, bool move)
+{
+	struct cursor *ptr = get_cursor(current_cursor);
+	char	   *amount;
+
+	if (current_cursor_amount)
+	{
+		amount = mm_alloc(strlen(current_cursor_amount) + 3);
+		sprintf(amount, "\"%s\"", current_cursor_amount);
+		free(current_cursor_amount);
+	}
+	else
+		amount = mm_strdup("NULL");
+
+	fprintf(yyout, "{ ECPGfetch(__LINE__, %d, %d, %s, %d, %s, %s, %d, ",
+						compat, force_indicator, connection ? connection : "NULL", questionmarks,
+						ecpg_cursor_direction_name[current_cursor_direction], amount, move);
+	output_cursor_name(ptr);
+	output_statement_epilogue(stmt, whenever_mode, st);
+	free(amount);
+	current_cursor_amount = NULL;
+}
+
+void
+output_cursor_dml_statement(char *stmt, int whenever_mode, enum ECPG_statement_type st)
+{
+	struct cursor *ptr = get_cursor(current_cursor);
+
+	fprintf(yyout, "{ ECPGcursor_dml(__LINE__, %d, %d, %s, %d, ", compat, force_indicator, connection ? connection : "NULL", questionmarks);
+	output_cursor_name(ptr);
+	output_statement_epilogue(stmt, whenever_mode, st);
+}
+
+void
+output_close_statement(char *stmt, int whenever_mode, enum ECPG_statement_type st)
+{
+	struct cursor *ptr = get_cursor(current_cursor);
+
+	fprintf(yyout, "{ ECPGclose(__LINE__, %d, %d, %s, %d, ", compat, force_indicator, connection ? connection : "NULL", questionmarks);
+	output_cursor_name(ptr);
+	output_statement_epilogue(stmt, whenever_mode, st);
 }
 
 static void

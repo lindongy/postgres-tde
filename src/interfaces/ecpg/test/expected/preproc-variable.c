@@ -182,7 +182,7 @@ if (sqlca.sqlcode < 0) exit (1);}
 
 
 	strcpy(msg, "commit");
-	{ ECPGtrans(__LINE__, NULL, "commit");
+	{ ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);
 #line 60 "variable.pgc"
 
 if (sqlca.sqlcode < 0) exit (1);}
@@ -190,7 +190,7 @@ if (sqlca.sqlcode < 0) exit (1);}
 
 
 	strcpy(msg, "open");
-	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "declare cur cursor for select name , born , age , married , children from family", ECPGt_EOIT, ECPGt_EORT);
+	{ ECPGopen(__LINE__, 0, 1, NULL, 0, 0, ECPGcs_unspecified, 1, 1, 0, "cur", ECPGst_normal, "declare cur cursor for select name , born , age , married , children from family", ECPGt_EOIT, ECPGt_EORT);
 #line 63 "variable.pgc"
 
 if (sqlca.sqlcode < 0) exit (1);}
@@ -206,7 +206,7 @@ if (sqlca.sqlcode < 0) exit (1);}
 	memset(i, 0, sizeof(ind_personal));
 	while (1) {
 		strcpy(msg, "fetch");
-		{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "fetch cur", ECPGt_EOIT, 
+		{ ECPGfetch(__LINE__, 0, 1, NULL, 0, ECPGc_forward, "1", 0, "cur", ECPGst_normal, "fetch cur", ECPGt_EOIT, 
 	ECPGt_varchar,&(p->name),(long)BUFFERSIZ,(long)1,sizeof(struct varchar_1), 
 	ECPGt_int,&(i->ind_name),(long)1,(long)1,sizeof(int), 
 	ECPGt_long,&(p->birth.born),(long)1,(long)1,sizeof(long), 
@@ -241,7 +241,7 @@ if (sqlca.sqlcode < 0) exit (1);}
 	}
 
 	strcpy(msg, "close");
-	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "close cur", ECPGt_EOIT, ECPGt_EORT);
+	{ ECPGclose(__LINE__, 0, 1, NULL, 0, "cur", ECPGst_normal, "close cur", ECPGt_EOIT, ECPGt_EORT);
 #line 89 "variable.pgc"
 
 if (sqlca.sqlcode < 0) exit (1);}
@@ -257,7 +257,7 @@ if (sqlca.sqlcode < 0) exit (1);}
 
 
 	strcpy(msg, "commit");
-	{ ECPGtrans(__LINE__, NULL, "commit");
+	{ ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);
 #line 95 "variable.pgc"
 
 if (sqlca.sqlcode < 0) exit (1);}

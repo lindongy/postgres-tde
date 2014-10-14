@@ -35,7 +35,7 @@ int main() {
 #line 11 "func.pgc"
 
 
-  { ECPGsetcommit(__LINE__, "on", NULL);}
+  { ECPGsetcommit(__LINE__, 1, NULL);}
 #line 13 "func.pgc"
 
   /* exec sql whenever sql_warning  sqlprint ; */

@@ -456,6 +456,36 @@ EXEC SQL COMMIT;
    details.
   </para>
 
+  <para>
+   ECPG does cursor accounting in its runtime library and this makes possible
+   to do readahead to improve performance of programs that use single-row FETCH
+   statements. The default is 1 row window size, i.e. no readahead.
+   Option <option>-r readahead=number</option> on the ECPG command line modifies
+   the default readahead window size for all cursors. Explicit
+   <literal>READAHEAD number</literal> sets the readahead window size for
+   the specified cursor. If this clause is not explicitly specified for a cursor
+   (option <option>-r readahead=number</option> is considered implicit), then
+   setting the <literal>ECPGFETCHSZ</literal> environment variable overrides
+   the readahead window size for all such cursors.
+  </para>
+
+  <para>
+   To execute an UPDATE or DELETE statement bearing the <literal>WHERE CURRENT OF</literal>
+   clause, ECPG may first execute an implicit MOVE to synchronize the server
+   cursor position with the local cursor position.  This can reduce or
+   eliminate the performance benefit of readahead for affected cursors.
+   For this reason, <literal>READAHEAD 1</literal> is recommended.
+  </para>
+
+  <para>
+   There is also a possibility to return the number of tuples returned by the cursor
+   in sqlca.sqlerrd[2] at <command>OPEN</command>. To turn this on, use the
+   <option>-r detect-cursor-resultset-size</option> ECPG command line parameter.
+   This may cause side effects if the cursor query contains calls to volatile
+   functions. See <xref linkend="xfunc-volatility">. Using this feature also
+   slows down opening the cursor.
+  </para>
+
    <note>
     <para>
      The ECPG <command>DECLARE</command> command does not actually
@@ -463,6 +493,18 @@ EXEC SQL COMMIT;
      cursor is opened in the backend (using the
      backend's <command>DECLARE</command> command) at the point when
      the <command>OPEN</command> command is executed.
+    </para>
+   </note>
+   <note>
+    <para>
+     If an ECPG application written for earlier versions of PostgreSQL uses its
+     own readahead (e.g. <command>FETCH N FROM cursorname</command>) then it's
+     recommended to recompile using option <option>-r readahead=number</option>
+     where the specified number equals to custom readahead size or an integer
+     multiple of it. Alternatively, the <command>DECLARE</command> statement can
+     be modified with the <literal>READAHEAD number</literal> clause. Without this,
+     the application performance will be worse because the readahead code in the
+     ECPG runtime uses single row <command>FETCH</command> statements.
     </para>
    </note>
   </sect2>
@@ -4857,6 +4899,12 @@ struct
     processed row, if applicable, and
     <literal>sqlca.sqlerrd[2]</literal> contains the number of
     processed or returned rows, if applicable to the command.
+    The <command>OPEN</command> statement may return the
+    result set size in <literal>sqlca.sqlerrd[2]</literal> if
+    option <literal>-r detect-cursor-resultset-size</literal> 
+    is specified on the ECPG command line. This may cause side effects
+    because of traversing the result set. See <xref linkend="xfunc-volatility">.
+    It will also slow down opening the cursor.
    </para>
 
    <para>
@@ -5272,6 +5320,27 @@ while (1)
     </varlistentry>
 
     <varlistentry>
+     <term>-231 (<symbol>ECPG_INVALID_CURSOR</symbol>)</term>
+     <listitem>
+      <para>
+       This error code may occur in the following conditions.
+      </para>
+      <para>
+       The readahead window size you are trying to use is invalid.
+       (SQLSTATE 24000)
+      </para>
+      <para>
+       The cursor name you are trying to use is invalid.
+       (SQLSTATE 34000)
+      </para>
+      <para>
+       The cursor was declared to be non-scrollable and you are
+       trying to move or fetch backward. (SQLSTATE 55000)
+      </para>
+     </listitem>
+    </varlistentry>
+
+    <varlistentry>
      <term>-239 (<symbol>ECPG_INFORMIX_DUPLICATE_KEY</symbol>)</term>
      <listitem>
       <para>
@@ -5358,9 +5427,22 @@ while (1)
      <term>-401 (<symbol>ECPG_TRANS</symbol>)</term>
      <listitem>
       <para>
+       This error code may occur in the following conditions.
+      </para>
+      <para>
        The <productname>PostgreSQL</productname> server signaled that
        we cannot start, commit, or rollback the transaction.
        (SQLSTATE 08007)
+      </para>
+      <para>
+       While processing a previous command, a client side error happened:
+       invalid savepoint name or invalid cursor name. The actual command
+       was not sent to the server because of this error. To mimic the
+       server behaviour, all subsequent commands return the error for
+       an aborted transaction. (SQLSTATE 25P02)
+      </para>
+      <para>
+       The savepoint name you are trying to use is invalid. (SQLSTATE 3B001)
       </para>
      </listitem>
     </varlistentry>
@@ -6575,8 +6657,8 @@ EXEC SQL DEALLOCATE DESCRIPTOR mydesc;
 
    <refsynopsisdiv>
 <synopsis>
-DECLARE <replaceable class="PARAMETER">cursor_name</replaceable> [ BINARY ] [ INSENSITIVE ] [ [ NO ] SCROLL ] CURSOR [ { WITH | WITHOUT } HOLD ] FOR <replaceable class="PARAMETER">prepared_name</replaceable>
-DECLARE <replaceable class="PARAMETER">cursor_name</replaceable> [ BINARY ] [ INSENSITIVE ] [ [ NO ] SCROLL ] CURSOR [ { WITH | WITHOUT } HOLD ] FOR <replaceable class="PARAMETER">query</replaceable>
+DECLARE <replaceable class="PARAMETER">cursor_name</replaceable> [ BINARY ] [ INSENSITIVE ] [ [ NO ] SCROLL ] [ READAHEAD number ] CURSOR [ { WITH | WITHOUT } HOLD ] FOR <replaceable class="PARAMETER">prepared_name</replaceable>
+DECLARE <replaceable class="PARAMETER">cursor_name</replaceable> [ BINARY ] [ INSENSITIVE ] [ [ NO ] SCROLL ] [ READAHEAD number ] CURSOR [ { WITH | WITHOUT } HOLD ] FOR <replaceable class="PARAMETER">query</replaceable>
 </synopsis>
    </refsynopsisdiv>
 
@@ -6631,11 +6713,30 @@ DECLARE <replaceable class="PARAMETER">cursor_name</replaceable> [ BINARY ] [ IN
       </listitem>
      </varlistentry>
     </variablelist>
+   </refsect1>
+
+   <refsect1>
+    <title>ECPG-specific cursor options</title>
 
     <para>
-     For the meaning of the cursor options,
-     see <xref linkend="sql-declare">.
+     For the meaning of regular cursor options, see <xref linkend="sql-declare">.
     </para>
+
+    <variablelist>
+     <varlistentry>
+      <term><literal>READAHEAD number</literal></term>
+       <listitem>
+        <para>
+         The ECPG preprocessor and runtime library use client-side cursor
+         tracking and accounting. <literal>READAHEAD number</literal> sets
+         data readahead used during <command>FETCH</command>. This improves
+         performance for programs that use single-row <command>FETCH</command>
+         statements.
+        </para>
+       </listitem>
+     </varlistentry>
+    </variablelist>
+
    </refsect1>
 
    <refsect1>

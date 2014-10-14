@@ -38,7 +38,7 @@ int main() {
 #line 14 "parser.pgc"
 
 
-  { ECPGsetcommit(__LINE__, "on", NULL);}
+  { ECPGsetcommit(__LINE__, 1, NULL);}
 #line 16 "parser.pgc"
 
   /* exec sql whenever sql_warning  sqlprint ; */

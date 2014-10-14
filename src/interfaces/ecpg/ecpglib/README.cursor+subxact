@@ -1,0 +1,185 @@
+Theory of operation for client side cursor accounting and readahead
+===================================================================
+
+Contents of tuples returned by a cursor always reflect the data present at
+the time of declaring the cursor. Because of this, executing DML commands
+involving the table(s) appearing in the cursor's SELECT query won't modify
+the result set returned by the cursor. Because of this, cursor readahead is
+possible and the cursor readahead window always contains the same data as
+the underlying cursor.
+
+Tracking the maximum known backend position value allows the number of MOVE
+commands sent to the server to be reduced and re-fetching the same readahead
+window avoided in case the application suddenly changes cursor positioning
+from positive to negative and vice-versa.
+
+The idea behind cursor readahead is to move one tuple less than asked by
+the application and then ecpglib performs a FETCH FORWARD/BACKWARD N to
+populate the local tuple cache.
+
+By using a readahead window larger than 1 tuple, the cursor positions known
+by the backend and the application are different most of the time. As a
+consequence, UPDATE/DELETE ... WHERE CURRENT OF requires a MOVE behind the
+application's back. This may reduce or eliminate the caching effects in the
+cursor and it will not work for non-scrollable cursors. Either the cursor
+must be scrollable or READAHEAD 1 must be explicitly specified for such
+cursors.
+
+The slight problem with this approach is that ABSOLUTE and RELATIVE movements
+needs two operations. If the next command issued by the application spills
+out of the cache and it happens frequently, it may actually decrease
+performance. To prevent this, the ECPG runtime switches to executing these
+kinds of commands as is after 3 cache misses. FETCH FORWARD/BACKWARD allows
+switching back to caching.
+
+The ECPG runtime library has "struct subxact_descriptor" and
+"struct cursor_descriptor" for tracking subtransactions and cursors.
+
+Explanation of structure members of "struct cursor_descriptor" are below.
+
+subxact_level: The cursor was declared in this transaction level.
+--------------
+Valid values are:
+0:  Outside of transactions. This is a WITH HOLD cursor, committed
+    in a previous transaction.
+1:  The cursor was declared in the currently running toplevel
+    transaction.
+>2: The cursor was declared in the currently running transaction
+    in the specified SAVEPOINT.
+
+As soon as a (sub-)transaction is committed or rolled back, cursors are
+either implicitly propagated to the next subtransaction level upwards,
+i.e. subxact_level is decreased by 1.
+
+with_hold: WITH HOLD cursor (true or false)
+----------
+
+scrollable: The scrollability of the cursor.
+-----------
+Valid values are: ECPGcs_unspecified, ECPGcs_no_scroll or ECPGcs_scroll
+
+ECPGcs_unspecified is used initially when the application didn't explicitly
+specify neither SCROLL nor NO SCROLL. The ECPG runtime tries to detect
+whether the cursor is scrollable upon by checking the result of backward
+movements. However, this is not always bullet proof and because of the
+cursor readahead, the application behaviour is slightly off because the
+ECPG runtime library will allow MOVE and FETCH commands back and forth
+in the current readahead window. The first error would be reported to
+the application as soon as it wants to move outside of the currently
+known tuple range or fetch outside the current readahead window backward.
+
+This difference in behaviour doesn't occur if the PostgreSQL server version
+reports whether the cursor is scrollable flag in the command tag, i.e.:
+
+DECLARE CURSOR 1
+
+res: The current readahead window.
+----
+It is used to return data across several FETCH commands, speeding up
+the application by reducing network turnaround.
+
+readahead: The size of the readahead window.
+----------
+The ECPG runtime library attempts to fetch this amount of records at once.
+
+cache_start_pos: The start position of the readahead window.
+----------------
+The value is 1-based. Position 0 means that the cursor is before the first
+tuple in the result set.
+
+I can also be negative (but also 1-based) if the application started with
+FETCH/MOVE ABSOLUTE <some negative number>. In this case the numbering
+is used to count from the end of the result set.
+
+backward: The ECPG runtime library fetched this readahead window backward.
+---------
+
+atstart: The current position is at the start of the result set.
+--------
+
+atend: The current position is at the end of the result set.
+------
+
+pos: The current cursor position, as known by the application.
+----
+The comments above for "cache_start_pos" are also applicable here.
+"atstart" and "atend" apply to this position.
+
+backend_pos: The current cursor position, as known by the server.
+------------
+
+mkbpos: The maximum known backend position.
+-------
+If the application tries to execute a MOVE and it's over the previously
+known maximum value, different things happen depending on the type of the
+motion.
+
+MOVE [FORWARD|BACKWARD] ALL
+The number of records from the previous position to the end of the result
+set is reported.
+
+MOVE ABSOLUTE N, MOVE [FORWARD|BACKWARD] RELATIVE N
+If there is a tuple on this position, the server indicates the existence of
+a tuple on that position.
+
+This value is trivially updated for FETCH commands.
+
+mkbp_is_last: Maximum Known Backend Position is the last valid position.
+-------------
+The "mkbpos" is the last cursor position where a tuple exists 
+
+Structure members of "struct subxact_descriptor" don't need too much
+explanation. New savepoints get prepended to the list of subtransations
+which are per-connection, so the head of the list is found in
+struct connection. However, the necessity of this structure is explained
+below.
+
+Tracking (sub-)transactions
+===========================
+
+One side effect/requirement of tracking cursors in the ECPG runtime library
+is that (sub-)transactions are also needed to be tracked. These two are
+in some kind of symbiosis: if a command fails, the (sub-)transaction returns
+"current transaction is aborted" error for every subsequent commands.
+Such a failed command can be a cursor command using an invalid cursor name.
+
+By tracking cursors in the ECPG runtime library, detecting an invalid cursor
+name can be done early which reduces the network turnaround further.
+
+But doing this, the server and the application now disagree on the failed
+transaction. Because of this, a "client side error" flag was introduced into
+"struct connection".
+
+Subsequent commands (in execute.c::ecpg_prologue() and misc.c::ECPGtrans())
+check this flag and return the "current transaction is aborted" error to the
+application without executing them in the server. As mentioned above, the
+server and the application at this point disagree on the failed transaction
+and he issued command may be executed without an error, causing unwanted
+effects.
+
+Checking the "client side error" flag further reduces network turnaround for
+transactions failed on the client side and buggy applications that don't check
+for failed commands and roll back the (sub-)transaction.
+
+Executing COMMIT or PREPARE TRANSACTION for a failed transaction silently
+overrides these commands as ROLLBACK in the server. By checking the "client
+side error" flag, it can be done explicitly.
+
+In a failed transaction, only the ROLLBACK and ROLLBACK TO SAVEPOINT commands
+are allowed to be executed without errors in the server. These also pass
+through in client side tracking code, allowing the "client side error" flag
+to be cleared.
+
+All other transaction commands are treated as regular commands in a failed
+transactions in that the "current transaction is aborted" error is returned.
+
+Cursors are mostly transactional, i.e. rolling back a (sub-)transaction makes
+cursors declared in that subtransaction forgotten in the server.
+
+Committing a transaction or releasing a subtransaction make cursors declared
+in this (sub-)transaction or some levels below that propagates the cursor
+upwards with only WITH HOLD cursors surviving a committed transaction.
+
+The ECPG runtime library must also follow the server behaviour in tracking
+cursors across (sub-)transactions. This is done in misc.c in the ECPGtrans()
+function and in cursor.c in the ecpg_commit_cursors() function.

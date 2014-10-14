@@ -87,6 +87,8 @@ my %replace_line = (
 	'fetch_argsFORWARDopt_from_incursor_name'      => 'ignore',
 	'fetch_argsBACKWARDopt_from_incursor_name'     => 'ignore',
 	"opt_array_boundsopt_array_bounds'['Iconst']'" => 'ignore',
+	'DeclareCursorStmtDECLAREcursor_namecursor_optionsCURSORopt_holdFORSelectStmt' =>
+			'DECLARE cursor_name cursor_options opt_readahead CURSOR opt_hold FOR SelectStmt',
 	'VariableShowStmtSHOWvar_name' => 'SHOW var_name ecpg_into',
 	'VariableShowStmtSHOWTIMEZONE' => 'SHOW TIME ZONE ecpg_into',
 	'VariableShowStmtSHOWTRANSACTIONISOLATIONLEVEL' =>

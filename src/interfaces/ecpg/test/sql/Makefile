@@ -7,6 +7,10 @@ TESTS = array array.c \
 	binary binary.c \
 	code100 code100.c \
         copystdout copystdout.c \
+        cursor-ra-fetch cursor-ra-fetch.c \
+        cursor-ra-move cursor-ra-move.c \
+        cursor-ra-swdir cursor-ra-swdir.c \
+        cursorsubxact cursorsubxact.c \
 	define define.c \
         desc desc.c \
         sqlda sqlda.c \

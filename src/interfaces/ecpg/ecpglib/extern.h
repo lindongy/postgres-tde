@@ -29,6 +29,11 @@ enum ARRAY_TYPE
 
 #define ECPG_IS_ARRAY(X) ((X) == ECPG_ARRAY_ARRAY || (X) == ECPG_ARRAY_VECTOR)
 
+#define LOOP_FORWARD	(1)
+#define LOOP_BACKWARD	(-1)
+#define MAX_CACHE_MISS	(3)
+#define FETCHALL_MULTIPLIER	(1000)
+
 /* A generic varchar type. */
 struct ECPGgeneric_varchar
 {
@@ -60,6 +65,11 @@ struct statement
 	bool		questionmarks;
 	struct variable *inlist;
 	struct variable *outlist;
+	char	   *oldlocale;
+	int		nparams;
+	char	  **paramvalues;
+	char	   *cursor_amount;
+	PGresult   *results;
 };
 
 /* structure to store prepared statements for a connection */
@@ -71,14 +81,58 @@ struct prepared_statement
 	struct prepared_statement *next;
 };
 
+struct subxact_descriptor
+{
+	char	   *name;
+	struct subxact_descriptor *next;
+	int		level;
+};
+
+struct cursor_descriptor {
+	struct cursor_descriptor *next;
+
+	char	   *name;
+
+	/*
+	 * The cursor was created in this level of * (sub-)transaction.
+	 * 0: WITH HOLD, committed successfully in a previous transaction
+	 * 1: cursor declared in the toplevel transaction
+	 * >=2: cursor declared in a named SAVEPOINT at the specified level
+	 */
+	int		subxact_level;
+	bool		with_hold;
+	enum ECPG_cursor_scroll scrollable;
+
+	PGresult   *res;
+	long		readahead;
+	int64		cache_start_pos;
+	bool		backward;
+
+	bool		atstart;
+	bool		atend;
+	int64		pos;
+
+	bool		backend_atstart;
+	bool		backend_atend;
+	int64		backend_pos;
+
+	int64		mkbpos;
+	bool		mkbpos_is_last;
+
+	int		cache_miss;
+};
+
 /* structure to store connections */
 struct connection
 {
 	char	   *name;
 	PGconn	   *connection;
 	bool		autocommit;
+	bool		client_side_error;
 	struct ECPGtype_information_cache *cache_head;
 	struct prepared_statement *prep_stmts;
+	struct subxact_descriptor *subxact_desc;
+	struct cursor_descriptor *cursor_desc;
 	struct connection *next;
 };
 
@@ -135,7 +189,7 @@ extern struct var_list *ivlist;
 /* Returns a pointer to a string containing a simple type name. */
 void		ecpg_add_mem(void *ptr, int lineno);
 
-bool ecpg_get_data(const PGresult *, int, int, int, enum ECPGttype type,
+bool ecpg_get_data(const PGresult *, int, int, int, int, enum ECPGttype type,
 			  enum ECPGttype, char *, char *, long, long, long,
 			  enum ARRAY_TYPE, enum COMPAT_MODE, bool);
 
@@ -161,9 +215,22 @@ struct descriptor *ecpg_find_desc(int line, const char *name);
 struct prepared_statement *ecpg_find_prepared_statement(const char *,
 						  struct connection *, struct prepared_statement **);
 
-bool ecpg_store_result(const PGresult *results, int act_field,
-				  const struct statement * stmt, struct variable * var);
+bool ecpg_store_result(const PGresult *results,
+				  int start, int ntuples, int direction, int act_field,
+				  const struct statement * stmt,
+				  struct variable * var, int var_index);
 bool		ecpg_store_input(const int, const bool, const struct variable *, char **, bool);
+void		ecpg_free_params(struct statement *stmt, bool print);
+bool		ecpg_do_prologue(int, const int, const int, const char *, const bool,
+				  enum ECPG_statement_type, const char *, va_list,
+				  struct statement **);
+bool		ecpg_build_params(struct statement *, bool);
+bool		ecpg_autostart_transaction(struct statement * stmt);
+bool		ecpg_execute(struct statement * stmt);
+bool		ecpg_process_output(struct statement *, int, int, int, int, bool, bool);
+void		ecpg_do_epilogue(struct statement *);
+bool		ecpg_do(const int, const int, const int, const char *, const bool,
+				  const int, const char *, va_list);
 
 bool		ecpg_check_PQresult(PGresult *, int, PGconn *, enum COMPAT_MODE);
 void		ecpg_raise(int line, int code, const char *sqlstate, const char *str);
@@ -179,6 +246,8 @@ void		ecpg_set_compat_sqlda(int, struct sqlda_compat **, const PGresult *, int, 
 struct sqlda_struct *ecpg_build_native_sqlda(int, PGresult *, int, enum COMPAT_MODE);
 void		ecpg_set_native_sqlda(int, struct sqlda_struct **, const PGresult *, int, enum COMPAT_MODE);
 
+void		ecpg_commit_cursors(int lineno, struct connection * conn, bool rollback, int level);
+
 /* SQLSTATE values generated or processed by ecpglib (intentionally
  * not exported -- users should refer to the codes directly) */
 
@@ -192,14 +261,18 @@ void		ecpg_set_native_sqlda(int, struct sqlda_struct **, const PGresult *, int, 
 #define ECPG_SQLSTATE_TRANSACTION_RESOLUTION_UNKNOWN	"08007"
 #define ECPG_SQLSTATE_CARDINALITY_VIOLATION "21000"
 #define ECPG_SQLSTATE_NULL_VALUE_NO_INDICATOR_PARAMETER "22002"
+#define ECPG_SQLSTATE_INVALID_CURSOR_STATE		"24000"
 #define ECPG_SQLSTATE_ACTIVE_SQL_TRANSACTION		"25001"
 #define ECPG_SQLSTATE_NO_ACTIVE_SQL_TRANSACTION		"25P01"
+#define ECPG_SQLSTATE_IN_FAILED_SQL_TRANSACTION		"25P02"
 #define ECPG_SQLSTATE_INVALID_SQL_STATEMENT_NAME	"26000"
 #define ECPG_SQLSTATE_INVALID_SQL_DESCRIPTOR_NAME	"33000"
-#define ECPG_SQLSTATE_INVALID_CURSOR_NAME	"34000"
+#define ECPG_SQLSTATE_INVALID_CURSOR_NAME		"34000"
+#define ECPG_SQLSTATE_S_E_INVALID_SPECIFICATION		"3B001"
 #define ECPG_SQLSTATE_SYNTAX_ERROR			"42601"
 #define ECPG_SQLSTATE_DATATYPE_MISMATCH		"42804"
 #define ECPG_SQLSTATE_DUPLICATE_CURSOR		"42P03"
+#define ECPG_SQLSTATE_OBJECT_NOT_IN_PREREQUISITE_STATE	"55000"
 
 /* implementation-defined internal errors of ecpg */
 #define ECPG_SQLSTATE_ECPG_INTERNAL_ERROR	"YE000"

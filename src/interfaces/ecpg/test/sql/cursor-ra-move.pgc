@@ -1,0 +1,165 @@
+#include <stdlib.h>
+#include <string.h>
+
+EXEC SQL INCLUDE ../regression;
+
+exec sql whenever sqlerror sqlprint;
+
+int main(void)
+{
+	int	quit_loop;
+
+	ECPGdebug(1, stderr);
+
+	exec sql connect to REGRESSDB1;
+
+	exec sql create table t1 (id serial primary key, t text);
+	exec sql insert into t1 (t) values
+			('a'), ('b'), ('c'), ('d'), ('e'), ('f'), ('g'), ('h'),
+			('i'), ('j'), ('k'), ('l'), ('m'), ('n'), ('o'), ('p'),
+			('q'), ('r'), ('s'), ('t'), ('u'), ('v'), ('w'), ('x'),
+			('y'), ('z');
+	exec sql commit;
+
+	exec sql declare scroll_cur scroll readahead 8 cursor for select id, t from t1 order by id;
+	exec sql declare noscroll_cur no scroll readahead 8 cursor for select id, t from t1 order by id;
+	/* Implicitly scrollable */
+	exec sql declare unspec_cur1 readahead 8 cursor for select id, t from t1 order by id;
+	/* Implicitly non-scrollable */
+	exec sql declare unspec_cur2 readahead 8 cursor for select t1.id, t1.t, t2.id, t2.t from t1 join t1 as t2 on (t1.id = 27 - t2.id) order by t1.id;
+
+	/* Test MOVE ABSOLUTE -1 for all 4 cursors */
+
+	printf("test scroll_cur for move absolute -1\n");
+
+	exec sql open scroll_cur;
+	if (sqlca.sqlcode < 0)
+		printf("open failed with SQLSTATE %5s\n", sqlca.sqlstate);
+
+	exec sql move absolute -1 in scroll_cur;
+	if (sqlca.sqlcode < 0)
+		printf("move absolute -1 in scroll_cur failed with SQLSTATE %5s\n", sqlca.sqlstate);
+	else
+		printf("move absolute -1 in scroll_cur succeeded\n");
+
+	exec sql rollback;
+
+	printf("test noscroll_cur for move absolute -1\n");
+
+	exec sql open noscroll_cur;
+	if (sqlca.sqlcode < 0)
+		printf("open failed with SQLSTATE %5s\n", sqlca.sqlstate);
+
+	exec sql move absolute -1 in noscroll_cur;
+	if (sqlca.sqlcode < 0)
+		printf("move absolute -1 in noscroll_cur failed with SQLSTATE %5s\n", sqlca.sqlstate);
+	else
+		printf("move absolute -1 in noscroll_cur succeeded\n");
+
+	exec sql rollback;
+
+	printf("test unspec_cur1 for move absolute -1\n");
+
+	exec sql open unspec_cur1;
+	if (sqlca.sqlcode < 0)
+		printf("open failed with SQLSTATE %5s\n", sqlca.sqlstate);
+
+	exec sql move absolute -1 in unspec_cur1;
+	if (sqlca.sqlcode < 0)
+		printf("move absolute -1 in unspec_cur1 failed with SQLSTATE %5s\n", sqlca.sqlstate);
+	else
+		printf("move absolute -1 in unspec_cur1 succeeded\n");
+
+	exec sql rollback;
+
+	printf("test unspec_cur2 for move absolute -1\n");
+
+	exec sql open unspec_cur2;
+	if (sqlca.sqlcode < 0)
+		printf("open failed with SQLSTATE %5s\n", sqlca.sqlstate);
+
+	exec sql move absolute -1 in unspec_cur2;
+	if (sqlca.sqlcode < 0)
+		printf("move absolute -1 in unspec_cur2 failed with SQLSTATE %5s\n", sqlca.sqlstate);
+	else
+		printf("move absolute -1 in unspec_cur2 succeeded\n");
+
+	exec sql rollback;
+
+	/* Test MOVE RELATIVE 8 */
+
+	printf("test scroll_cur for move relative 8\n");
+
+	exec sql open scroll_cur;
+	if (sqlca.sqlcode < 0)
+		printf("open failed with SQLSTATE %5s\n", sqlca.sqlstate);
+
+	quit_loop = 0;
+	while (!quit_loop)
+	{
+		exec sql move relative 8 in scroll_cur;
+		if (sqlca.sqlcode < 0)
+			printf("move relative 8 in scroll_cur failed with SQLSTATE %5s\n", sqlca.sqlstate);
+		else
+			printf("move relative 8 in scroll_cur succeeded, sqlerrd[2] %ld\n", sqlca.sqlerrd[2]);
+		quit_loop = (sqlca.sqlerrd[2] == 0);
+	}
+
+	printf("test scroll_cur for move relative -8\n");
+
+	quit_loop = 0;
+	while (!quit_loop)
+	{
+		exec sql move relative -8 in scroll_cur;
+		if (sqlca.sqlcode < 0)
+			printf("move relative -8 in scroll_cur failed with SQLSTATE %5s\n", sqlca.sqlstate);
+		else
+			printf("move relative -8 in scroll_cur succeeded, sqlerrd[2] %ld\n", sqlca.sqlerrd[2]);
+		quit_loop = (sqlca.sqlerrd[2] == 0);
+	}
+
+	exec sql rollback;
+
+	/* Test MOVE FORWARD 8 */
+
+	printf("test scroll_cur for move forward 8\n");
+
+	exec sql open scroll_cur;
+	if (sqlca.sqlcode < 0)
+		printf("open failed with SQLSTATE %5s\n", sqlca.sqlstate);
+
+	quit_loop = 0;
+	while (!quit_loop)
+	{
+		exec sql move forward 8 in scroll_cur;
+		if (sqlca.sqlcode < 0)
+			printf("move forward 8 in scroll_cur failed with SQLSTATE %5s\n", sqlca.sqlstate);
+		else
+			printf("move forward 8 in scroll_cur succeeded, sqlerrd[2] %ld\n", sqlca.sqlerrd[2]);
+		quit_loop = (sqlca.sqlerrd[2] == 0);
+	}
+
+	printf("test scroll_cur for move forward -8\n");
+
+	quit_loop = 0;
+	while (!quit_loop)
+	{
+		exec sql move forward -8 in scroll_cur;
+		if (sqlca.sqlcode < 0)
+			printf("move forward -8 in scroll_cur failed with SQLSTATE %5s\n", sqlca.sqlstate);
+		else
+			printf("move forward -8 in scroll_cur succeeded, sqlerrd[2] %ld\n", sqlca.sqlerrd[2]);
+		quit_loop = (sqlca.sqlerrd[2] == 0);
+	}
+
+	exec sql rollback;
+
+	/* Drop the test table */
+
+	exec sql drop table t1;
+	exec sql commit;
+
+	exec sql disconnect all;
+
+	return 0;
+}

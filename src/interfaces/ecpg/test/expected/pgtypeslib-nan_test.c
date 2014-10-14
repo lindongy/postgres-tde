@@ -82,7 +82,7 @@ if (sqlca.sqlcode < 0) sqlprint ( );}
 	/* declare cur cursor for select id , d , d from nantest1 */
 #line 33 "nan_test.pgc"
 
-	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "declare cur cursor for select id , d , d from nantest1", ECPGt_EOIT, ECPGt_EORT);
+	{ ECPGopen(__LINE__, 0, 1, NULL, 0, 0, ECPGcs_unspecified, 1, 1, 0, "cur", ECPGst_normal, "declare cur cursor for select id , d , d from nantest1", ECPGt_EOIT, ECPGt_EORT);
 #line 34 "nan_test.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint ( );}
@@ -90,7 +90,7 @@ if (sqlca.sqlcode < 0) sqlprint ( );}
 
 	while (1)
 	{
-		{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "fetch from cur", ECPGt_EOIT, 
+		{ ECPGfetch(__LINE__, 0, 1, NULL, 0, ECPGc_forward, "1", 0, "cur", ECPGst_normal, "fetch from cur", ECPGt_EOIT, 
 	ECPGt_int,&(id),(long)1,(long)1,sizeof(int), 
 	ECPGt_NO_INDICATOR, NULL , 0L, 0L, 0L, 
 	ECPGt_double,&(d),(long)1,(long)1,sizeof(double), 
@@ -130,14 +130,14 @@ if (sqlca.sqlcode < 0) sqlprint ( );}
 #line 46 "nan_test.pgc"
 
 	}
-	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "close cur", ECPGt_EOIT, ECPGt_EORT);
+	{ ECPGclose(__LINE__, 0, 1, NULL, 0, "cur", ECPGst_normal, "close cur", ECPGt_EOIT, ECPGt_EORT);
 #line 48 "nan_test.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint ( );}
 #line 48 "nan_test.pgc"
 
 
-	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "declare cur cursor for select id , d , d from nantest1", ECPGt_EOIT, ECPGt_EORT);
+	{ ECPGopen(__LINE__, 0, 1, NULL, 0, 0, ECPGcs_unspecified, 1, 1, 0, "cur", ECPGst_normal, "declare cur cursor for select id , d , d from nantest1", ECPGt_EOIT, ECPGt_EORT);
 #line 50 "nan_test.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint ( );}
@@ -145,7 +145,7 @@ if (sqlca.sqlcode < 0) sqlprint ( );}
 
 	while (1)
 	{
-		{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "fetch from cur", ECPGt_EOIT, 
+		{ ECPGfetch(__LINE__, 0, 1, NULL, 0, ECPGc_forward, "1", 0, "cur", ECPGst_normal, "fetch from cur", ECPGt_EOIT, 
 	ECPGt_int,&(id),(long)1,(long)1,sizeof(int), 
 	ECPGt_NO_INDICATOR, NULL , 0L, 0L, 0L, 
 	ECPGt_double,&(d),(long)1,(long)1,sizeof(double), 
@@ -164,7 +164,7 @@ if (sqlca.sqlcode < 0) sqlprint ( );}
 		if (isnan(d))
 			printf("%d  NaN '%s'\n", id, val);
 	}
-	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "close cur", ECPGt_EOIT, ECPGt_EORT);
+	{ ECPGclose(__LINE__, 0, 1, NULL, 0, "cur", ECPGst_normal, "close cur", ECPGt_EOIT, ECPGt_EORT);
 #line 61 "nan_test.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint ( );}
@@ -221,7 +221,7 @@ if (sqlca.sqlcode < 0) sqlprint ( );}
 	/* declare cur1 cursor for select id , d , d from nantest2 */
 #line 75 "nan_test.pgc"
 
-	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "declare cur1 cursor for select id , d , d from nantest2", ECPGt_EOIT, ECPGt_EORT);
+	{ ECPGopen(__LINE__, 0, 1, NULL, 0, 0, ECPGcs_unspecified, 1, 1, 0, "cur1", ECPGst_normal, "declare cur1 cursor for select id , d , d from nantest2", ECPGt_EOIT, ECPGt_EORT);
 #line 76 "nan_test.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint ( );}
@@ -229,7 +229,7 @@ if (sqlca.sqlcode < 0) sqlprint ( );}
 
 	while (1)
 	{
-		{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "fetch from cur1", ECPGt_EOIT, 
+		{ ECPGfetch(__LINE__, 0, 1, NULL, 0, ECPGc_forward, "1", 0, "cur1", ECPGst_normal, "fetch from cur1", ECPGt_EOIT, 
 	ECPGt_int,&(id),(long)1,(long)1,sizeof(int), 
 	ECPGt_NO_INDICATOR, NULL , 0L, 0L, 0L, 
 	ECPGt_numeric,&(num),(long)1,(long)0,sizeof(numeric), 
@@ -245,7 +245,7 @@ if (sqlca.sqlcode < 0) sqlprint ( );}
 			break;
 		printf("%d %s '%s'\n", id, (num->sign == NUMERIC_NAN ? "NaN" : "not NaN"), val);
 	}
-	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "close cur1", ECPGt_EOIT, ECPGt_EORT);
+	{ ECPGclose(__LINE__, 0, 1, NULL, 0, "cur1", ECPGst_normal, "close cur1", ECPGt_EOIT, ECPGt_EORT);
 #line 84 "nan_test.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint ( );}
@@ -254,7 +254,7 @@ if (sqlca.sqlcode < 0) sqlprint ( );}
 
 	PGTYPESnumeric_free(num);
 
-	{ ECPGtrans(__LINE__, NULL, "rollback");
+	{ ECPGtrans(__LINE__, NULL, "rollback", 0, 0, 1, NULL);
 #line 88 "nan_test.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint ( );}

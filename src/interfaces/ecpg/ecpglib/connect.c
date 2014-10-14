@@ -162,7 +162,7 @@ ecpg_finish(struct connection * act)
 }
 
 bool
-ECPGsetcommit(int lineno, const char *mode, const char *connection_name)
+ECPGsetcommit(int lineno, const bool turn_on, const char *connection_name)
 {
 	struct connection *con = ecpg_get_connection(connection_name);
 	PGresult   *results;
@@ -170,10 +170,15 @@ ECPGsetcommit(int lineno, const char *mode, const char *connection_name)
 	if (!ecpg_init(con, connection_name, lineno))
 		return (false);
 
-	ecpg_log("ECPGsetcommit on line %d: action \"%s\"; connection \"%s\"\n", lineno, mode, con->name);
+	ecpg_log("ECPGsetcommit on line %d: action \"%s\"; connection \"%s\"\n", lineno, turn_on ? "on" : "off", con->name);
 
-	if (con->autocommit && strncmp(mode, "off", strlen("off")) == 0)
+	if (con->autocommit && !turn_on)
 	{
+		if (con->client_side_error || PQtransactionStatus(con->connection) == PQTRANS_INERROR)
+		{
+			ecpg_raise(lineno, ECPG_TRANS, ECPG_SQLSTATE_IN_FAILED_SQL_TRANSACTION, NULL);
+			return false;
+		}
 		if (PQtransactionStatus(con->connection) == PQTRANS_IDLE)
 		{
 			results = PQexec(con->connection, "begin transaction");
@@ -183,7 +188,7 @@ ECPGsetcommit(int lineno, const char *mode, const char *connection_name)
 		}
 		con->autocommit = false;
 	}
-	else if (!con->autocommit && strncmp(mode, "on", strlen("on")) == 0)
+	else if (!con->autocommit && turn_on)
 	{
 		if (PQtransactionStatus(con->connection) != PQTRANS_IDLE)
 		{
@@ -475,6 +480,9 @@ ECPGconnect(int lineno, int c, const char *name, const char *user, const char *p
 
 	this->cache_head = NULL;
 	this->prep_stmts = NULL;
+	this->subxact_desc = NULL;
+	this->cursor_desc = NULL;
+	this->client_side_error = false;
 
 	if (all_connections == NULL)
 		this->next = NULL;

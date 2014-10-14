@@ -1,0 +1,676 @@
+[NO_PID]: ECPGdebug: set to 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGconnect: opening database regress1 on <DEFAULT> port <DEFAULT>  
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 16: query: create table t1 ( id serial primary key , t text ); with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 16: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 16: OK: CREATE TABLE
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 17: query: insert into t1 ( t ) values ( 'a' ) , ( 'b' ) , ( 'c' ) , ( 'd' ) , ( 'e' ) , ( 'f' ) , ( 'g' ) , ( 'h' ) , ( 'i' ) , ( 'j' ) , ( 'k' ) , ( 'l' ) , ( 'm' ) , ( 'n' ) , ( 'o' ) , ( 'p' ) , ( 'q' ) , ( 'r' ) , ( 's' ) , ( 't' ) , ( 'u' ) , ( 'v' ) , ( 'w' ) , ( 'x' ) , ( 'y' ) , ( 'z' ); with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 17: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 17: OK: INSERT 0 26
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGtrans on line 22: action "commit"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 35: query: declare scroll_cur scroll cursor for select id , t from t1 order by id; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 35: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 35: OK: DECLARE CURSOR 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 39: fetch/move amount: "- 1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 39: query: move absolute - 1 in scroll_cur
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 39: ECPGc_absolute -1 fetchall 0 current positions: pos 0 atstart 1 atend 0 backend_pos 0 bkatstart 1 bkatend 0 mkbpos_is_last 0 mkbpos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 39: ECPGc_absolute -1 (-1) current positions: pos 0 atstart 1 atend 0 backend_pos 0 bkatstart 1 bkatend 0 mkbpos_is_last 0 mkbpos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 39: ECPGc_absolute set wanted_pos -1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 39: ECPGc_absolute -1 (-1) prediction wanted_pos -1 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 39: ECPGc_absolute new position is beyond known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_do_move_absolute on line 39: amount -1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 39: query: move absolute -1 in scroll_cur; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 39: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_do_move_absolute on line 39: cmdstatus 'MOVE 1', have_tuple 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 39: ECPGc_absolute -1 (1) current positions: pos 0 atstart 1 atend 0 backend_pos 0 bkatstart 1 bkatend 0 mkbpos_is_last 0 mkbpos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 39: ECPGc_absolute set wanted_pos -1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 39: ECPGc_absolute -1 (1) wanted_pos -1 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 39: ECPGc_absolute mkbpos set 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 39: ECPGc_absolute trigger 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 39: next_pos -1 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 39: final positions: pos -1 atstart 0 atend 0 backend_pos -1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1 return_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 39: stmt->results is NULL, ignoring
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGtrans on line 45: action "rollback"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 49: query: declare noscroll_cur no scroll cursor for select id , t from t1 order by id; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 49: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 49: OK: DECLARE CURSOR 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 53: fetch/move amount: "- 1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: raising sqlcode -231 on line 53: cursor "noscroll_cur" can only scan forward on line 53
+[NO_PID]: sqlca: code: -231, state: 55000
+SQL error: cursor "noscroll_cur" can only scan forward on line 53
+[NO_PID]: ECPGtrans on line 59: action "rollback"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 63: query: declare unspec_cur1 cursor for select id , t from t1 order by id; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 63: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 63: OK: DECLARE CURSOR 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 67: fetch/move amount: "- 1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 67: query: move absolute - 1 in unspec_cur1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 67: ECPGc_absolute -1 fetchall 0 current positions: pos 0 atstart 1 atend 0 backend_pos 0 bkatstart 1 bkatend 0 mkbpos_is_last 0 mkbpos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 67: ECPGc_absolute -1 (-1) current positions: pos 0 atstart 1 atend 0 backend_pos 0 bkatstart 1 bkatend 0 mkbpos_is_last 0 mkbpos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 67: ECPGc_absolute set wanted_pos -1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 67: ECPGc_absolute -1 (-1) prediction wanted_pos -1 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 67: ECPGc_absolute new position is beyond known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_do_move_absolute on line 67: amount -1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 67: query: move absolute -1 in unspec_cur1; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 67: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_do_move_absolute on line 67: cmdstatus 'MOVE 1', have_tuple 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 67: ECPGc_absolute -1 (1) current positions: pos 0 atstart 1 atend 0 backend_pos 0 bkatstart 1 bkatend 0 mkbpos_is_last 0 mkbpos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 67: ECPGc_absolute set wanted_pos -1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 67: ECPGc_absolute -1 (1) wanted_pos -1 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 67: ECPGc_absolute mkbpos set 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 67: ECPGc_absolute trigger 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 67: next_pos -1 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 67: final positions: pos -1 atstart 0 atend 0 backend_pos -1 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 1 return_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 67: stmt->results is NULL, ignoring
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGtrans on line 73: action "rollback"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 77: query: declare unspec_cur2 cursor for select t1 . id , t1 . t , t2 . id , t2 . t from t1 join t1 as t2 on ( t1 . id = 27 - t2 . id ) order by t1 . id; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 77: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 77: OK: DECLARE CURSOR 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 81: fetch/move amount: "- 1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: raising sqlcode -231 on line 81: cursor "unspec_cur2" can only scan forward on line 81
+[NO_PID]: sqlca: code: -231, state: 55000
+SQL error: cursor "unspec_cur2" can only scan forward on line 81
+[NO_PID]: ECPGtrans on line 87: action "rollback"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 93: query: declare scroll_cur scroll cursor for select id , t from t1 order by id; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 93: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 93: OK: DECLARE CURSOR 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 100: fetch/move amount: "8"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 100: query: move relative 8 in scroll_cur
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 100: ECPGc_relative 8 fetchall 0 current positions: pos 0 atstart 1 atend 0 backend_pos 0 bkatstart 1 bkatend 0 mkbpos_is_last 0 mkbpos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative 8 (-1) current positions: pos 0 atstart 1 atend 0 backend_pos 0 bkatstart 1 bkatend 0 mkbpos_is_last 0 mkbpos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative set wanted_pos 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative 8 (-1) prediction wanted_pos 8 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative new position is beyond known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_do_move_relative on line 100: amount 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 100: query: move relative 8 in scroll_cur; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 100: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_do_move_relative on line 100: cmdstatus 'MOVE 1', have_tuple 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative 8 (1) current positions: pos 0 atstart 1 atend 0 backend_pos 0 bkatstart 1 bkatend 0 mkbpos_is_last 0 mkbpos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative set wanted_pos 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative 8 (1) wanted_pos 8 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative mkbpos set 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative trigger 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: next_pos 8 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 100: final positions: pos 8 atstart 0 atend 0 backend_pos 8 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 8 return_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 100: stmt->results is NULL, ignoring
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 100: fetch/move amount: "8"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 100: query: move relative 8 in scroll_cur
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 100: ECPGc_relative 8 fetchall 0 current positions: pos 8 atstart 0 atend 0 backend_pos 8 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative 8 (-1) current positions: pos 8 atstart 0 atend 0 backend_pos 8 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative set wanted_pos 16
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative 8 (-1) prediction wanted_pos 16 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative new position is beyond known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_do_move_relative on line 100: amount 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 100: query: move relative 8 in scroll_cur; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 100: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_do_move_relative on line 100: cmdstatus 'MOVE 1', have_tuple 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative 8 (1) current positions: pos 8 atstart 0 atend 0 backend_pos 8 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative set wanted_pos 16
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative 8 (1) wanted_pos 16 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative mkbpos set 16
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative trigger 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: next_pos 16 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 100: final positions: pos 16 atstart 0 atend 0 backend_pos 16 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 16 return_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 100: stmt->results is NULL, ignoring
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 100: fetch/move amount: "8"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 100: query: move relative 8 in scroll_cur
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 100: ECPGc_relative 8 fetchall 0 current positions: pos 16 atstart 0 atend 0 backend_pos 16 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 16
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative 8 (-1) current positions: pos 16 atstart 0 atend 0 backend_pos 16 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 16
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative set wanted_pos 24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative 8 (-1) prediction wanted_pos 24 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative new position is beyond known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_do_move_relative on line 100: amount 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 100: query: move relative 8 in scroll_cur; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 100: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_do_move_relative on line 100: cmdstatus 'MOVE 1', have_tuple 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative 8 (1) current positions: pos 16 atstart 0 atend 0 backend_pos 16 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 16
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative set wanted_pos 24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative 8 (1) wanted_pos 24 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative mkbpos set 24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative trigger 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: next_pos 24 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 100: final positions: pos 24 atstart 0 atend 0 backend_pos 24 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 24 return_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 100: stmt->results is NULL, ignoring
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 100: fetch/move amount: "8"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 100: query: move relative 8 in scroll_cur
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 100: ECPGc_relative 8 fetchall 0 current positions: pos 24 atstart 0 atend 0 backend_pos 24 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative 8 (-1) current positions: pos 24 atstart 0 atend 0 backend_pos 24 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative set wanted_pos 32
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative 8 (-1) prediction wanted_pos 32 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative new position is beyond known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_do_move_relative on line 100: amount 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 100: query: move relative 8 in scroll_cur; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 100: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_do_move_relative on line 100: cmdstatus 'MOVE 0', have_tuple 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative 8 (0) current positions: pos 24 atstart 0 atend 0 backend_pos 24 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative set wanted_pos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: ECPGc_relative 8 (0) wanted_pos 0 next_atstart 0 next_atend 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 100: next_pos 0 next_atstart 0 next_atend 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 100: final positions: pos 0 atstart 0 atend 1 backend_pos 0 bkatstart 0 bkatend 1 mkbpos_is_last 0 mkbpos 24 return_pos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 100: stmt->results is NULL, ignoring
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 113: fetch/move amount: "- 8"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 113: query: move relative - 8 in scroll_cur
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 113: ECPGc_relative -8 fetchall 0 current positions: pos 0 atstart 0 atend 1 backend_pos 0 bkatstart 0 bkatend 1 mkbpos_is_last 0 mkbpos 24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: ECPGc_relative -8 (-1) current positions: pos 0 atstart 0 atend 1 backend_pos 0 bkatstart 0 bkatend 1 mkbpos_is_last 0 mkbpos 24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: ECPGc_relative set wanted_pos -8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: ECPGc_relative -8 (-1) prediction wanted_pos -8 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: ECPGc_relative new position is in known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 113: final positions: pos -8 atstart 0 atend 0 backend_pos 0 bkatstart 0 bkatend 1 mkbpos_is_last 0 mkbpos 24 return_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 113: stmt->results is NULL, ignoring
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 113: fetch/move amount: "- 8"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 113: query: move relative - 8 in scroll_cur
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 113: ECPGc_relative -8 fetchall 0 current positions: pos -8 atstart 0 atend 0 backend_pos 0 bkatstart 0 bkatend 1 mkbpos_is_last 0 mkbpos 24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: ECPGc_relative -8 (-1) current positions: pos -8 atstart 0 atend 0 backend_pos 0 bkatstart 0 bkatend 1 mkbpos_is_last 0 mkbpos 24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: ECPGc_relative set wanted_pos -16
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: ECPGc_relative -8 (-1) prediction wanted_pos -16 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: ECPGc_relative new position is in known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 113: final positions: pos -16 atstart 0 atend 0 backend_pos 0 bkatstart 0 bkatend 1 mkbpos_is_last 0 mkbpos 24 return_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 113: stmt->results is NULL, ignoring
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 113: fetch/move amount: "- 8"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 113: query: move relative - 8 in scroll_cur
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 113: ECPGc_relative -8 fetchall 0 current positions: pos -16 atstart 0 atend 0 backend_pos 0 bkatstart 0 bkatend 1 mkbpos_is_last 0 mkbpos 24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: ECPGc_relative -8 (-1) current positions: pos -16 atstart 0 atend 0 backend_pos 0 bkatstart 0 bkatend 1 mkbpos_is_last 0 mkbpos 24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: ECPGc_relative set wanted_pos -24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: ECPGc_relative -8 (-1) prediction wanted_pos -24 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: ECPGc_relative new position is in known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 113: final positions: pos -24 atstart 0 atend 0 backend_pos 0 bkatstart 0 bkatend 1 mkbpos_is_last 0 mkbpos 24 return_pos 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 113: stmt->results is NULL, ignoring
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 113: fetch/move amount: "- 8"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 113: query: move relative - 8 in scroll_cur
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 113: ECPGc_relative -8 fetchall 0 current positions: pos -24 atstart 0 atend 0 backend_pos 0 bkatstart 0 bkatend 1 mkbpos_is_last 0 mkbpos 24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: ECPGc_relative -8 (-1) current positions: pos -24 atstart 0 atend 0 backend_pos 0 bkatstart 0 bkatend 1 mkbpos_is_last 0 mkbpos 24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: ECPGc_relative set wanted_pos -32
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: ECPGc_relative -8 (-1) prediction wanted_pos -32 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: ECPGc_relative new position is beyond known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_do_move_relative on line 113: amount -8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_do_move_absolute on line 113: amount -24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 113: query: move absolute -24 in scroll_cur; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 113: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_do_move_absolute on line 113: cmdstatus 'MOVE 1', have_tuple 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: ECPGc_absolute -24 (1) current positions: pos -24 atstart 0 atend 0 backend_pos 0 bkatstart 0 bkatend 1 mkbpos_is_last 0 mkbpos 24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: ECPGc_absolute set wanted_pos -24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: ECPGc_absolute -24 (1) wanted_pos -24 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: ECPGc_absolute trigger 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: next_pos -24 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 113: query: move relative -8 in scroll_cur; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 113: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_do_move_relative on line 113: cmdstatus 'MOVE 0', have_tuple 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: ECPGc_relative -8 (0) current positions: pos -24 atstart 0 atend 0 backend_pos -24 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: ECPGc_relative set wanted_pos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: ECPGc_relative -8 (0) wanted_pos 0 next_atstart 1 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 113: next_pos 0 next_atstart 1 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 113: final positions: pos 0 atstart 1 atend 0 backend_pos 0 bkatstart 1 bkatend 0 mkbpos_is_last 0 mkbpos 24 return_pos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 113: stmt->results is NULL, ignoring
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGtrans on line 121: action "rollback"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 127: query: declare scroll_cur scroll cursor for select id , t from t1 order by id; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 127: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 127: OK: DECLARE CURSOR 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 134: fetch/move amount: "8"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 134: query: move forward 8 in scroll_cur
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 134: ECPGc_forward 8 fetchall 0 current positions: pos 0 atstart 1 atend 0 backend_pos 0 bkatstart 1 bkatend 0 mkbpos_is_last 0 mkbpos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward 8 (-1) current positions: pos 0 atstart 1 atend 0 backend_pos 0 bkatstart 1 bkatend 0 mkbpos_is_last 0 mkbpos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward set wanted_pos 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward 8 (-1) prediction wanted_pos 8 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward new position is beyond known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_do_move_forward on line 134: amount 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 134: query: move forward 8 in scroll_cur; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 134: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_do_move_forward on line 134: cmdstatus 'MOVE 8', ntuples 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward 8 (8) current positions: pos 0 atstart 1 atend 0 backend_pos 0 bkatstart 1 bkatend 0 mkbpos_is_last 0 mkbpos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward set wanted_pos 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward 8 (8) wanted_pos 8 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward mkbpos set 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward trigger 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: next_pos 8 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 134: final positions: pos 8 atstart 0 atend 0 backend_pos 8 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 8 return_pos 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 134: OK: MOVE 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 134: fetch/move amount: "8"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 134: query: move forward 8 in scroll_cur
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 134: ECPGc_forward 8 fetchall 0 current positions: pos 8 atstart 0 atend 0 backend_pos 8 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward 8 (-1) current positions: pos 8 atstart 0 atend 0 backend_pos 8 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward set wanted_pos 16
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward 8 (-1) prediction wanted_pos 16 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward new position is beyond known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_do_move_forward on line 134: amount 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 134: query: move forward 8 in scroll_cur; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 134: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_do_move_forward on line 134: cmdstatus 'MOVE 8', ntuples 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward 8 (8) current positions: pos 8 atstart 0 atend 0 backend_pos 8 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward set wanted_pos 16
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward 8 (8) wanted_pos 16 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward mkbpos set 16
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward trigger 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: next_pos 16 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 134: final positions: pos 16 atstart 0 atend 0 backend_pos 16 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 16 return_pos 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 134: OK: MOVE 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 134: fetch/move amount: "8"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 134: query: move forward 8 in scroll_cur
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 134: ECPGc_forward 8 fetchall 0 current positions: pos 16 atstart 0 atend 0 backend_pos 16 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 16
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward 8 (-1) current positions: pos 16 atstart 0 atend 0 backend_pos 16 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 16
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward set wanted_pos 24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward 8 (-1) prediction wanted_pos 24 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward new position is beyond known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_do_move_forward on line 134: amount 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 134: query: move forward 8 in scroll_cur; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 134: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_do_move_forward on line 134: cmdstatus 'MOVE 8', ntuples 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward 8 (8) current positions: pos 16 atstart 0 atend 0 backend_pos 16 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 16
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward set wanted_pos 24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward 8 (8) wanted_pos 24 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward mkbpos set 24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward trigger 4
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: next_pos 24 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 134: final positions: pos 24 atstart 0 atend 0 backend_pos 24 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 24 return_pos 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 134: OK: MOVE 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 134: fetch/move amount: "8"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 134: query: move forward 8 in scroll_cur
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 134: ECPGc_forward 8 fetchall 0 current positions: pos 24 atstart 0 atend 0 backend_pos 24 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward 8 (-1) current positions: pos 24 atstart 0 atend 0 backend_pos 24 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward set wanted_pos 32
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward 8 (-1) prediction wanted_pos 32 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward new position is beyond known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_do_move_forward on line 134: amount 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 134: query: move forward 8 in scroll_cur; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 134: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_do_move_forward on line 134: cmdstatus 'MOVE 2', ntuples 2
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward 8 (2) current positions: pos 24 atstart 0 atend 0 backend_pos 24 bkatstart 0 bkatend 0 mkbpos_is_last 0 mkbpos 24
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward set wanted_pos 27
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward 8 (2) wanted_pos 27 next_atstart 0 next_atend 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: next_pos 27 next_atstart 0 next_atend 1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 134: final positions: pos 27 atstart 0 atend 1 backend_pos 27 bkatstart 0 bkatend 1 mkbpos_is_last 1 mkbpos 26 return_pos 2
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 134: OK: MOVE 2
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 134: fetch/move amount: "8"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 134: query: move forward 8 in scroll_cur
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 134: ECPGc_forward 8 fetchall 0 current positions: pos 27 atstart 0 atend 1 backend_pos 27 bkatstart 0 bkatend 1 mkbpos_is_last 1 mkbpos 26
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward 8 (-1) current positions: pos 27 atstart 0 atend 1 backend_pos 27 bkatstart 0 bkatend 1 mkbpos_is_last 1 mkbpos 26
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward set wanted_pos 35
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward 8 (-1) prediction wanted_pos 35 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 134: ECPGc_forward new position is known last position
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 134: final positions: pos 27 atstart 0 atend 1 backend_pos 27 bkatstart 0 bkatend 1 mkbpos_is_last 1 mkbpos 26 return_pos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 134: stmt->results is NULL, ignoring
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 147: fetch/move amount: "- 8"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 147: query: move forward - 8 in scroll_cur
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 147: ECPGc_forward -8 fetchall 0 current positions: pos 27 atstart 0 atend 1 backend_pos 27 bkatstart 0 bkatend 1 mkbpos_is_last 1 mkbpos 26
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 147: ECPGc_forward -8 (-1) current positions: pos 27 atstart 0 atend 1 backend_pos 27 bkatstart 0 bkatend 1 mkbpos_is_last 1 mkbpos 26
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 147: ECPGc_forward set wanted_pos 19
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 147: ECPGc_forward -8 (-1) prediction wanted_pos 19 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 147: ECPGc_forward new position is in known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 147: final positions: pos 19 atstart 0 atend 0 backend_pos 27 bkatstart 0 bkatend 1 mkbpos_is_last 1 mkbpos 26 return_pos 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 147: stmt->results is NULL, ignoring
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 147: fetch/move amount: "- 8"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 147: query: move forward - 8 in scroll_cur
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 147: ECPGc_forward -8 fetchall 0 current positions: pos 19 atstart 0 atend 0 backend_pos 27 bkatstart 0 bkatend 1 mkbpos_is_last 1 mkbpos 26
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 147: ECPGc_forward -8 (-1) current positions: pos 19 atstart 0 atend 0 backend_pos 27 bkatstart 0 bkatend 1 mkbpos_is_last 1 mkbpos 26
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 147: ECPGc_forward set wanted_pos 11
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 147: ECPGc_forward -8 (-1) prediction wanted_pos 11 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 147: ECPGc_forward new position is in known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 147: final positions: pos 11 atstart 0 atend 0 backend_pos 27 bkatstart 0 bkatend 1 mkbpos_is_last 1 mkbpos 26 return_pos 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 147: stmt->results is NULL, ignoring
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 147: fetch/move amount: "- 8"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 147: query: move forward - 8 in scroll_cur
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 147: ECPGc_forward -8 fetchall 0 current positions: pos 11 atstart 0 atend 0 backend_pos 27 bkatstart 0 bkatend 1 mkbpos_is_last 1 mkbpos 26
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 147: ECPGc_forward -8 (-1) current positions: pos 11 atstart 0 atend 0 backend_pos 27 bkatstart 0 bkatend 1 mkbpos_is_last 1 mkbpos 26
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 147: ECPGc_forward set wanted_pos 3
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 147: ECPGc_forward -8 (-1) prediction wanted_pos 3 next_atstart 0 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 147: ECPGc_forward new position is in known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 147: final positions: pos 3 atstart 0 atend 0 backend_pos 27 bkatstart 0 bkatend 1 mkbpos_is_last 1 mkbpos 26 return_pos 8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 147: stmt->results is NULL, ignoring
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 147: fetch/move amount: "- 8"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 147: query: move forward - 8 in scroll_cur
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 147: ECPGc_forward -8 fetchall 0 current positions: pos 3 atstart 0 atend 0 backend_pos 27 bkatstart 0 bkatend 1 mkbpos_is_last 1 mkbpos 26
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 147: ECPGc_forward -8 (-1) current positions: pos 3 atstart 0 atend 0 backend_pos 27 bkatstart 0 bkatend 1 mkbpos_is_last 1 mkbpos 26
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 147: ECPGc_forward set wanted_pos -5
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 147: wanted_pos truncated to 0 from positive
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 147: ECPGc_forward -8 (-1) prediction wanted_pos 0 next_atstart 1 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 147: ECPGc_forward new position is in known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 147: final positions: pos 0 atstart 1 atend 0 backend_pos 27 bkatstart 0 bkatend 1 mkbpos_is_last 1 mkbpos 26 return_pos 2
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 147: stmt->results is NULL, ignoring
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 147: fetch/move amount: "- 8"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGfetch on line 147: query: move forward - 8 in scroll_cur
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 147: ECPGc_forward -8 fetchall 0 current positions: pos 0 atstart 1 atend 0 backend_pos 27 bkatstart 0 bkatend 1 mkbpos_is_last 1 mkbpos 26
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 147: ECPGc_forward -8 (-1) current positions: pos 0 atstart 1 atend 0 backend_pos 27 bkatstart 0 bkatend 1 mkbpos_is_last 1 mkbpos 26
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 147: ECPGc_forward set wanted_pos -8
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 147: wanted_pos truncated to 0 from positive
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 147: ECPGc_forward -8 (-1) prediction wanted_pos 0 next_atstart 1 next_atend 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_next_pos on line 147: ECPGc_forward new position is in known range
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_cursor_move on line 147: final positions: pos 0 atstart 1 atend 0 backend_pos 27 bkatstart 0 bkatend 1 mkbpos_is_last 1 mkbpos 26 return_pos 0
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 147: stmt->results is NULL, ignoring
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGtrans on line 155: action "rollback"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 159: query: drop table t1; with 0 parameter(s) on connection regress1
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_execute on line 159: using PQexec
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_process_output on line 159: OK: DROP TABLE
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ECPGtrans on line 160: action "commit"; connection "regress1"
+[NO_PID]: sqlca: code: 0, state: 00000
+[NO_PID]: ecpg_finish: connection regress1 closed
+[NO_PID]: sqlca: code: 0, state: 00000

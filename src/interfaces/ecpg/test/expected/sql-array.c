@@ -141,14 +141,14 @@ if (sqlca.sqlcode < 0) sqlprint();}
 #line 27 "array.pgc"
 
 
-	{ ECPGsetcommit(__LINE__, "on", NULL);
+	{ ECPGsetcommit(__LINE__, 1, NULL);
 #line 29 "array.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint();}
 #line 29 "array.pgc"
 
 
-	{ ECPGtrans(__LINE__, NULL, "begin work");
+	{ ECPGtrans(__LINE__, NULL, "begin work", 0, 1, 0, NULL);
 #line 31 "array.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint();}
@@ -193,14 +193,14 @@ if (sqlca.sqlcode < 0) sqlprint();}
 #line 39 "array.pgc"
 
 
-	{ ECPGtrans(__LINE__, NULL, "commit");
+	{ ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);
 #line 41 "array.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint();}
 #line 41 "array.pgc"
 
 
-	{ ECPGtrans(__LINE__, NULL, "begin work");
+	{ ECPGtrans(__LINE__, NULL, "begin work", 0, 1, 0, NULL);
 #line 43 "array.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint();}
@@ -259,7 +259,7 @@ if (sqlca.sqlcode < 0) sqlprint();}
 #line 70 "array.pgc"
 
 
-	{ ECPGtrans(__LINE__, NULL, "commit");
+	{ ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);
 #line 72 "array.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint();}
