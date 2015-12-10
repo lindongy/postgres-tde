@@ -17,13 +17,24 @@ set -e
 unset MAKEFLAGS
 unset MAKELEVEL
 
+# Run a given "initdb" binary and overlay the regression testing
+# authentication configuration.
+standard_initdb() {
+	"$1" -N
+	if [ -n "$TEMP_CONFIG" -a -r "$TEMP_CONFIG" ]
+	then
+		cat "$TEMP_CONFIG" >> "$PGDATA/postgresql.conf"
+	fi
+	../../src/test/regress/pg_regress --config-auth "$PGDATA"
+}
+
 # Establish how the server will listen for connections
 testhost=`uname -s`
 
 case $testhost in
 	MINGW*)
 		LISTEN_ADDRESSES="localhost"
-		PGHOST=""; unset PGHOST
+		PGHOST=localhost
 		;;
 	*)
 		LISTEN_ADDRESSES=""
@@ -49,13 +60,14 @@ case $testhost in
 			trap 'rm -rf "$PGHOST"' 0
 			trap 'exit 3' 1 2 13 15
 		fi
-		export PGHOST
 		;;
 esac
 
 POSTMASTER_OPTS="-F -c listen_addresses=$LISTEN_ADDRESSES -k \"$PGHOST\""
+export PGHOST
 
-temp_root=$PWD/tmp_check
+# don't rely on $PWD here, as old shells don't set it
+temp_root=`pwd`/tmp_check
 
 if [ "$1" = '--install' ]; then
 	temp_install=$temp_root/install
@@ -98,7 +110,7 @@ PGDATA="$BASE_PGDATA.old"
 export PGDATA
 rm -rf "$BASE_PGDATA" "$PGDATA"
 
-logdir=$PWD/log
+logdir=`pwd`/log
 rm -rf "$logdir"
 mkdir "$logdir"
 
@@ -141,7 +153,7 @@ export EXTRA_REGRESS_OPTS
 # enable echo so the user can see what is being executed
 set -x
 
-$oldbindir/initdb -N
+standard_initdb "$oldbindir"/initdb
 $oldbindir/pg_ctl start -l "$logdir/postmaster1.log" -o "$POSTMASTER_OPTS" -w
 if "$MAKE" -C "$oldsrc" installcheck; then
 	pg_dumpall -f "$temp_root"/dump1.sql || pg_dumpall1_status=$?
@@ -181,7 +193,7 @@ fi
 
 PGDATA=$BASE_PGDATA
 
-initdb -N
+standard_initdb 'initdb'
 
 pg_upgrade $PG_UPGRADE_OPTS -d "${PGDATA}.old" -D "${PGDATA}" -b "$oldbindir" -B "$bindir" -p "$PGPORT" -P "$PGPORT"
 
@@ -209,10 +221,11 @@ case $testhost in
 	*)	    sh ./delete_old_cluster.sh ;;
 esac
 
-if diff -q "$temp_root"/dump1.sql "$temp_root"/dump2.sql; then
+if diff "$temp_root"/dump1.sql "$temp_root"/dump2.sql >/dev/null; then
 	echo PASSED
 	exit 0
 else
+	echo "Files $temp_root/dump1.sql and $temp_root/dump2.sql differ"
 	echo "dumps were not identical"
 	exit 1
 fi

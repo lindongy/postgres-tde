@@ -858,7 +858,7 @@ include 'filename'
         cryptanalysis when large amounts of traffic can be examined, but it
         also carries a large performance penalty. The sum of sent and received
         traffic is used to check the limit. If this parameter is set to 0,
-        renegotiation is disabled. The default is <literal>512MB</>.
+        renegotiation is disabled. The default is <literal>0</>.
        </para>
        <note>
         <para>
@@ -870,6 +870,14 @@ include 'filename'
          disabled.
         </para>
        </note>
+
+       <warning>
+        <para>
+         Due to bugs in <productname>OpenSSL</> enabling ssl renegotiation, by
+         configuring a non-zero <varname>ssl_renegotiation_limit</>, is likely
+         to lead to problems like long-lived connections breaking.
+        </para>
+       </warning>
       </listitem>
      </varlistentry>
 
@@ -5411,9 +5419,9 @@ SET XML OPTION { DOCUMENT | CONTENT };
         Sets the collection of time zone abbreviations that will be accepted
         by the server for datetime input.  The default is <literal>'Default'</>,
         which is a collection that works in most of the world; there are
-        also <literal>'Australia'</literal> and <literal>'India'</literal>, and other collections can be defined
-        for a particular installation.  See <xref
-        linkend="datetime-appendix"> for more information.
+        also <literal>'Australia'</literal> and <literal>'India'</literal>,
+        and other collections can be defined for a particular installation.
+        See <xref linkend="datetime-config-files"> for more information.
        </para>
       </listitem>
      </varlistentry>
@@ -5678,8 +5686,8 @@ dynamic_library_path = 'C:\tools\postgresql;H:\my_project\lib;$libdir'
         this feature is to allow debugging or performance-measurement
         libraries to be loaded into specific sessions without an explicit
         <command>LOAD</> command being given.  For example, debugging could
-        be enabled for all sessions under a given user name by setting
-        this parameter with <command>ALTER ROLE SET</>.
+        be enabled for a session by setting this parameter via the
+        <envar>PGOPTIONS</envar> environment variable.
        </para>
 
        <para>

@@ -1074,20 +1074,8 @@ exec_command(const char *cmd,
 		char	   *fname = psql_scan_slash_option(scan_state,
 												   OT_NORMAL, NULL, true);
 
-#if defined(WIN32) && !defined(__CYGWIN__)
-
-		/*
-		 * XXX This does not work for all terminal environments or for output
-		 * containing non-ASCII characters; see comments in simple_prompt().
-		 */
-#define DEVTTY	"con"
-#else
-#define DEVTTY	"/dev/tty"
-#endif
-
 		expand_tilde(&fname);
-		/* This scrolls off the screen when using /dev/tty */
-		success = saveHistory(fname ? fname : DEVTTY, -1, false, false);
+		success = printHistory(fname, pset.popt.topt.pager);
 		if (success && !pset.quiet && fname)
 			printf(gettext("Wrote history to file \"%s/%s\".\n"),
 				   pset.dirname ? pset.dirname : ".", fname);
@@ -1124,12 +1112,7 @@ exec_command(const char *cmd,
 			while ((opt = psql_scan_slash_option(scan_state,
 												 OT_NORMAL, NULL, false)))
 			{
-				newval = realloc(newval, strlen(newval) + strlen(opt) + 1);
-				if (!newval)
-				{
-					psql_error("out of memory\n");
-					exit(EXIT_FAILURE);
-				}
+				newval = pg_realloc(newval, strlen(newval) + strlen(opt) + 1);
 				strcat(newval, opt);
 				free(opt);
 			}
@@ -1338,7 +1321,7 @@ exec_command(const char *cmd,
 												 OT_NORMAL, NULL, false);
 
 		if (opt)
-			pset.timing = ParseVariableBool(opt);
+			pset.timing = ParseVariableBool(opt, "\\timing");
 		else
 			pset.timing = !pset.timing;
 		if (!pset.quiet)
@@ -1576,6 +1559,8 @@ do_connect(char *dbname, char *user, char *host, char *port)
 	PGconn	   *o_conn = pset.db,
 			   *n_conn;
 	char	   *password = NULL;
+	bool		keep_password;
+	bool		has_connection_string;
 
 	if (!o_conn && (!dbname || !user || !host || !port))
 	{
@@ -1589,14 +1574,35 @@ do_connect(char *dbname, char *user, char *host, char *port)
 		return false;
 	}
 
-	if (!dbname)
-		dbname = PQdb(o_conn);
+	/* grab values from the old connection, unless supplied by caller */
 	if (!user)
 		user = PQuser(o_conn);
 	if (!host)
 		host = PQhost(o_conn);
 	if (!port)
 		port = PQport(o_conn);
+
+	has_connection_string =
+		dbname ? recognized_connection_string(dbname) : false;
+
+	/*
+	 * Any change in the parameters read above makes us discard the password.
+	 * We also discard it if we're to use a conninfo rather than the positional
+	 * syntax.
+	 */
+	keep_password =
+		(o_conn &&
+		 (strcmp(user, PQuser(o_conn)) == 0) &&
+		 (!host || strcmp(host, PQhost(o_conn)) == 0) &&
+		 (strcmp(port, PQport(o_conn)) == 0) &&
+		 !has_connection_string);
+
+	/*
+	 * Grab dbname from old connection unless supplied by caller.  No password
+	 * discard if this changes: passwords aren't (usually) database-specific.
+	 */
+	if (!dbname)
+		dbname = PQdb(o_conn);
 
 	/*
 	 * If the user asked to be prompted for a password, ask for one now. If
@@ -1612,9 +1618,13 @@ do_connect(char *dbname, char *user, char *host, char *port)
 	{
 		password = prompt_for_password(user);
 	}
-	else if (o_conn && user && strcmp(PQuser(o_conn), user) == 0)
+	else if (o_conn && keep_password)
 	{
-		password = pg_strdup(PQpass(o_conn));
+		password = PQpass(o_conn);
+		if (password && *password)
+			password = pg_strdup(password);
+		else
+			password = NULL;
 	}
 
 	while (true)
@@ -1622,32 +1632,39 @@ do_connect(char *dbname, char *user, char *host, char *port)
 #define PARAMS_ARRAY_SIZE	8
 		const char **keywords = pg_malloc(PARAMS_ARRAY_SIZE * sizeof(*keywords));
 		const char **values = pg_malloc(PARAMS_ARRAY_SIZE * sizeof(*values));
+		int			paramnum = 0;
 
-		keywords[0] = "host";
-		values[0] = host;
-		keywords[1] = "port";
-		values[1] = port;
-		keywords[2] = "user";
-		values[2] = user;
-		keywords[3] = "password";
-		values[3] = password;
-		keywords[4] = "dbname";
-		values[4] = dbname;
-		keywords[5] = "fallback_application_name";
-		values[5] = pset.progname;
-		keywords[6] = "client_encoding";
-		values[6] = (pset.notty || getenv("PGCLIENTENCODING")) ? NULL : "auto";
-		keywords[7] = NULL;
-		values[7] = NULL;
+		keywords[0] = "dbname";
+		values[0] = dbname;
+
+		if (!has_connection_string)
+		{
+			keywords[++paramnum] = "host";
+			values[paramnum] = host;
+			keywords[++paramnum] = "port";
+			values[paramnum] = port;
+			keywords[++paramnum] = "user";
+			values[paramnum] = user;
+		}
+		keywords[++paramnum] = "password";
+		values[paramnum] = password;
+		keywords[++paramnum] = "fallback_application_name";
+		values[paramnum] = pset.progname;
+		keywords[++paramnum] = "client_encoding";
+		values[paramnum] = (pset.notty || getenv("PGCLIENTENCODING")) ? NULL : "auto";
+
+		/* add array terminator */
+		keywords[++paramnum] = NULL;
+		values[paramnum] = NULL;
 
 		n_conn = PQconnectdbParams(keywords, values, true);
 
-		free(keywords);
-		free(values);
+		pg_free(keywords);
+		pg_free(values);
 
 		/* We can immediately discard the password -- no longer needed */
 		if (password)
-			free(password);
+			pg_free(password);
 
 		if (PQstatus(n_conn) == CONNECTION_OK)
 			break;
@@ -1702,7 +1719,8 @@ do_connect(char *dbname, char *user, char *host, char *port)
 	/* Tell the user about the new connection */
 	if (!pset.quiet)
 	{
-		if (param_is_newly_set(PQhost(o_conn), PQhost(pset.db)) ||
+		if (!o_conn ||
+			param_is_newly_set(PQhost(o_conn), PQhost(pset.db)) ||
 			param_is_newly_set(PQport(o_conn), PQport(pset.db)))
 		{
 			char	   *host = PQhost(pset.db);
@@ -2271,7 +2289,7 @@ do_pset(const char *param, const char *value, printQueryOpt *popt, bool quiet)
 			popt->topt.format = PRINT_TROFF_MS;
 		else
 		{
-			psql_error("\\pset: allowed formats are unaligned, aligned, wrapped, html, latex, troff-ms\n");
+			psql_error("\\pset: allowed formats are unaligned, aligned, wrapped, html, latex, latex-longtable, troff-ms\n");
 			return false;
 		}
 
@@ -2312,12 +2330,14 @@ do_pset(const char *param, const char *value, printQueryOpt *popt, bool quiet)
 	}
 
 	/* set expanded/vertical mode */
-	else if (strcmp(param, "x") == 0 || strcmp(param, "expanded") == 0 || strcmp(param, "vertical") == 0)
+	else if (strcmp(param, "x") == 0 ||
+			 strcmp(param, "expanded") == 0 ||
+			 strcmp(param, "vertical") == 0)
 	{
 		if (value && pg_strcasecmp(value, "auto") == 0)
 			popt->topt.expanded = 2;
 		else if (value)
-			popt->topt.expanded = ParseVariableBool(value);
+			popt->topt.expanded = ParseVariableBool(value, param);
 		else
 			popt->topt.expanded = !popt->topt.expanded;
 		if (!quiet)
@@ -2335,7 +2355,7 @@ do_pset(const char *param, const char *value, printQueryOpt *popt, bool quiet)
 	else if (strcmp(param, "numericlocale") == 0)
 	{
 		if (value)
-			popt->topt.numericLocale = ParseVariableBool(value);
+			popt->topt.numericLocale = ParseVariableBool(value, param);
 		else
 			popt->topt.numericLocale = !popt->topt.numericLocale;
 		if (!quiet)
@@ -2419,7 +2439,7 @@ do_pset(const char *param, const char *value, printQueryOpt *popt, bool quiet)
 	else if (strcmp(param, "t") == 0 || strcmp(param, "tuples_only") == 0)
 	{
 		if (value)
-			popt->topt.tuples_only = ParseVariableBool(value);
+			popt->topt.tuples_only = ParseVariableBool(value, param);
 		else
 			popt->topt.tuples_only = !popt->topt.tuples_only;
 		if (!quiet)
@@ -2473,10 +2493,12 @@ do_pset(const char *param, const char *value, printQueryOpt *popt, bool quiet)
 		if (value && pg_strcasecmp(value, "always") == 0)
 			popt->topt.pager = 2;
 		else if (value)
-			if (ParseVariableBool(value))
+		{
+			if (ParseVariableBool(value, param))
 				popt->topt.pager = 1;
 			else
 				popt->topt.pager = 0;
+		}
 		else if (popt->topt.pager == 1)
 			popt->topt.pager = 0;
 		else
@@ -2496,7 +2518,7 @@ do_pset(const char *param, const char *value, printQueryOpt *popt, bool quiet)
 	else if (strcmp(param, "footer") == 0)
 	{
 		if (value)
-			popt->topt.default_footer = ParseVariableBool(value);
+			popt->topt.default_footer = ParseVariableBool(value, param);
 		else
 			popt->topt.default_footer = !popt->topt.default_footer;
 		if (!quiet)
@@ -2602,7 +2624,6 @@ do_watch(PQExpBuffer query_buf, long sleep)
 	 * Set up rendering options, in particular, disable the pager, because
 	 * nobody wants to be prompted while watching the output of 'watch'.
 	 */
-	myopt.nullPrint = NULL;
 	myopt.topt.pager = 0;
 
 	for (;;)

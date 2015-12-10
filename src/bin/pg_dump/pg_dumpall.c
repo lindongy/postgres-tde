@@ -688,7 +688,7 @@ dumpRoles(PGconn *conn)
 						  "ORDER BY 2");
 	else
 		printfPQExpBuffer(buf,
-						  "SELECT 0, usename as rolname, "
+						  "SELECT 0 as oid, usename as rolname, "
 						  "usesuper as rolsuper, "
 						  "true as rolinherit, "
 						  "usesuper as rolcreaterole, "
@@ -702,7 +702,7 @@ dumpRoles(PGconn *conn)
 						  "usename = current_user AS is_current_user "
 						  "FROM pg_shadow "
 						  "UNION ALL "
-						  "SELECT 0, groname as rolname, "
+						  "SELECT 0 as oid, groname as rolname, "
 						  "false as rolsuper, "
 						  "true as rolinherit, "
 						  "false as rolcreaterole, "
@@ -712,7 +712,8 @@ dumpRoles(PGconn *conn)
 						  "null::text as rolpassword, "
 						  "null::abstime as rolvaliduntil, "
 						  "false as rolreplication, "
-						  "null as rolcomment, false "
+						  "null as rolcomment, "
+						  "false AS is_current_user "
 						  "FROM pg_group "
 						  "WHERE NOT EXISTS (SELECT 1 FROM pg_shadow "
 						  " WHERE usename = groname) "
@@ -1381,17 +1382,35 @@ dumpCreateDB(PGconn *conn)
 				appendStringLiteralConn(buf, dbname, conn);
 				appendPQExpBuffer(buf, ";\n");
 			}
+		}
+		else if (strcmp(dbtablespace, "pg_default") != 0 && !no_tablespaces)
+		{
+			/*
+			 * Cannot change tablespace of the database we're connected to,
+			 * so to move "postgres" to another tablespace, we connect to
+			 * "template1", and vice versa.
+			 */
+			if (strcmp(dbname, "postgres") == 0)
+				appendPQExpBuffer(buf, "\\connect template1\n");
+			else
+				appendPQExpBuffer(buf, "\\connect postgres\n");
 
-			if (binary_upgrade)
-			{
-				appendPQExpBuffer(buf, "-- For binary upgrade, set datfrozenxid and datminmxid.\n");
-				appendPQExpBuffer(buf, "UPDATE pg_catalog.pg_database "
-								  "SET datfrozenxid = '%u', datminmxid = '%u' "
-								  "WHERE datname = ",
-								  dbfrozenxid, dbminmxid);
-				appendStringLiteralConn(buf, dbname, conn);
-				appendPQExpBuffer(buf, ";\n");
-			}
+			appendPQExpBuffer(buf, "ALTER DATABASE %s SET TABLESPACE %s;\n",
+							  fdbname, fmtId(dbtablespace));
+
+			/* connect to original database */
+			appendPQExpBuffer(buf, "\\connect %s\n", fdbname);
+		}
+
+		if (binary_upgrade)
+		{
+			appendPQExpBuffer(buf, "-- For binary upgrade, set datfrozenxid and datminmxid.\n");
+			appendPQExpBuffer(buf, "UPDATE pg_catalog.pg_database "
+							  "SET datfrozenxid = '%u', datminmxid = '%u' "
+							  "WHERE datname = ",
+							  dbfrozenxid, dbminmxid);
+			appendStringLiteralConn(buf, dbname, conn);
+			appendPQExpBuffer(buf, ";\n");
 		}
 
 		if (!skip_acls &&

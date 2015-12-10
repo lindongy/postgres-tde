@@ -131,14 +131,6 @@ bool		criticalSharedRelcachesBuilt = false;
 static long relcacheInvalsReceived = 0L;
 
 /*
- * This list remembers the OIDs of the non-shared relations cached in the
- * database's local relcache init file.  Note that there is no corresponding
- * list for the shared relcache init file, for reasons explained in the
- * comments for RelationCacheInitFileRemove.
- */
-static List *initFileRelationIds = NIL;
-
-/*
  * eoxact_list[] stores the OIDs of relations that (might) need AtEOXact
  * cleanup work.  This list intentionally has limited size; if it overflows,
  * we fall back to scanning the whole hashtable.  There is no value in a very
@@ -1870,7 +1862,9 @@ RelationClearRelation(Relation relation, bool rebuild)
 {
 	/*
 	 * As per notes above, a rel to be rebuilt MUST have refcnt > 0; while of
-	 * course it would be a bad idea to blow away one with nonzero refcnt.
+	 * course it would be an equally bad idea to blow away one with nonzero
+	 * refcnt, since that would leave someone somewhere with a dangling
+	 * pointer.  All callers are expected to have verified that this holds.
 	 */
 	Assert(rebuild ?
 		   !RelationHasReferenceCountZero(relation) :
@@ -1983,9 +1977,13 @@ RelationClearRelation(Relation relation, bool rebuild)
 		newrel = RelationBuildDesc(save_relid, false);
 		if (newrel == NULL)
 		{
-			/* Should only get here if relation was deleted */
-			RelationCacheDelete(relation);
-			RelationDestroyRelation(relation);
+			/*
+			 * This shouldn't happen as dropping a relation is intended to be
+			 * impossible if still referenced (c.f. CheckTableNotInUse()). But
+			 * if we get here anyway, we can't just delete the relcache entry,
+			 * as it possibly could get accessed later (as e.g. the error
+			 * might get trapped and handled via a subtransaction rollback).
+			 */
 			elog(ERROR, "relation %u deleted while still in use", save_relid);
 		}
 
@@ -2393,10 +2391,24 @@ AtEOXact_cleanup(Relation relation, bool isCommit)
 	{
 		if (isCommit)
 			relation->rd_createSubid = InvalidSubTransactionId;
-		else
+		else if (RelationHasReferenceCountZero(relation))
 		{
 			RelationClearRelation(relation, false);
 			return;
+		}
+		else
+		{
+			/*
+			 * Hmm, somewhere there's a (leaked?) reference to the relation.
+			 * We daren't remove the entry for fear of dereferencing a
+			 * dangling pointer later.  Bleat, and mark it as not belonging to
+			 * the current transaction.  Hopefully it'll get cleaned up
+			 * eventually.  This must be just a WARNING to avoid
+			 * error-during-error-recovery loops.
+			 */
+			relation->rd_createSubid = InvalidSubTransactionId;
+			elog(WARNING, "cannot remove relcache entry for \"%s\" because it has nonzero refcount",
+				 RelationGetRelationName(relation));
 		}
 	}
 
@@ -2485,10 +2497,23 @@ AtEOSubXact_cleanup(Relation relation, bool isCommit,
 	{
 		if (isCommit)
 			relation->rd_createSubid = parentSubid;
-		else
+		else if (RelationHasReferenceCountZero(relation))
 		{
 			RelationClearRelation(relation, false);
 			return;
+		}
+		else
+		{
+			/*
+			 * Hmm, somewhere there's a (leaked?) reference to the relation.
+			 * We daren't remove the entry for fear of dereferencing a
+			 * dangling pointer later.  Bleat, and transfer it to the parent
+			 * subtransaction so we can try again later.  This must be just a
+			 * WARNING to avoid error-during-error-recovery loops.
+			 */
+			relation->rd_createSubid = parentSubid;
+			elog(WARNING, "cannot remove relcache entry for \"%s\" because it has nonzero refcount",
+				 RelationGetRelationName(relation));
 		}
 	}
 
@@ -3185,9 +3210,6 @@ RelationCacheInitializePhase3(void)
 		 * that the init files will be most useful for future backends.
 		 */
 		InitCatalogCachePhase2();
-
-		/* reset initFileRelationIds list; we'll fill it during write */
-		initFileRelationIds = NIL;
 
 		/* now write the files */
 		write_relcache_init_file(true);
@@ -4448,21 +4470,32 @@ load_relcache_init_file(bool shared)
 	}
 
 	/*
-	 * We reached the end of the init file without apparent problem. Did we
-	 * get the right number of nailed items?  (This is a useful crosscheck in
-	 * case the set of critical rels or indexes changes.)
+	 * We reached the end of the init file without apparent problem.  Did we
+	 * get the right number of nailed items?  This is a useful crosscheck in
+	 * case the set of critical rels or indexes changes.  However, that should
+	 * not happen in a normally-running system, so let's bleat if it does.
 	 */
 	if (shared)
 	{
 		if (nailed_rels != NUM_CRITICAL_SHARED_RELS ||
 			nailed_indexes != NUM_CRITICAL_SHARED_INDEXES)
+		{
+			elog(WARNING, "found %d nailed shared rels and %d nailed shared indexes in init file, but expected %d and %d respectively",
+				 nailed_rels, nailed_indexes,
+				 NUM_CRITICAL_SHARED_RELS, NUM_CRITICAL_SHARED_INDEXES);
 			goto read_failed;
+		}
 	}
 	else
 	{
 		if (nailed_rels != NUM_CRITICAL_LOCAL_RELS ||
 			nailed_indexes != NUM_CRITICAL_LOCAL_INDEXES)
+		{
+			elog(WARNING, "found %d nailed rels and %d nailed indexes in init file, but expected %d and %d respectively",
+				 nailed_rels, nailed_indexes,
+				 NUM_CRITICAL_LOCAL_RELS, NUM_CRITICAL_LOCAL_INDEXES);
 			goto read_failed;
+		}
 	}
 
 	/*
@@ -4473,10 +4506,6 @@ load_relcache_init_file(bool shared)
 	for (relno = 0; relno < num_rels; relno++)
 	{
 		RelationCacheInsert(rels[relno]);
-		/* also make a list of their OIDs, for RelationIdIsInInitFile */
-		if (!shared)
-			initFileRelationIds = lcons_oid(RelationGetRelid(rels[relno]),
-											initFileRelationIds);
 	}
 
 	pfree(rels);
@@ -4513,8 +4542,14 @@ write_relcache_init_file(bool shared)
 	int			magic;
 	HASH_SEQ_STATUS status;
 	RelIdCacheEnt *idhentry;
-	MemoryContext oldcxt;
 	int			i;
+
+	/*
+	 * If we have already received any relcache inval events, there's no
+	 * chance of succeeding so we may as well skip the whole thing.
+	 */
+	if (relcacheInvalsReceived != 0L)
+		return;
 
 	/*
 	 * We must write a temporary file and rename it into place. Otherwise,
@@ -4575,6 +4610,23 @@ write_relcache_init_file(bool shared)
 		if (relform->relisshared != shared)
 			continue;
 
+		/*
+		 * Ignore if not supposed to be in init file.  We can allow any shared
+		 * relation that's been loaded so far to be in the shared init file,
+		 * but unshared relations must be ones that should be in the local
+		 * file per RelationIdIsInInitFile.  (Note: if you want to change the
+		 * criterion for rels to be kept in the init file, see also inval.c.
+		 * The reason for filtering here is to be sure that we don't put
+		 * anything into the local init file for which a relcache inval would
+		 * not cause invalidation of that init file.)
+		 */
+		if (!shared && !RelationIdIsInInitFile(RelationGetRelid(rel)))
+		{
+			/* Nailed rels had better get stored. */
+			Assert(!rel->rd_isnailed);
+			continue;
+		}
+
 		/* first write the relcache entry proper */
 		write_item(rel, sizeof(RelationData), fp);
 
@@ -4630,15 +4682,6 @@ write_relcache_init_file(bool shared)
 			write_item(rel->rd_indoption,
 					   relform->relnatts * sizeof(int16),
 					   fp);
-		}
-
-		/* also make a list of their OIDs, for RelationIdIsInInitFile */
-		if (!shared)
-		{
-			oldcxt = MemoryContextSwitchTo(CacheMemoryContext);
-			initFileRelationIds = lcons_oid(RelationGetRelid(rel),
-											initFileRelationIds);
-			MemoryContextSwitchTo(oldcxt);
 		}
 	}
 
@@ -4699,18 +4742,29 @@ write_item(const void *data, Size len, FILE *fp)
 }
 
 /*
- * Detect whether a given relation (identified by OID) is one of the ones
- * we store in the local relcache init file.
+ * Determine whether a given relation (identified by OID) is one of the ones
+ * we should store in the local relcache init file.
  *
- * Note that we effectively assume that all backends running in a database
- * would choose to store the same set of relations in the init file;
- * otherwise there are cases where we'd fail to detect the need for an init
- * file invalidation.  This does not seem likely to be a problem in practice.
+ * We must cache all nailed rels, and for efficiency we should cache every rel
+ * that supports a syscache.  The former set is almost but not quite a subset
+ * of the latter.  Currently, we must special-case TriggerRelidNameIndexId,
+ * which RelationCacheInitializePhase3 chooses to nail for efficiency reasons,
+ * but which does not support any syscache.
+ *
+ * Note: this function is currently never called for shared rels.  If it were,
+ * we'd probably also need a special case for DatabaseNameIndexId, which is
+ * critical but does not support a syscache.
  */
 bool
 RelationIdIsInInitFile(Oid relationId)
 {
-	return list_member_oid(initFileRelationIds, relationId);
+	if (relationId == TriggerRelidNameIndexId)
+	{
+		/* If this Assert fails, we don't need this special case anymore. */
+		Assert(!RelationSupportsSysCache(relationId));
+		return true;
+	}
+	return RelationSupportsSysCache(relationId);
 }
 
 /*

@@ -40,9 +40,11 @@
 #include "commands/trigger.h"
 #include "executor/executor.h"
 #include "executor/spi.h"
+#include "lib/ilist.h"
 #include "parser/parse_coerce.h"
 #include "parser/parse_relation.h"
 #include "miscadmin.h"
+#include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/guc.h"
@@ -123,6 +125,7 @@ typedef struct RI_ConstraintInfo
 												 * PK) */
 	Oid			ff_eq_oprs[RI_MAX_NUMKEYS];		/* equality operators (FK =
 												 * FK) */
+	dlist_node	valid_link;		/* Link in list of valid entries */
 } RI_ConstraintInfo;
 
 
@@ -183,6 +186,8 @@ typedef struct RI_CompareHashEntry
 static HTAB *ri_constraint_cache = NULL;
 static HTAB *ri_query_cache = NULL;
 static HTAB *ri_compare_cache = NULL;
+static dlist_head ri_constraint_cache_valid_list;
+static int	ri_constraint_cache_valid_count = 0;
 
 
 /* ----------
@@ -2910,6 +2915,13 @@ ri_LoadConstraintInfo(Oid constraintOid)
 
 	ReleaseSysCache(tup);
 
+	/*
+	 * For efficient processing of invalidation messages below, we keep a
+	 * doubly-linked list, and a count, of all currently valid entries.
+	 */
+	dlist_push_tail(&ri_constraint_cache_valid_list, &riinfo->valid_link);
+	ri_constraint_cache_valid_count++;
+
 	riinfo->valid = true;
 
 	return riinfo;
@@ -2922,20 +2934,41 @@ ri_LoadConstraintInfo(Oid constraintOid)
  * gets enough update traffic that it's probably worth being smarter.
  * Invalidate any ri_constraint_cache entry associated with the syscache
  * entry with the specified hash value, or all entries if hashvalue == 0.
+ *
+ * Note: at the time a cache invalidation message is processed there may be
+ * active references to the cache.  Because of this we never remove entries
+ * from the cache, but only mark them invalid, which is harmless to active
+ * uses.  (Any query using an entry should hold a lock sufficient to keep that
+ * data from changing under it --- but we may get cache flushes anyway.)
  */
 static void
 InvalidateConstraintCacheCallBack(Datum arg, int cacheid, uint32 hashvalue)
 {
-	HASH_SEQ_STATUS status;
-	RI_ConstraintInfo *hentry;
+	dlist_mutable_iter iter;
 
 	Assert(ri_constraint_cache != NULL);
 
-	hash_seq_init(&status, ri_constraint_cache);
-	while ((hentry = (RI_ConstraintInfo *) hash_seq_search(&status)) != NULL)
+	/*
+	 * If the list of currently valid entries gets excessively large, we mark
+	 * them all invalid so we can empty the list.  This arrangement avoids
+	 * O(N^2) behavior in situations where a session touches many foreign keys
+	 * and also does many ALTER TABLEs, such as a restore from pg_dump.
+	 */
+	if (ri_constraint_cache_valid_count > 1000)
+		hashvalue = 0;			/* pretend it's a cache reset */
+
+	dlist_foreach_modify(iter, &ri_constraint_cache_valid_list)
 	{
-		if (hashvalue == 0 || hentry->oidHashValue == hashvalue)
-			hentry->valid = false;
+		RI_ConstraintInfo *riinfo = dlist_container(RI_ConstraintInfo,
+													valid_link, iter.cur);
+
+		if (hashvalue == 0 || riinfo->oidHashValue == hashvalue)
+		{
+			riinfo->valid = false;
+			/* Remove invalidated entries from the list, too */
+			dlist_delete(iter.cur);
+			ri_constraint_cache_valid_count--;
+		}
 	}
 }
 
@@ -3169,6 +3202,9 @@ ri_ReportViolation(const RI_ConstraintInfo *riinfo,
 	bool		onfk;
 	const int16 *attnums;
 	int			idx;
+	Oid			rel_oid;
+	AclResult	aclresult;
+	bool		has_perm = true;
 
 	if (spi_err)
 		ereport(ERROR,
@@ -3187,37 +3223,68 @@ ri_ReportViolation(const RI_ConstraintInfo *riinfo,
 	if (onfk)
 	{
 		attnums = riinfo->fk_attnums;
+		rel_oid = fk_rel->rd_id;
 		if (tupdesc == NULL)
 			tupdesc = fk_rel->rd_att;
 	}
 	else
 	{
 		attnums = riinfo->pk_attnums;
+		rel_oid = pk_rel->rd_id;
 		if (tupdesc == NULL)
 			tupdesc = pk_rel->rd_att;
 	}
 
-	/* Get printable versions of the keys involved */
-	initStringInfo(&key_names);
-	initStringInfo(&key_values);
-	for (idx = 0; idx < riinfo->nkeys; idx++)
+	/*
+	 * Check permissions- if the user does not have access to view the data in
+	 * any of the key columns then we don't include the errdetail() below.
+	 *
+	 * Check table-level permissions first and, failing that, column-level
+	 * privileges.
+	 */
+	aclresult = pg_class_aclcheck(rel_oid, GetUserId(), ACL_SELECT);
+	if (aclresult != ACLCHECK_OK)
 	{
-		int			fnum = attnums[idx];
-		char	   *name,
+		/* Try for column-level permissions */
+		for (idx = 0; idx < riinfo->nkeys; idx++)
+		{
+			aclresult = pg_attribute_aclcheck(rel_oid, attnums[idx],
+											  GetUserId(),
+											  ACL_SELECT);
+
+			/* No access to the key */
+			if (aclresult != ACLCHECK_OK)
+			{
+				has_perm = false;
+				break;
+			}
+		}
+	}
+
+	if (has_perm)
+	{
+		/* Get printable versions of the keys involved */
+		initStringInfo(&key_names);
+		initStringInfo(&key_values);
+		for (idx = 0; idx < riinfo->nkeys; idx++)
+		{
+			int			fnum = attnums[idx];
+			char	   *name,
 				   *val;
 
-		name = SPI_fname(tupdesc, fnum);
-		val = SPI_getvalue(violator, tupdesc, fnum);
-		if (!val)
-			val = "null";
+			name = SPI_fname(tupdesc, fnum);
+			val = SPI_getvalue(violator, tupdesc, fnum);
+			if (!val)
+				val = "null";
 
-		if (idx > 0)
-		{
-			appendStringInfoString(&key_names, ", ");
-			appendStringInfoString(&key_values, ", ");
+			if (idx > 0)
+			{
+				appendStringInfoString(&key_names, ", ");
+				appendStringInfoString(&key_values, ", ");
+			}
+			appendStringInfoString(&key_names, name);
+			appendStringInfoString(&key_values, val);
 		}
-		appendStringInfoString(&key_names, name);
-		appendStringInfoString(&key_values, val);
 	}
 
 	if (onfk)
@@ -3226,9 +3293,12 @@ ri_ReportViolation(const RI_ConstraintInfo *riinfo,
 				 errmsg("insert or update on table \"%s\" violates foreign key constraint \"%s\"",
 						RelationGetRelationName(fk_rel),
 						NameStr(riinfo->conname)),
-				 errdetail("Key (%s)=(%s) is not present in table \"%s\".",
-						   key_names.data, key_values.data,
-						   RelationGetRelationName(pk_rel)),
+				 has_perm ?
+					 errdetail("Key (%s)=(%s) is not present in table \"%s\".",
+							   key_names.data, key_values.data,
+							   RelationGetRelationName(pk_rel)) :
+					 errdetail("Key is not present in table \"%s\".",
+							   RelationGetRelationName(pk_rel)),
 				 errtableconstraint(fk_rel, NameStr(riinfo->conname))));
 	else
 		ereport(ERROR,
@@ -3237,8 +3307,11 @@ ri_ReportViolation(const RI_ConstraintInfo *riinfo,
 						RelationGetRelationName(pk_rel),
 						NameStr(riinfo->conname),
 						RelationGetRelationName(fk_rel)),
+				 has_perm ?
 			errdetail("Key (%s)=(%s) is still referenced from table \"%s\".",
 					  key_names.data, key_values.data,
+					  RelationGetRelationName(fk_rel)) :
+					errdetail("Key is still referenced from table \"%s\".",
 					  RelationGetRelationName(fk_rel)),
 				 errtableconstraint(fk_rel, NameStr(riinfo->conname))));
 }

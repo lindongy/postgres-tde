@@ -47,6 +47,7 @@ int			geqo_threshold;
 join_search_hook_type join_search_hook = NULL;
 
 
+static void set_base_rel_consider_startup(PlannerInfo *root);
 static void set_base_rel_sizes(PlannerInfo *root);
 static void set_base_rel_pathlists(PlannerInfo *root);
 static void set_rel_size(PlannerInfo *root, RelOptInfo *rel,
@@ -131,6 +132,9 @@ make_one_rel(PlannerInfo *root, List *joinlist)
 		root->all_baserels = bms_add_member(root->all_baserels, brel->relid);
 	}
 
+	/* Mark base rels as to whether we care about fast-start plans */
+	set_base_rel_consider_startup(root);
+
 	/*
 	 * Generate access paths for the base rels.
 	 */
@@ -148,6 +152,49 @@ make_one_rel(PlannerInfo *root, List *joinlist)
 	Assert(bms_equal(rel->relids, root->all_baserels));
 
 	return rel;
+}
+
+/*
+ * set_base_rel_consider_startup
+ *	  Set the consider_[param_]startup flags for each base-relation entry.
+ *
+ * For the moment, we only deal with consider_param_startup here; because the
+ * logic for consider_startup is pretty trivial and is the same for every base
+ * relation, we just let build_simple_rel() initialize that flag correctly to
+ * start with.  If that logic ever gets more complicated it would probably
+ * be better to move it here.
+ */
+static void
+set_base_rel_consider_startup(PlannerInfo *root)
+{
+	/*
+	 * Since parameterized paths can only be used on the inside of a nestloop
+	 * join plan, there is usually little value in considering fast-start
+	 * plans for them.  However, for relations that are on the RHS of a SEMI
+	 * or ANTI join, a fast-start plan can be useful because we're only going
+	 * to care about fetching one tuple anyway.
+	 *
+	 * To minimize growth of planning time, we currently restrict this to
+	 * cases where the RHS is a single base relation, not a join; there is no
+	 * provision for consider_param_startup to get set at all on joinrels.
+	 * Also we don't worry about appendrels.  costsize.c's costing rules for
+	 * nestloop semi/antijoins don't consider such cases either.
+	 */
+	ListCell   *lc;
+
+	foreach(lc, root->join_info_list)
+	{
+		SpecialJoinInfo *sjinfo = (SpecialJoinInfo *) lfirst(lc);
+
+		if ((sjinfo->jointype == JOIN_SEMI || sjinfo->jointype == JOIN_ANTI) &&
+			bms_membership(sjinfo->syn_righthand) == BMS_SINGLETON)
+		{
+			int			varno = bms_singleton_member(sjinfo->syn_righthand);
+			RelOptInfo *rel = find_base_rel(root, varno);
+
+			rel->consider_param_startup = true;
+		}
+	}
 }
 
 /*
@@ -224,7 +271,7 @@ set_rel_size(PlannerInfo *root, RelOptInfo *rel,
 		 * We proved we don't need to scan the rel via constraint exclusion,
 		 * so set up a single dummy path for it.  Here we only check this for
 		 * regular baserels; if it's an otherrel, CE was already checked in
-		 * set_append_rel_pathlist().
+		 * set_append_rel_size().
 		 *
 		 * In this case, we go ahead and set up the relation's path right away
 		 * instead of leaving it for set_rel_pathlist to do.  This is because
@@ -286,6 +333,11 @@ set_rel_size(PlannerInfo *root, RelOptInfo *rel,
 				break;
 		}
 	}
+
+	/*
+	 * We insist that all non-dummy rels have a nonzero rowcount estimate.
+	 */
+	Assert(rel->rows > 0 || IS_DUMMY_REL(rel));
 }
 
 /*
@@ -415,6 +467,9 @@ set_foreign_size(PlannerInfo *root, RelOptInfo *rel, RangeTblEntry *rte)
 
 	/* Let FDW adjust the size estimates, if it can */
 	rel->fdwroutine->GetForeignRelSize(root, rel, rte->relid);
+
+	/* ... but do not let it set the rows estimate to zero */
+	rel->rows = clamp_row_est(rel->rows);
 }
 
 /*
@@ -447,6 +502,7 @@ set_append_rel_size(PlannerInfo *root, RelOptInfo *rel,
 					Index rti, RangeTblEntry *rte)
 {
 	int			parentRTindex = rti;
+	bool		has_live_children;
 	double		parent_rows;
 	double		parent_size;
 	double	   *parent_attrsizes;
@@ -467,6 +523,7 @@ set_append_rel_size(PlannerInfo *root, RelOptInfo *rel,
 	 * Note: if you consider changing this logic, beware that child rels could
 	 * have zero rows and/or width, if they were excluded by constraints.
 	 */
+	has_live_children = false;
 	parent_rows = 0;
 	parent_size = 0;
 	nattrs = rel->max_attr - rel->min_attr + 1;
@@ -594,70 +651,80 @@ set_append_rel_size(PlannerInfo *root, RelOptInfo *rel,
 		if (IS_DUMMY_REL(childrel))
 			continue;
 
+		/* We have at least one live child. */
+		has_live_children = true;
+
 		/*
 		 * Accumulate size information from each live child.
 		 */
-		if (childrel->rows > 0)
+		Assert(childrel->rows > 0);
+
+		parent_rows += childrel->rows;
+		parent_size += childrel->width * childrel->rows;
+
+		/*
+		 * Accumulate per-column estimates too.  We need not do anything for
+		 * PlaceHolderVars in the parent list.  If child expression isn't a
+		 * Var, or we didn't record a width estimate for it, we have to fall
+		 * back on a datatype-based estimate.
+		 *
+		 * By construction, child's reltargetlist is 1-to-1 with parent's.
+		 */
+		forboth(parentvars, rel->reltargetlist,
+				childvars, childrel->reltargetlist)
 		{
-			parent_rows += childrel->rows;
-			parent_size += childrel->width * childrel->rows;
+			Var		   *parentvar = (Var *) lfirst(parentvars);
+			Node	   *childvar = (Node *) lfirst(childvars);
 
-			/*
-			 * Accumulate per-column estimates too.  We need not do anything
-			 * for PlaceHolderVars in the parent list.  If child expression
-			 * isn't a Var, or we didn't record a width estimate for it, we
-			 * have to fall back on a datatype-based estimate.
-			 *
-			 * By construction, child's reltargetlist is 1-to-1 with parent's.
-			 */
-			forboth(parentvars, rel->reltargetlist,
-					childvars, childrel->reltargetlist)
+			if (IsA(parentvar, Var))
 			{
-				Var		   *parentvar = (Var *) lfirst(parentvars);
-				Node	   *childvar = (Node *) lfirst(childvars);
+				int			pndx = parentvar->varattno - rel->min_attr;
+				int32		child_width = 0;
 
-				if (IsA(parentvar, Var))
+				if (IsA(childvar, Var) &&
+					((Var *) childvar)->varno == childrel->relid)
 				{
-					int			pndx = parentvar->varattno - rel->min_attr;
-					int32		child_width = 0;
+					int			cndx = ((Var *) childvar)->varattno - childrel->min_attr;
 
-					if (IsA(childvar, Var) &&
-						((Var *) childvar)->varno == childrel->relid)
-					{
-						int			cndx = ((Var *) childvar)->varattno - childrel->min_attr;
-
-						child_width = childrel->attr_widths[cndx];
-					}
-					if (child_width <= 0)
-						child_width = get_typavgwidth(exprType(childvar),
-													  exprTypmod(childvar));
-					Assert(child_width > 0);
-					parent_attrsizes[pndx] += child_width * childrel->rows;
+					child_width = childrel->attr_widths[cndx];
 				}
+				if (child_width <= 0)
+					child_width = get_typavgwidth(exprType(childvar),
+												  exprTypmod(childvar));
+				Assert(child_width > 0);
+				parent_attrsizes[pndx] += child_width * childrel->rows;
 			}
 		}
 	}
 
-	/*
-	 * Save the finished size estimates.
-	 */
-	rel->rows = parent_rows;
-	if (parent_rows > 0)
+	if (has_live_children)
 	{
+		/*
+		 * Save the finished size estimates.
+		 */
 		int			i;
 
+		Assert(parent_rows > 0);
+		rel->rows = parent_rows;
 		rel->width = rint(parent_size / parent_rows);
 		for (i = 0; i < nattrs; i++)
 			rel->attr_widths[i] = rint(parent_attrsizes[i] / parent_rows);
+
+		/*
+		 * Set "raw tuples" count equal to "rows" for the appendrel; needed
+		 * because some places assume rel->tuples is valid for any baserel.
+		 */
+		rel->tuples = parent_rows;
 	}
 	else
-		rel->width = 0;			/* attr_widths should be zero already */
-
-	/*
-	 * Set "raw tuples" count equal to "rows" for the appendrel; needed
-	 * because some places assume rel->tuples is valid for any baserel.
-	 */
-	rel->tuples = parent_rows;
+	{
+		/*
+		 * All children were excluded by constraints, so mark the whole
+		 * appendrel dummy.  We must do this in this phase so that the rel's
+		 * dummy-ness is visible when we generate paths for other rels.
+		 */
+		set_dummy_rel_pathlist(rel);
+	}
 
 	pfree(parent_attrsizes);
 }

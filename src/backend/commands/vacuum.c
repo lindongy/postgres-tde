@@ -104,6 +104,7 @@ vacuum(VacuumStmt *vacstmt, Oid relid, bool do_toast,
 	volatile bool in_outer_xact,
 				use_own_xacts;
 	List	   *relations;
+	static bool in_vacuum = false;
 
 	/* sanity checks on options */
 	Assert(vacstmt->options & (VACOPT_VACUUM | VACOPT_ANALYZE));
@@ -128,6 +129,14 @@ vacuum(VacuumStmt *vacstmt, Oid relid, bool do_toast,
 	}
 	else
 		in_outer_xact = IsInTransactionChain(isTopLevel);
+
+	/*
+	 * Due to static variables vac_context, anl_context and vac_strategy,
+	 * vacuum() is not reentrant.  This matters when VACUUM FULL or ANALYZE
+	 * calls a hostile index expression that itself calls ANALYZE.
+	 */
+	if (in_vacuum)
+		elog(ERROR, "%s cannot be executed from VACUUM or ANALYZE", stmttype);
 
 	/*
 	 * Send info about dead objects to the statistics collector, unless we are
@@ -206,6 +215,8 @@ vacuum(VacuumStmt *vacstmt, Oid relid, bool do_toast,
 	 */
 	if (use_own_xacts)
 	{
+		Assert(!in_outer_xact);
+
 		/* ActiveSnapshot is not set by autovacuum */
 		if (ActiveSnapshotSet())
 			PopActiveSnapshot();
@@ -219,6 +230,7 @@ vacuum(VacuumStmt *vacstmt, Oid relid, bool do_toast,
 	{
 		ListCell   *cur;
 
+		in_vacuum = true;
 		VacuumCostActive = (VacuumCostDelay > 0);
 		VacuumCostBalance = 0;
 		VacuumPageHit = 0;
@@ -251,7 +263,7 @@ vacuum(VacuumStmt *vacstmt, Oid relid, bool do_toast,
 					PushActiveSnapshot(GetTransactionSnapshot());
 				}
 
-				analyze_rel(relid, vacstmt, vac_strategy);
+				analyze_rel(relid, vacstmt, in_outer_xact, vac_strategy);
 
 				if (use_own_xacts)
 				{
@@ -263,13 +275,13 @@ vacuum(VacuumStmt *vacstmt, Oid relid, bool do_toast,
 	}
 	PG_CATCH();
 	{
-		/* Make sure cost accounting is turned off after error */
+		in_vacuum = false;
 		VacuumCostActive = false;
 		PG_RE_THROW();
 	}
 	PG_END_TRY();
 
-	/* Turn off vacuum cost accounting */
+	in_vacuum = false;
 	VacuumCostActive = false;
 
 	/*
@@ -414,6 +426,7 @@ vacuum_set_xid_limits(int freeze_min_age,
 {
 	int			freezemin;
 	int			mxid_freezemin;
+	int			effective_multixact_freeze_max_age;
 	TransactionId limit;
 	TransactionId safeLimit;
 	MultiXactId mxactLimit;
@@ -471,16 +484,23 @@ vacuum_set_xid_limits(int freeze_min_age,
 	*freezeLimit = limit;
 
 	/*
+	 * Compute the multixact age for which freezing is urgent.  This is
+	 * normally autovacuum_multixact_freeze_max_age, but may be less if we
+	 * are short of multixact member space.
+	 */
+	effective_multixact_freeze_max_age = MultiXactMemberFreezeThreshold();
+
+	/*
 	 * Determine the minimum multixact freeze age to use: as specified by
 	 * caller, or vacuum_multixact_freeze_min_age, but in any case not more
-	 * than half autovacuum_multixact_freeze_max_age, so that autovacuums to
+	 * than half effective_multixact_freeze_max_age, so that autovacuums to
 	 * prevent MultiXact wraparound won't occur too frequently.
 	 */
 	mxid_freezemin = multixact_freeze_min_age;
 	if (mxid_freezemin < 0)
 		mxid_freezemin = vacuum_multixact_freeze_min_age;
 	mxid_freezemin = Min(mxid_freezemin,
-						 autovacuum_multixact_freeze_max_age / 2);
+						 effective_multixact_freeze_max_age / 2);
 	Assert(mxid_freezemin >= 0);
 
 	/* compute the cutoff multi, being careful to generate a valid value */
@@ -489,7 +509,7 @@ vacuum_set_xid_limits(int freeze_min_age,
 		mxactLimit = FirstMultiXactId;
 
 	safeMxactLimit =
-		ReadNextMultiXactId() - autovacuum_multixact_freeze_max_age;
+		ReadNextMultiXactId() - effective_multixact_freeze_max_age;
 	if (safeMxactLimit < FirstMultiXactId)
 		safeMxactLimit = FirstMultiXactId;
 
@@ -544,7 +564,7 @@ vacuum_set_xid_limits(int freeze_min_age,
 		if (freezetable < 0)
 			freezetable = vacuum_multixact_freeze_table_age;
 		freezetable = Min(freezetable,
-						  autovacuum_multixact_freeze_max_age * 0.95);
+						  effective_multixact_freeze_max_age * 0.95);
 		Assert(freezetable >= 0);
 
 		/*
@@ -648,22 +668,30 @@ vac_estimate_reltuples(Relation relation, bool is_analyze,
  *
  *		We violate transaction semantics here by overwriting the rel's
  *		existing pg_class tuple with the new values.  This is reasonably
- *		safe since the new values are correct whether or not this transaction
- *		commits.  The reason for this is that if we updated these tuples in
- *		the usual way, vacuuming pg_class itself wouldn't work very well ---
- *		by the time we got done with a vacuum cycle, most of the tuples in
- *		pg_class would've been obsoleted.  Of course, this only works for
- *		fixed-size never-null columns, but these are.
- *
- *		Note another assumption: that two VACUUMs/ANALYZEs on a table can't
- *		run in parallel, nor can VACUUM/ANALYZE run in parallel with a
- *		schema alteration such as adding an index, rule, or trigger.  Otherwise
- *		our updates of relhasindex etc might overwrite uncommitted updates.
+ *		safe as long as we're sure that the new values are correct whether or
+ *		not this transaction commits.  The reason for doing this is that if
+ *		we updated these tuples in the usual way, vacuuming pg_class itself
+ *		wouldn't work very well --- by the time we got done with a vacuum
+ *		cycle, most of the tuples in pg_class would've been obsoleted.  Of
+ *		course, this only works for fixed-size not-null columns, but these are.
  *
  *		Another reason for doing it this way is that when we are in a lazy
- *		VACUUM and have PROC_IN_VACUUM set, we mustn't do any updates ---
- *		somebody vacuuming pg_class might think they could delete a tuple
+ *		VACUUM and have PROC_IN_VACUUM set, we mustn't do any regular updates.
+ *		Somebody vacuuming pg_class might think they could delete a tuple
  *		marked with xmin = our xid.
+ *
+ *		In addition to fundamentally nontransactional statistics such as
+ *		relpages and relallvisible, we try to maintain certain lazily-updated
+ *		DDL flags such as relhasindex, by clearing them if no longer correct.
+ *		It's safe to do this in VACUUM, which can't run in parallel with
+ *		CREATE INDEX/RULE/TRIGGER and can't be part of a transaction block.
+ *		However, it's *not* safe to do it in an ANALYZE that's within an
+ *		outer transaction, because for example the current transaction might
+ *		have dropped the last index; then we'd think relhasindex should be
+ *		cleared, but if the transaction later rolls back this would be wrong.
+ *		So we refrain from updating the DDL flags if we're inside an outer
+ *		transaction.  This is OK since postponing the flag maintenance is
+ *		always allowable.
  *
  *		This routine is shared by VACUUM and ANALYZE.
  */
@@ -672,7 +700,8 @@ vac_update_relstats(Relation relation,
 					BlockNumber num_pages, double num_tuples,
 					BlockNumber num_all_visible_pages,
 					bool hasindex, TransactionId frozenxid,
-					MultiXactId minmulti)
+					MultiXactId minmulti,
+					bool in_outer_xact)
 {
 	Oid			relid = RelationGetRelid(relation);
 	Relation	rd;
@@ -689,7 +718,7 @@ vac_update_relstats(Relation relation,
 			 relid);
 	pgcform = (Form_pg_class) GETSTRUCT(ctup);
 
-	/* Apply required updates, if any, to copied tuple */
+	/* Apply statistical updates, if any, to copied tuple */
 
 	dirty = false;
 	if (pgcform->relpages != (int32) num_pages)
@@ -707,32 +736,41 @@ vac_update_relstats(Relation relation,
 		pgcform->relallvisible = (int32) num_all_visible_pages;
 		dirty = true;
 	}
-	if (pgcform->relhasindex != hasindex)
-	{
-		pgcform->relhasindex = hasindex;
-		dirty = true;
-	}
 
-	/*
-	 * If we have discovered that there are no indexes, then there's no
-	 * primary key either.  This could be done more thoroughly...
-	 */
-	if (pgcform->relhaspkey && !hasindex)
-	{
-		pgcform->relhaspkey = false;
-		dirty = true;
-	}
+	/* Apply DDL updates, but not inside an outer transaction (see above) */
 
-	/* We also clear relhasrules and relhastriggers if needed */
-	if (pgcform->relhasrules && relation->rd_rules == NULL)
+	if (!in_outer_xact)
 	{
-		pgcform->relhasrules = false;
-		dirty = true;
-	}
-	if (pgcform->relhastriggers && relation->trigdesc == NULL)
-	{
-		pgcform->relhastriggers = false;
-		dirty = true;
+		/*
+		 * If we didn't find any indexes, reset relhasindex.
+		 */
+		if (pgcform->relhasindex && !hasindex)
+		{
+			pgcform->relhasindex = false;
+			dirty = true;
+		}
+
+		/*
+		 * If we have discovered that there are no indexes, then there's no
+		 * primary key either.  This could be done more thoroughly...
+		 */
+		if (pgcform->relhaspkey && !hasindex)
+		{
+			pgcform->relhaspkey = false;
+			dirty = true;
+		}
+
+		/* We also clear relhasrules and relhastriggers if needed */
+		if (pgcform->relhasrules && relation->rd_rules == NULL)
+		{
+			pgcform->relhasrules = false;
+			dirty = true;
+		}
+		if (pgcform->relhastriggers && relation->trigdesc == NULL)
+		{
+			pgcform->relhastriggers = false;
+			dirty = true;
+		}
 	}
 
 	/*

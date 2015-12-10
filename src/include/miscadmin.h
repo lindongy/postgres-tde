@@ -50,6 +50,10 @@
  * will be held off until CHECK_FOR_INTERRUPTS() is done outside any
  * HOLD_INTERRUPTS() ... RESUME_INTERRUPTS() section.
  *
+ * There is also a mechanism to prevent query cancel interrupts, while still
+ * allowing die interrupts: HOLD_CANCEL_INTERRUPTS() and
+ * RESUME_CANCEL_INTERRUPTS().
+ *
  * Special mechanisms are used to let an interrupt be accepted when we are
  * waiting for a lock or when we are waiting for command input (but, of
  * course, only if the interrupt holdoff counter is zero).  See the
@@ -80,6 +84,7 @@ extern volatile bool ClientConnectionLost;
 /* these are marked volatile because they are examined by signal handlers: */
 extern volatile bool ImmediateInterruptOK;
 extern PGDLLIMPORT volatile uint32 InterruptHoldoffCount;
+extern PGDLLIMPORT volatile uint32 QueryCancelHoldoffCount;
 extern PGDLLIMPORT volatile uint32 CritSectionCount;
 
 /* in tcop/postgres.c */
@@ -110,6 +115,14 @@ do { \
 do { \
 	Assert(InterruptHoldoffCount > 0); \
 	InterruptHoldoffCount--; \
+} while(0)
+
+#define HOLD_CANCEL_INTERRUPTS()  (QueryCancelHoldoffCount++)
+
+#define RESUME_CANCEL_INTERRUPTS() \
+do { \
+	Assert(QueryCancelHoldoffCount > 0); \
+	QueryCancelHoldoffCount--; \
 } while(0)
 
 #define START_CRIT_SECTION()  (CritSectionCount++)
@@ -261,6 +274,7 @@ typedef char *pg_stack_base_t;
 extern pg_stack_base_t set_stack_base(void);
 extern void restore_stack_base(pg_stack_base_t base);
 extern void check_stack_depth(void);
+extern bool stack_is_too_deep(void);
 
 /* in tcop/utility.c */
 extern void PreventCommandIfReadOnly(const char *cmdname);

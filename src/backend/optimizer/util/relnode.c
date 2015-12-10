@@ -101,6 +101,7 @@ build_simple_rel(PlannerInfo *root, int relid, RelOptKind reloptkind)
 	rel->width = 0;
 	/* cheap startup cost is interesting iff not all tuples to be retrieved */
 	rel->consider_startup = (root->tuple_fraction > 0);
+	rel->consider_param_startup = false;		/* might get changed later */
 	rel->reltargetlist = NIL;
 	rel->pathlist = NIL;
 	rel->ppilist = NIL;
@@ -360,6 +361,7 @@ build_join_rel(PlannerInfo *root,
 	joinrel->width = 0;
 	/* cheap startup cost is interesting iff not all tuples to be retrieved */
 	joinrel->consider_startup = (root->tuple_fraction > 0);
+	joinrel->consider_param_startup = false;
 	joinrel->reltargetlist = NIL;
 	joinrel->pathlist = NIL;
 	joinrel->ppilist = NIL;
@@ -683,7 +685,8 @@ subbuild_joinrel_joinlist(RelOptInfo *joinrel,
  *		Get the AppendRelInfo associated with an appendrel child rel.
  *
  * This search could be eliminated by storing a link in child RelOptInfos,
- * but for now it doesn't seem performance-critical.
+ * but for now it doesn't seem performance-critical.  (Also, it might be
+ * difficult to maintain such a link during mutation of the append_rel_list.)
  */
 AppendRelInfo *
 find_childrel_appendrelinfo(PlannerInfo *root, RelOptInfo *rel)
@@ -704,6 +707,62 @@ find_childrel_appendrelinfo(PlannerInfo *root, RelOptInfo *rel)
 	/* should have found the entry ... */
 	elog(ERROR, "child rel %d not found in append_rel_list", relid);
 	return NULL;				/* not reached */
+}
+
+
+/*
+ * find_childrel_top_parent
+ *		Fetch the topmost appendrel parent rel of an appendrel child rel.
+ *
+ * Since appendrels can be nested, a child could have multiple levels of
+ * appendrel ancestors.  This function locates the topmost ancestor,
+ * which will be a regular baserel not an otherrel.
+ */
+RelOptInfo *
+find_childrel_top_parent(PlannerInfo *root, RelOptInfo *rel)
+{
+	do
+	{
+		AppendRelInfo *appinfo = find_childrel_appendrelinfo(root, rel);
+		Index		prelid = appinfo->parent_relid;
+
+		/* traverse up to the parent rel, loop if it's also a child rel */
+		rel = find_base_rel(root, prelid);
+	} while (rel->reloptkind == RELOPT_OTHER_MEMBER_REL);
+
+	Assert(rel->reloptkind == RELOPT_BASEREL);
+
+	return rel;
+}
+
+
+/*
+ * find_childrel_parents
+ *		Compute the set of parent relids of an appendrel child rel.
+ *
+ * Since appendrels can be nested, a child could have multiple levels of
+ * appendrel ancestors.  This function computes a Relids set of all the
+ * parent relation IDs.
+ */
+Relids
+find_childrel_parents(PlannerInfo *root, RelOptInfo *rel)
+{
+	Relids		result = NULL;
+
+	do
+	{
+		AppendRelInfo *appinfo = find_childrel_appendrelinfo(root, rel);
+		Index		prelid = appinfo->parent_relid;
+
+		result = bms_add_member(result, prelid);
+
+		/* traverse up to the parent rel, loop if it's also a child rel */
+		rel = find_base_rel(root, prelid);
+	} while (rel->reloptkind == RELOPT_OTHER_MEMBER_REL);
+
+	Assert(rel->reloptkind == RELOPT_BASEREL);
+
+	return result;
 }
 
 
@@ -880,9 +939,18 @@ get_joinrel_parampathinfo(PlannerInfo *root, RelOptInfo *joinrel,
 	{
 		RestrictInfo *rinfo = (RestrictInfo *) lfirst(lc);
 
+		/*
+		 * In principle, join_clause_is_movable_into() should accept anything
+		 * returned by generate_join_implied_equalities(); but because its
+		 * analysis is only approximate, sometimes it doesn't.  So we
+		 * currently cannot use this Assert; instead just assume it's okay to
+		 * apply the joinclause at this level.
+		 */
+#ifdef NOT_USED
 		Assert(join_clause_is_movable_into(rinfo,
 										   joinrel->relids,
 										   join_and_req));
+#endif
 		if (!join_clause_is_movable_into(rinfo,
 										 outer_path->parent->relids,
 										 outer_and_req) &&

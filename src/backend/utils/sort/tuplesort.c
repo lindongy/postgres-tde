@@ -571,7 +571,14 @@ tuplesort_begin_common(int workMem, bool randomAccess)
 	state->tapeset = NULL;
 
 	state->memtupcount = 0;
-	state->memtupsize = 1024;	/* initial guess */
+
+	/*
+	 * Initial size of array must be more than ALLOCSET_SEPARATE_THRESHOLD;
+	 * see comments in grow_memtuples().
+	 */
+	state->memtupsize = Max(1024,
+						ALLOCSET_SEPARATE_THRESHOLD / sizeof(SortTuple) + 1);
+
 	state->growmemtuples = true;
 	state->memtuples = (SortTuple *) palloc(state->memtupsize * sizeof(SortTuple));
 
@@ -1055,10 +1062,10 @@ grow_memtuples(Tuplesortstate *state)
 	 * never generate a dangerous request, but to be safe, check explicitly
 	 * that the array growth fits within availMem.  (We could still cause
 	 * LACKMEM if the memory chunk overhead associated with the memtuples
-	 * array were to increase.  That shouldn't happen with any sane value of
-	 * allowedMem, because at any array size large enough to risk LACKMEM,
-	 * palloc would be treating both old and new arrays as separate chunks.
-	 * But we'll check LACKMEM explicitly below just in case.)
+	 * array were to increase.  That shouldn't happen because we chose the
+	 * initial array size large enough to ensure that palloc will be treating
+	 * both old and new arrays as separate chunks.  But we'll check LACKMEM
+	 * explicitly below just in case.)
 	 */
 	if (state->availMem < (long) ((newmemtupsize - memtupsize) * sizeof(SortTuple)))
 		goto noalloc;
@@ -1071,7 +1078,7 @@ grow_memtuples(Tuplesortstate *state)
 				 state->memtupsize * sizeof(SortTuple));
 	USEMEM(state, GetMemoryChunkSpace(state->memtuples));
 	if (LACKMEM(state))
-		elog(ERROR, "unexpected out-of-memory situation during sort");
+		elog(ERROR, "unexpected out-of-memory situation in tuplesort");
 	return true;
 
 noalloc:
@@ -3160,6 +3167,7 @@ comparetup_index_btree(const SortTuple *a, const SortTuple *b,
 	{
 		Datum		values[INDEX_MAX_KEYS];
 		bool		isnull[INDEX_MAX_KEYS];
+		char	   *key_desc;
 
 		/*
 		 * Some rather brain-dead implementations of qsort (such as the one in
@@ -3170,13 +3178,15 @@ comparetup_index_btree(const SortTuple *a, const SortTuple *b,
 		Assert(tuple1 != tuple2);
 
 		index_deform_tuple(tuple1, tupDes, values, isnull);
+
+		key_desc = BuildIndexValueDescription(state->indexRel, values, isnull);
+
 		ereport(ERROR,
 				(errcode(ERRCODE_UNIQUE_VIOLATION),
 				 errmsg("could not create unique index \"%s\"",
 						RelationGetRelationName(state->indexRel)),
-				 errdetail("Key %s is duplicated.",
-						   BuildIndexValueDescription(state->indexRel,
-													  values, isnull)),
+				 key_desc ? errdetail("Key %s is duplicated.", key_desc) :
+							errdetail("Duplicate keys exist."),
 				 errtableconstraint(state->heapRel,
 								 RelationGetRelationName(state->indexRel))));
 	}

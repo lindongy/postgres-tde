@@ -186,8 +186,8 @@ typedef struct
 	uint32		ctrl_ver;
 	uint32		cat_ver;
 	char		nextxlogfile[25];
-	uint32		chkpnt_tli;
 	uint32		chkpnt_nxtxid;
+	uint32		chkpnt_nxtepoch;
 	uint32		chkpnt_nxtoid;
 	uint32		chkpnt_nxtmulti;
 	uint32		chkpnt_nxtmxoff;
@@ -335,6 +335,7 @@ void		disable_old_cluster(void);
 /* dump.c */
 
 void		generate_old_dump(void);
+void		optionally_create_toast_tables(void);
 
 
 /* exec.c */
