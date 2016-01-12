@@ -29,6 +29,7 @@
 #include "access/xlog.h"
 #include "catalog/catalog.h"
 #include "pgstat.h"
+#include "libpq/md5.h"
 #include "portability/instr_time.h"
 #include "postmaster/bgwriter.h"
 #include "storage/fd.h"
@@ -38,6 +39,7 @@
 #include "storage/smgr.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
+#include "utils/rijndael.h"
 #include "pg_trace.h"
 
 
@@ -114,7 +116,11 @@ typedef struct _MdfdVec
 } MdfdVec;
 
 static MemoryContext MdCxt;		/* context for all MdfdVec objects */
+static bool encryption_enabled = false;
 static char *md_encryption_buffer;
+static rijndael_ctx encryption_key;
+static rijndael_ctx decryption_key;
+
 
 
 /*
@@ -199,8 +205,8 @@ static MdfdVec *_mdfd_getseg(SMgrRelation reln, ForkNumber forkno,
 			 BlockNumber blkno, bool skipFsync, int behavior);
 static BlockNumber _mdnblocks(SMgrRelation reln, ForkNumber forknum,
 		   MdfdVec *seg);
-static void mdencrypt(char *buffer);
-static void mddecrypt(char *buffer);
+static void mdencrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer);
+static void mddecrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer);
 
 /*
  *	mdinit() -- Initialize private state for magnetic disk storage manager.
@@ -542,8 +548,10 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 				 errmsg("could not seek to block %u in file \"%s\": %m",
 						blocknum, FilePathName(v->mdfd_vfd))));
 
-	mdencrypt(buffer);
-	if ((nbytes = FileWrite(v->mdfd_vfd, md_encryption_buffer, BLCKSZ, WAIT_EVENT_DATA_FILE_EXTEND)) != BLCKSZ)
+	if (encryption_enabled)
+		mdencrypt(reln, forknum, blocknum, buffer);
+
+	if ((nbytes = FileWrite(v->mdfd_vfd, encryption_enabled ? md_encryption_buffer : buffer, BLCKSZ, WAIT_EVENT_DATA_FILE_EXTEND)) != BLCKSZ)
 	{
 		if (nbytes < 0)
 			ereport(ERROR,
@@ -760,7 +768,7 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 				 errmsg("could not seek to block %u in file \"%s\": %m",
 						blocknum, FilePathName(v->mdfd_vfd))));
 
-	nbytes = FileRead(v->mdfd_vfd, md_encryption_buffer, BLCKSZ, WAIT_EVENT_DATA_FILE_READ);
+	nbytes = FileRead(v->mdfd_vfd, encryption_enabled ? md_encryption_buffer : buffer, BLCKSZ, WAIT_EVENT_DATA_FILE_READ);
 
 	TRACE_POSTGRESQL_SMGR_MD_READ_DONE(forknum, blocknum,
 									   reln->smgr_rnode.node.spcNode,
@@ -795,8 +803,8 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 							blocknum, FilePathName(v->mdfd_vfd),
 							nbytes, BLCKSZ)));
 	}
-	else
-		mddecrypt(buffer);
+	else if (encryption_enabled)
+		mddecrypt(reln, forknum, blocknum, buffer);
 }
 
 /*
@@ -838,7 +846,9 @@ mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 				 errmsg("could not seek to block %u in file \"%s\": %m",
 						blocknum, FilePathName(v->mdfd_vfd))));
 
-	nbytes = FileWrite(v->mdfd_vfd, md_encryption_buffer, BLCKSZ, WAIT_EVENT_DATA_FILE_WRITE);
+	if (encryption_enabled)
+		mdencrypt(reln, forknum, blocknum, buffer);
+	nbytes = FileWrite(v->mdfd_vfd, encryption_enabled ? md_encryption_buffer : buffer, BLCKSZ, WAIT_EVENT_DATA_FILE_WRITE);
 
 	TRACE_POSTGRESQL_SMGR_MD_WRITE_DONE(forknum, blocknum,
 										reln->smgr_rnode.node.spcNode,
@@ -1969,8 +1979,6 @@ static bool iszero(char *buffer)
 	return true;
 }
 
-static uint8 encryption_key;
-
 void setup_encryption()
 {
 	char* key = getenv("PGENCRYPTIONKEY");
@@ -1979,33 +1987,50 @@ void setup_encryption()
 	}
 }
 
-bool set_encryption_key(char *key)
+void set_encryption_key(char *key)
 {
-	char *endptr;
-	encryption_key = strtol(key, &endptr, 0);
-	return endptr == '\0';
+	uint8 key_hash[16];
+	encryption_enabled = true;
+
+	pg_md5_binary(key, strlen(key), &key_hash);
+
+	aes_set_key(&encryption_key, key_hash, 128, 1);
+	aes_set_key(&decryption_key, key_hash, 128, 0);
 }
 
-static void mdencrypt(char *buffer)
+static void set_iva(uint8 *iva, SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum);
+
+static void set_iva(uint8 *iva, SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum)
 {
-	int i;
+	uint32 fork_and_block = (forknum << 24) ^ blocknum;
+	memcpy(iva, &(reln->smgr_rnode.node), 12);
+	memcpy(iva+12, &fork_and_block, 4);
+}
+
+static void mdencrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer)
+{
+	uint8 iva[16];
+
 	if (iszero(buffer))
 		memset(md_encryption_buffer, 0, BLCKSZ);
 	else
 	{
-		for (i = 0; i < BLCKSZ; i++)
-			md_encryption_buffer[i] = buffer[i] ^ encryption_key;
+		set_iva(iva, reln, forknum, blocknum);
+		memcpy(md_encryption_buffer, buffer, BLCKSZ);
+		aes_cbc_encrypt(&encryption_key, iva, (uint8*) md_encryption_buffer, BLCKSZ);
 	}
 }
 
-static void mddecrypt(char *dest)
+static void mddecrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *dest)
 {
-	int i;
+	uint8 iva[16];
+
 	if (iszero(md_encryption_buffer))
 		memset(dest, 0, BLCKSZ);
 	else
 	{
-		for (i = 0; i < BLCKSZ; i++)
-			dest[i] = md_encryption_buffer[i] ^ encryption_key;
+		set_iva(iva, reln, forknum, blocknum);
+		aes_cbc_decrypt(&decryption_key, iva, (uint8*) md_encryption_buffer, BLCKSZ);
+		memcpy(dest, md_encryption_buffer, BLCKSZ);
 	}
 }

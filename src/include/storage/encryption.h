@@ -15,7 +15,7 @@
 #define ENCRYPTION_H
 
 
-bool set_encryption_key(char *key);
-void setup_encryption();
+void set_encryption_key(char *key);
+void setup_encryption(void);
 
 #endif   /* ENCRYPTION_H */
