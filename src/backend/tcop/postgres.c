@@ -61,6 +61,7 @@
 #include "replication/walsender.h"
 #include "rewrite/rewriteHandler.h"
 #include "storage/bufmgr.h"
+#include "storage/encryption.h"
 #include "storage/ipc.h"
 #include "storage/proc.h"
 #include "storage/procsignal.h"
@@ -3698,6 +3699,8 @@ PostgresMain(int argc, char *argv[],
 
 		/* Change into DataDir (if under postmaster, was done already) */
 		ChangeToDataDir();
+
+		setup_encryption();
 
 		/*
 		 * Create lockfile for data directory.

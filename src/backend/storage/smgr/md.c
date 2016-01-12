@@ -33,6 +33,7 @@
 #include "postmaster/bgwriter.h"
 #include "storage/fd.h"
 #include "storage/bufmgr.h"
+#include "storage/encryption.h"
 #include "storage/relfilenode.h"
 #include "storage/smgr.h"
 #include "utils/hsearch.h"
@@ -113,6 +114,7 @@ typedef struct _MdfdVec
 } MdfdVec;
 
 static MemoryContext MdCxt;		/* context for all MdfdVec objects */
+static char *md_encryption_buffer;
 
 
 /*
@@ -197,7 +199,8 @@ static MdfdVec *_mdfd_getseg(SMgrRelation reln, ForkNumber forkno,
 			 BlockNumber blkno, bool skipFsync, int behavior);
 static BlockNumber _mdnblocks(SMgrRelation reln, ForkNumber forknum,
 		   MdfdVec *seg);
-
+static void mdencrypt(char *buffer);
+static void mddecrypt(char *buffer);
 
 /*
  *	mdinit() -- Initialize private state for magnetic disk storage manager.
@@ -242,6 +245,8 @@ mdinit(void)
 									  HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 		pendingUnlinks = NIL;
 	}
+
+	md_encryption_buffer = MemoryContextAllocZero(MdCxt, BLCKSZ);
 }
 
 /*
@@ -537,7 +542,8 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 				 errmsg("could not seek to block %u in file \"%s\": %m",
 						blocknum, FilePathName(v->mdfd_vfd))));
 
-	if ((nbytes = FileWrite(v->mdfd_vfd, buffer, BLCKSZ, WAIT_EVENT_DATA_FILE_EXTEND)) != BLCKSZ)
+	mdencrypt(buffer);
+	if ((nbytes = FileWrite(v->mdfd_vfd, md_encryption_buffer, BLCKSZ, WAIT_EVENT_DATA_FILE_EXTEND)) != BLCKSZ)
 	{
 		if (nbytes < 0)
 			ereport(ERROR,
@@ -754,7 +760,7 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 				 errmsg("could not seek to block %u in file \"%s\": %m",
 						blocknum, FilePathName(v->mdfd_vfd))));
 
-	nbytes = FileRead(v->mdfd_vfd, buffer, BLCKSZ, WAIT_EVENT_DATA_FILE_READ);
+	nbytes = FileRead(v->mdfd_vfd, md_encryption_buffer, BLCKSZ, WAIT_EVENT_DATA_FILE_READ);
 
 	TRACE_POSTGRESQL_SMGR_MD_READ_DONE(forknum, blocknum,
 									   reln->smgr_rnode.node.spcNode,
@@ -789,6 +795,8 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 							blocknum, FilePathName(v->mdfd_vfd),
 							nbytes, BLCKSZ)));
 	}
+	else
+		mddecrypt(buffer);
 }
 
 /*
@@ -830,7 +838,7 @@ mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 				 errmsg("could not seek to block %u in file \"%s\": %m",
 						blocknum, FilePathName(v->mdfd_vfd))));
 
-	nbytes = FileWrite(v->mdfd_vfd, buffer, BLCKSZ, WAIT_EVENT_DATA_FILE_WRITE);
+	nbytes = FileWrite(v->mdfd_vfd, md_encryption_buffer, BLCKSZ, WAIT_EVENT_DATA_FILE_WRITE);
 
 	TRACE_POSTGRESQL_SMGR_MD_WRITE_DONE(forknum, blocknum,
 										reln->smgr_rnode.node.spcNode,
@@ -1950,4 +1958,54 @@ _mdnblocks(SMgrRelation reln, ForkNumber forknum, MdfdVec *seg)
 						FilePathName(seg->mdfd_vfd))));
 	/* note that this calculation will ignore any partial block at EOF */
 	return (BlockNumber) (len / BLCKSZ);
+}
+
+static bool iszero(char *buffer)
+{
+	int i;
+	for (i = 0; i < BLCKSZ; i++)
+		if (buffer[i] != 0)
+			return false;
+	return true;
+}
+
+static uint8 encryption_key;
+
+void setup_encryption()
+{
+	char* key = getenv("PGENCRYPTIONKEY");
+	if (key != NULL) {
+		set_encryption_key(key);
+	}
+}
+
+bool set_encryption_key(char *key)
+{
+	char *endptr;
+	encryption_key = strtol(key, &endptr, 0);
+	return endptr == '\0';
+}
+
+static void mdencrypt(char *buffer)
+{
+	int i;
+	if (iszero(buffer))
+		memset(md_encryption_buffer, 0, BLCKSZ);
+	else
+	{
+		for (i = 0; i < BLCKSZ; i++)
+			md_encryption_buffer[i] = buffer[i] ^ encryption_key;
+	}
+}
+
+static void mddecrypt(char *dest)
+{
+	int i;
+	if (iszero(md_encryption_buffer))
+		memset(dest, 0, BLCKSZ);
+	else
+	{
+		for (i = 0; i < BLCKSZ; i++)
+			dest[i] = md_encryption_buffer[i] ^ encryption_key;
+	}
 }

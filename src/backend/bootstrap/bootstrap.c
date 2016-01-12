@@ -35,6 +35,7 @@
 #include "storage/bufmgr.h"
 #include "storage/bufpage.h"
 #include "storage/condition_variable.h"
+#include "storage/encryption.h"
 #include "storage/ipc.h"
 #include "storage/proc.h"
 #include "tcop/tcopprot.h"
@@ -343,6 +344,9 @@ AuxiliaryProcessMain(int argc, char *argv[])
 	/* Change into DataDir (if under postmaster, should be done already) */
 	if (!IsUnderPostmaster)
 		ChangeToDataDir();
+
+	if (!IsUnderPostmaster)
+		setup_encryption();
 
 	/* If standalone, create lockfile for data directory */
 	if (!IsUnderPostmaster)

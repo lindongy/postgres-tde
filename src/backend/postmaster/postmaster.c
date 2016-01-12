@@ -115,6 +115,7 @@
 #include "postmaster/syslogger.h"
 #include "replication/logicallauncher.h"
 #include "replication/walsender.h"
+#include "storage/encryption.h"
 #include "storage/fd.h"
 #include "storage/ipc.h"
 #include "storage/pg_shmem.h"
@@ -877,6 +878,8 @@ PostmasterMain(int argc, char *argv[])
 
 	/* And switch working directory into it */
 	ChangeToDataDir();
+
+	setup_encryption();
 
 	/*
 	 * Check for invalid combinations of GUC settings.

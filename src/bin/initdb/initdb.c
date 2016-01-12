@@ -140,6 +140,7 @@ static bool do_sync = true;
 static bool sync_only = false;
 static bool show_setting = false;
 static bool data_checksums = false;
+static char *data_encryption_key = NULL;
 static char *xlog_dir = "";
 
 
@@ -269,6 +270,7 @@ static bool check_locale_encoding(const char *locale, int encoding);
 static void setlocales(void);
 static void usage(const char *progname);
 void		setup_pgdata(void);
+void		setup_encryption(void);
 void		setup_bin_paths(const char *argv0);
 void		setup_data_file_paths(void);
 void		setup_locale_encoding(void);
@@ -2400,6 +2402,23 @@ setup_pgdata(void)
 	putenv(pgdata_set_env);
 }
 
+void
+setup_encryption(void)
+{
+	if (data_encryption_key == NULL)
+	{
+		char *key = getenv("PGENCRYPTIONKEY");
+		if (key != NULL && strlen(key) != 0)
+			data_encryption_key = pg_strdup(key);
+	}
+
+	if (data_encryption_key != NULL)
+	{
+		char *pgencryptionkey_set_env;
+		pgencryptionkey_set_env = psprintf("PGENCRYPTIONKEY=%s", data_encryption_key);
+		putenv(pgencryptionkey_set_env);
+	}
+}
 
 void
 setup_bin_paths(const char *argv0)
@@ -2953,7 +2972,6 @@ initialize_data_directory(void)
 	check_ok();
 }
 
-
 int
 main(int argc, char *argv[])
 {
@@ -2986,6 +3004,7 @@ main(int argc, char *argv[])
 		{"sync-only", no_argument, NULL, 'S'},
 		{"waldir", required_argument, NULL, 'X'},
 		{"data-checksums", no_argument, NULL, 'k'},
+		{"data-encryption", required_argument, NULL, 'K'},
 		{NULL, 0, NULL, 0}
 	};
 
@@ -3027,7 +3046,7 @@ main(int argc, char *argv[])
 
 	/* process command-line options */
 
-	while ((c = getopt_long(argc, argv, "dD:E:kL:nNU:WA:sST:X:", long_options, &option_index)) != -1)
+	while ((c = getopt_long(argc, argv, "dD:E:kK:L:nNU:WA:sST:X:", long_options, &option_index)) != -1)
 	{
 		switch (c)
 		{
@@ -3078,6 +3097,10 @@ main(int argc, char *argv[])
 				break;
 			case 'k':
 				data_checksums = true;
+				break;
+			case 'K':
+				if (strlen(optarg) > 0)
+					data_encryption_key = pg_strdup(optarg);
 				break;
 			case 'L':
 				share_path = pg_strdup(optarg);
@@ -3185,6 +3208,13 @@ main(int argc, char *argv[])
 	setup_pgdata();
 
 	setup_bin_paths(argv[0]);
+
+	setup_encryption();
+
+	if (data_encryption_key != NULL)
+		printf(_("Data encryption is enabled.\n"));
+	else
+		printf(_("Data encryption is disabled.\n"));
 
 	effective_user = get_id();
 	if (strlen(username) == 0)
