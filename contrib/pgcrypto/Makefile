@@ -1,6 +1,6 @@
 # contrib/pgcrypto/Makefile
 
-INT_SRCS = md5.c sha1.c internal.c internal-sha2.c blf.c rijndael.c \
+INT_SRCS = md5.c sha1.c internal.c internal-sha2.c blf.c \
 		pgp-mpi-internal.c imath.c
 INT_TESTS = sha2
 
@@ -58,9 +58,3 @@ SHLIB_LINK += $(filter -leay32, $(LIBS))
 # those must be at the end
 SHLIB_LINK += -lws2_32
 endif
-
-rijndael.o: rijndael.tbl
-
-rijndael.tbl:
-	$(CC) $(CPPFLAGS) $(CFLAGS) -DPRINT_TABS rijndael.c -o gen-rtab
-	./gen-rtab > rijndael.tbl
