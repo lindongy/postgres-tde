@@ -2469,7 +2469,14 @@ XLogWrite(XLogwrtRqst WriteRqst, bool flexible)
 			{
 				errno = 0;
 				pgstat_report_wait_start(WAIT_EVENT_WAL_WRITE);
-				written = write(openLogFile, from, nleft);
+				if (encryption_is_enabled()) {
+					char buf[XLOG_BLCKSZ];
+					memcpy(buf, from, XLOG_BLCKSZ);
+					encrypt_block(buf, XLOG_BLCKSZ);
+					written = write(openLogFile, buf, XLOG_BLCKSZ);
+				} else {
+					written = write(openLogFile, from, nleft);
+				}
 				pgstat_report_wait_end();
 				if (written <= 0)
 				{
@@ -5087,6 +5094,9 @@ BootStrapXLOG(void)
 	/* Create first XLOG segment file */
 	use_existent = false;
 	openLogFile = XLogFileInit(1, &use_existent, false);
+
+	if (encryption_is_enabled())
+		encrypt_block((char*)page, XLOG_BLCKSZ);
 
 	/* Write the first page with the initial record */
 	errno = 0;
@@ -11589,6 +11599,9 @@ retry:
 	Assert(targetSegNo == readSegNo);
 	Assert(targetPageOff == readOff);
 	Assert(reqLen <= readLen);
+
+	if (encryption_is_enabled())
+		decrypt_block(readBuf, XLOG_BLCKSZ);
 
 	*readTLI = curFileTLI;
 	return readLen;

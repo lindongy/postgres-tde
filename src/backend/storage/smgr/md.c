@@ -2047,3 +2047,17 @@ void sample_encryption(char *buf)
 	memcpy(buf, "postgresqlcrypt", ENCRYPTION_SAMPLE_SIZE);
 	aes_cbc_encrypt(&encryption_key, iva, (uint8*) buf, ENCRYPTION_SAMPLE_SIZE);
 }
+
+void encrypt_block(char *buf, size_t size)
+{
+	uint8 iva[ENCRYPTION_BLOCK];
+	memset(iva, 0, ENCRYPTION_BLOCK);
+	aes_cbc_encrypt(&encryption_key, iva, (uint8*) buf, size);
+}
+
+void decrypt_block(char *buf, size_t size)
+{
+	uint8 iva[ENCRYPTION_BLOCK];
+	memset(iva, 0, ENCRYPTION_BLOCK);
+	aes_cbc_decrypt(&decryption_key, iva, (uint8*) buf, size);
+}
