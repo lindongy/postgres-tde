@@ -54,6 +54,7 @@
 #include "replication/walreceiver.h"
 #include "replication/walsender.h"
 #include "storage/bufmgr.h"
+#include "storage/encryption.h"
 #include "storage/fd.h"
 #include "storage/ipc.h"
 #include "storage/large_object.h"
@@ -77,6 +78,8 @@
 #include "pg_trace.h"
 
 extern uint32 bootstrap_data_checksum_version;
+extern bool	  bootstrap_data_encrypted;
+extern char  *bootstrap_encryption_sample;
 
 /* File path names (all relative to $PGDATA) */
 #define RECOVERY_COMMAND_FILE	"recovery.conf"
@@ -4637,6 +4640,23 @@ ReadControlFile(void)
 				 errhint("It looks like you need to recompile or initdb.")));
 #endif
 
+	if (ControlFile->data_encrypted != encryption_is_enabled())
+		ereport(FATAL,
+						(errmsg("database files are encrypted"),
+				errdetail("The database cluster was initialized with encryption"
+						  " but the server was started without an encryption key."),
+						 errhint("Set the key using PGENCRYPTIONKEY environment variable.")));
+	else
+	{
+		char sample[ENCRYPTION_SAMPLE_SIZE];
+		sample_encryption(sample);
+		if (memcmp(ControlFile->encryption_verification, sample, ENCRYPTION_SAMPLE_SIZE))
+			ereport(FATAL,
+							(errmsg("invalid encryption key"),
+					errdetail("The key specified in PGENCRYPTIONKEY does not match"
+							  " database encryption key.")));
+	}
+
 	/* Make the initdb settings visible as GUC variables, too */
 	SetConfigOption("data_checksums", DataChecksumsEnabled() ? "yes" : "no",
 					PGC_INTERNAL, PGC_S_OVERRIDE);
@@ -5117,6 +5137,11 @@ BootStrapXLOG(void)
 	ControlFile->wal_log_hints = wal_log_hints;
 	ControlFile->track_commit_timestamp = track_commit_timestamp;
 	ControlFile->data_checksum_version = bootstrap_data_checksum_version;
+	ControlFile->data_encrypted = bootstrap_data_encrypted;
+	if (bootstrap_data_encrypted)
+		memcpy(ControlFile->encryption_verification, bootstrap_encryption_sample, 16);
+	else
+		memset(ControlFile->encryption_verification, 0, 16);
 
 	/* some additional ControlFile fields are set in WriteControlFile() */
 

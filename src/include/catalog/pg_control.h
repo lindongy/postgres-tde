@@ -228,6 +228,10 @@ typedef struct ControlFileData
 	 */
 	char		mock_authentication_nonce[MOCK_AUTH_NONCE_LEN];
 
+	/* Encryption sample */
+	bool		data_encrypted;
+	uint8		encryption_verification[16];
+
 	/* CRC of all above ... MUST BE LAST! */
 	pg_crc32c	crc;
 } ControlFileData;

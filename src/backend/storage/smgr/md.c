@@ -2009,7 +2009,7 @@ static void set_iva(uint8 *iva, SMgrRelation reln, ForkNumber forknum, BlockNumb
 
 static void mdencrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer)
 {
-	uint8 iva[16];
+	uint8 iva[ENCRYPTION_BLOCK];
 
 	if (iszero(buffer))
 		memset(md_encryption_buffer, 0, BLCKSZ);
@@ -2023,7 +2023,7 @@ static void mdencrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknu
 
 static void mddecrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *dest)
 {
-	uint8 iva[16];
+	uint8 iva[ENCRYPTION_BLOCK];
 
 	if (iszero(md_encryption_buffer))
 		memset(dest, 0, BLCKSZ);
@@ -2033,4 +2033,17 @@ static void mddecrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknu
 		aes_cbc_decrypt(&decryption_key, iva, (uint8*) md_encryption_buffer, BLCKSZ);
 		memcpy(dest, md_encryption_buffer, BLCKSZ);
 	}
+}
+
+bool encryption_is_enabled()
+{
+	return encryption_enabled;
+}
+
+void sample_encryption(char *buf)
+{
+	uint8 iva[ENCRYPTION_BLOCK];
+	memset(iva, 0, ENCRYPTION_BLOCK);
+	memcpy(buf, "postgresqlcrypt", ENCRYPTION_SAMPLE_SIZE);
+	aes_cbc_encrypt(&encryption_key, iva, (uint8*) buf, ENCRYPTION_SAMPLE_SIZE);
 }

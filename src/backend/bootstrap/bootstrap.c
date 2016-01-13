@@ -48,7 +48,8 @@
 #include "utils/tqual.h"
 
 uint32		bootstrap_data_checksum_version = 0;	/* No checksum */
-
+bool		bootstrap_data_encrypted = false;
+char	   *bootstrap_encryption_sample = NULL;
 
 #define ALLOC(t, c) \
 	((t *) MemoryContextAllocZero(TopMemoryContext, (unsigned)(c) * sizeof(t)))
@@ -347,6 +348,13 @@ AuxiliaryProcessMain(int argc, char *argv[])
 
 	if (!IsUnderPostmaster)
 		setup_encryption();
+
+	if (encryption_is_enabled())
+	{
+		bootstrap_data_encrypted = true;
+		bootstrap_encryption_sample = palloc0(16);
+		sample_encryption(bootstrap_encryption_sample);
+	}
 
 	/* If standalone, create lockfile for data directory */
 	if (!IsUnderPostmaster)

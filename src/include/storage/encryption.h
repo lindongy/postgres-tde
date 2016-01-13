@@ -14,8 +14,12 @@
 #ifndef ENCRYPTION_H
 #define ENCRYPTION_H
 
+#define ENCRYPTION_SAMPLE_SIZE 16
+#define ENCRYPTION_BLOCK 16
 
 void set_encryption_key(char *key);
 void setup_encryption(void);
+bool encryption_is_enabled(void);
+void sample_encryption(char *buf);
 
 #endif   /* ENCRYPTION_H */
