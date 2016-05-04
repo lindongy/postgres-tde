@@ -39,7 +39,6 @@
 #include "storage/smgr.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
-#include "utils/rijndael.h"
 #include "pg_trace.h"
 
 
@@ -116,12 +115,8 @@ typedef struct _MdfdVec
 } MdfdVec;
 
 static MemoryContext MdCxt;		/* context for all MdfdVec objects */
-static bool encryption_enabled = false;
 static char *md_encryption_buffer;
-static rijndael_ctx encryption_key;
-static rijndael_ctx decryption_key;
-
-
+static char *md_encryption_tweak;
 
 /*
  * In some contexts (currently, standalone backends and the checkpointer)
@@ -253,6 +248,7 @@ mdinit(void)
 	}
 
 	md_encryption_buffer = MemoryContextAllocZero(MdCxt, BLCKSZ);
+	md_encryption_tweak = MemoryContextAllocZero(MdCxt, TWEAK_SIZE);
 }
 
 /*
@@ -1979,85 +1975,34 @@ static bool iszero(char *buffer)
 	return true;
 }
 
-void setup_encryption()
-{
-	char* key = getenv("PGENCRYPTIONKEY");
-	if (key != NULL) {
-		set_encryption_key(key);
-	}
-}
+static void md_tweak(char *tweak, SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum);
 
-void set_encryption_key(char *key)
-{
-	uint8 key_hash[16];
-	encryption_enabled = true;
-
-	pg_md5_binary(key, strlen(key), &key_hash);
-
-	aes_set_key(&encryption_key, key_hash, 128, 1);
-	aes_set_key(&decryption_key, key_hash, 128, 0);
-}
-
-static void set_iva(uint8 *iva, SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum);
-
-static void set_iva(uint8 *iva, SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum)
+static void md_tweak(char *tweak, SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum)
 {
 	uint32 fork_and_block = (forknum << 24) ^ blocknum;
-	memcpy(iva, &(reln->smgr_rnode.node), 12);
-	memcpy(iva+12, &fork_and_block, 4);
+	memcpy(tweak, &(reln->smgr_rnode.node), 12);
+	memcpy(tweak+12, &fork_and_block, 4);
 }
 
 static void mdencrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer)
 {
-	uint8 iva[ENCRYPTION_BLOCK];
-
 	if (iszero(buffer))
 		memset(md_encryption_buffer, 0, BLCKSZ);
 	else
 	{
-		set_iva(iva, reln, forknum, blocknum);
-		memcpy(md_encryption_buffer, buffer, BLCKSZ);
-		aes_cbc_encrypt(&encryption_key, iva, (uint8*) md_encryption_buffer, BLCKSZ);
+		md_tweak(md_encryption_tweak, reln, forknum, blocknum);
+		encrypt_block(buffer, md_encryption_buffer, BLCKSZ, md_encryption_tweak);
 	}
 }
 
 static void mddecrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *dest)
 {
-	uint8 iva[ENCRYPTION_BLOCK];
-
 	if (iszero(md_encryption_buffer))
 		memset(dest, 0, BLCKSZ);
 	else
 	{
-		set_iva(iva, reln, forknum, blocknum);
-		aes_cbc_decrypt(&decryption_key, iva, (uint8*) md_encryption_buffer, BLCKSZ);
-		memcpy(dest, md_encryption_buffer, BLCKSZ);
+		md_tweak(md_encryption_tweak, reln, forknum, blocknum);
+		decrypt_block(md_encryption_buffer, dest, BLCKSZ, md_encryption_tweak);
 	}
 }
 
-bool encryption_is_enabled()
-{
-	return encryption_enabled;
-}
-
-void sample_encryption(char *buf)
-{
-	uint8 iva[ENCRYPTION_BLOCK];
-	memset(iva, 0, ENCRYPTION_BLOCK);
-	memcpy(buf, "postgresqlcrypt", ENCRYPTION_SAMPLE_SIZE);
-	aes_cbc_encrypt(&encryption_key, iva, (uint8*) buf, ENCRYPTION_SAMPLE_SIZE);
-}
-
-void encrypt_block(char *buf, size_t size)
-{
-	uint8 iva[ENCRYPTION_BLOCK];
-	memset(iva, 0, ENCRYPTION_BLOCK);
-	aes_cbc_encrypt(&encryption_key, iva, (uint8*) buf, size);
-}
-
-void decrypt_block(char *buf, size_t size)
-{
-	uint8 iva[ENCRYPTION_BLOCK];
-	memset(iva, 0, ENCRYPTION_BLOCK);
-	aes_cbc_decrypt(&decryption_key, iva, (uint8*) buf, size);
-}

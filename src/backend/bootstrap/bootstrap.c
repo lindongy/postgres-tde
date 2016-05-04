@@ -349,7 +349,7 @@ AuxiliaryProcessMain(int argc, char *argv[])
 	if (!IsUnderPostmaster)
 		setup_encryption();
 
-	if (encryption_is_enabled())
+	if (encryption_enabled)
 	{
 		bootstrap_data_encrypted = true;
 		bootstrap_encryption_sample = palloc0(16);

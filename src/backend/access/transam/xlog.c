@@ -861,6 +861,7 @@ static void LocalSetXLogInsertAllowed(void);
 static void CreateEndOfRecoveryRecord(void);
 static void CheckPointGuts(XLogRecPtr checkPointRedo, int flags);
 static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo);
+static void XLogWritePages(char *from, int npages);
 static XLogRecPtr XLogGetReplicationSlotMinimumLSN(void);
 
 static void AdvanceXLInsertBuffer(XLogRecPtr upto, bool opportunistic);
@@ -2324,6 +2325,14 @@ XLogCheckpointNeeded(XLogSegNo new_segno)
 	return false;
 }
 
+static void
+XLogEncryptionTweak(char *tweak, TimeLineID timeline, XLogSegNo segment, uint32 offset)
+{
+	memcpy(tweak, &segment, sizeof(XLogSegNo));
+	memcpy(tweak  + sizeof(XLogSegNo), &offset, sizeof(offset));
+	memcpy(tweak + sizeof(XLogSegNo) + sizeof(uint32), &timeline, sizeof(timeline));
+}
+
 /*
  * Write and/or fsync the log at least as far as WriteRqst indicates.
  *
@@ -2446,8 +2455,6 @@ XLogWrite(XLogwrtRqst WriteRqst, bool flexible)
 		{
 			char	   *from;
 			Size		nbytes;
-			Size		nleft;
-			int			written;
 
 			/* Need to seek in the file? */
 			if (openLogOff != startoffset)
@@ -2464,37 +2471,26 @@ XLogWrite(XLogwrtRqst WriteRqst, bool flexible)
 			/* OK to write the page(s) */
 			from = XLogCtl->pages + startidx * (Size) XLOG_BLCKSZ;
 			nbytes = npages * (Size) XLOG_BLCKSZ;
-			nleft = nbytes;
-			do
-			{
-				errno = 0;
-				pgstat_report_wait_start(WAIT_EVENT_WAL_WRITE);
-				if (encryption_is_enabled()) {
+			if (encryption_enabled) {
+				int i;
+				for (i = 0; i < npages; i++) {
 					char buf[XLOG_BLCKSZ];
-					memcpy(buf, from, XLOG_BLCKSZ);
-					encrypt_block(buf, XLOG_BLCKSZ);
-					written = write(openLogFile, buf, XLOG_BLCKSZ);
-				} else {
-					written = write(openLogFile, from, nleft);
-				}
-				pgstat_report_wait_end();
-				if (written <= 0)
-				{
-					if (errno == EINTR)
-						continue;
-					ereport(PANIC,
-							(errcode_for_file_access(),
-							 errmsg("could not write to log file %s "
-									"at offset %u, length %zu: %m",
-									XLogFileNameP(ThisTimeLineID, openLogSegNo),
-									openLogOff, nbytes)));
-				}
-				nleft -= written;
-				from += written;
-			} while (nleft > 0);
+					char tweak[TWEAK_SIZE];
+					XLogEncryptionTweak(tweak, ThisTimeLineID, openLogSegNo, openLogOff);
+					encrypt_block(from, buf, XLOG_BLCKSZ, tweak);
 
+					pgstat_report_wait_start(WAIT_EVENT_WAL_WRITE);
+					XLogWritePages(buf, 1);
+					pgstat_report_wait_end();
+
+					from += XLOG_BLCKSZ;
+					openLogOff += XLOG_BLCKSZ;
+				}
+			} else {
+				XLogWritePages(from, npages);
+				openLogOff += nbytes;
+			}
 			/* Update state for write */
-			openLogOff += nbytes;
 			npages = 0;
 
 			/*
@@ -2606,6 +2602,32 @@ XLogWrite(XLogwrtRqst WriteRqst, bool flexible)
 			XLogCtl->LogwrtRqst.Flush = LogwrtResult.Flush;
 		SpinLockRelease(&XLogCtl->info_lck);
 	}
+}
+
+static void
+XLogWritePages(char *from, int npages)
+{
+	Size nleft = npages * (Size) XLOG_BLCKSZ;
+	Size written;
+
+	do
+	{
+		errno = 0;
+		written = write(openLogFile, from, nleft);
+		if (written <= 0)
+		{
+			if (errno == EINTR)
+				continue;
+			ereport(PANIC,
+					(errcode_for_file_access(),
+					 errmsg("could not write to log file %s "
+							"at offset %u, length %zu: %m",
+						 XLogFileNameP(ThisTimeLineID, openLogSegNo),
+							openLogOff, npages * (Size) XLOG_BLCKSZ)));
+		}
+		nleft -= written;
+		from += written;
+	} while (nleft > 0);
 }
 
 /*
@@ -4647,7 +4669,7 @@ ReadControlFile(void)
 				 errhint("It looks like you need to recompile or initdb.")));
 #endif
 
-	if (ControlFile->data_encrypted != encryption_is_enabled())
+	if (ControlFile->data_encrypted != encryption_enabled)
 		ereport(FATAL,
 						(errmsg("database files are encrypted"),
 				errdetail("The database cluster was initialized with encryption"
@@ -5095,8 +5117,12 @@ BootStrapXLOG(void)
 	use_existent = false;
 	openLogFile = XLogFileInit(1, &use_existent, false);
 
-	if (encryption_is_enabled())
-		encrypt_block((char*)page, XLOG_BLCKSZ);
+	if (encryption_enabled)
+	{
+		char tweak[TWEAK_SIZE];
+		XLogEncryptionTweak(tweak, ThisTimeLineID, 1, 0);
+		encrypt_block((char*)page, (char*)page, XLOG_BLCKSZ, tweak);
+	}
 
 	/* Write the first page with the initial record */
 	errno = 0;
@@ -11600,8 +11626,12 @@ retry:
 	Assert(targetPageOff == readOff);
 	Assert(reqLen <= readLen);
 
-	if (encryption_is_enabled())
-		decrypt_block(readBuf, XLOG_BLCKSZ);
+	if (encryption_enabled)
+	{
+		char tweak[TWEAK_SIZE];
+		XLogEncryptionTweak(tweak, curFileTLI, readSegNo, readOff);
+		decrypt_block(readBuf, readBuf, XLOG_BLCKSZ, tweak);
+	}
 
 	*readTLI = curFileTLI;
 	return readLen;
