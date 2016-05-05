@@ -2325,14 +2325,6 @@ XLogCheckpointNeeded(XLogSegNo new_segno)
 	return false;
 }
 
-static void
-XLogEncryptionTweak(char *tweak, TimeLineID timeline, XLogSegNo segment, uint32 offset)
-{
-	memcpy(tweak, &segment, sizeof(XLogSegNo));
-	memcpy(tweak  + sizeof(XLogSegNo), &offset, sizeof(offset));
-	memcpy(tweak + sizeof(XLogSegNo) + sizeof(uint32), &timeline, sizeof(timeline));
-}
-
 /*
  * Write and/or fsync the log at least as far as WriteRqst indicates.
  *

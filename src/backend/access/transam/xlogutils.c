@@ -26,6 +26,7 @@
 #include "catalog/catalog.h"
 #include "miscadmin.h"
 #include "pgstat.h"
+#include "storage/encryption.h"
 #include "storage/smgr.h"
 #include "utils/guc.h"
 #include "utils/hsearch.h"
@@ -656,9 +657,14 @@ XLogTruncateRelation(RelFileNode rnode, ForkNumber forkNum,
 static void
 XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
 {
-	char	   *p;
+	char	   *p, *decrypt_p;
 	XLogRecPtr	recptr;
 	Size		nbytes;
+	uint32		decryptOff;
+
+	/* We only support block aligned reads to support encryption */
+	Assert(startptr % XLOG_BLCKSZ == 0);
+	Assert(count % XLOG_BLCKSZ == 0);
 
 	/* state maintained across calls */
 	static int	sendFile = -1;
@@ -666,9 +672,10 @@ XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
 	static TimeLineID sendTLI = 0;
 	static uint32 sendOff = 0;
 
-	p = buf;
+	decrypt_p = p = buf;
 	recptr = startptr;
 	nbytes = count;
+	decryptOff = startptr % XLogSegSize;
 
 	while (nbytes > 0)
 	{
@@ -754,6 +761,20 @@ XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
 		sendOff += readbytes;
 		nbytes -= readbytes;
 		p += readbytes;
+
+		/* Decrypt completed blocks */
+		if (encryption_enabled)
+		{
+			while (decrypt_p + XLOG_BLCKSZ <= p)
+			{
+				char tweak[TWEAK_SIZE];
+				XLogEncryptionTweak(tweak, sendTLI, sendSegNo, decryptOff);
+				decrypt_block(decrypt_p, decrypt_p, XLOG_BLCKSZ, tweak);
+
+				decrypt_p += XLOG_BLCKSZ;
+				decryptOff += XLOG_BLCKSZ;
+			}
+		}
 	}
 }
 
@@ -1018,4 +1039,12 @@ read_local_xlog_page(XLogReaderState *state, XLogRecPtr targetPagePtr,
 
 	/* number of valid bytes in the buffer */
 	return count;
+}
+
+void
+XLogEncryptionTweak(char *tweak, TimeLineID timeline, XLogSegNo segment, uint32 offset)
+{
+	memcpy(tweak, &segment, sizeof(XLogSegNo));
+	memcpy(tweak  + sizeof(XLogSegNo), &offset, sizeof(offset));
+	memcpy(tweak + sizeof(XLogSegNo) + sizeof(uint32), &timeline, sizeof(timeline));
 }
