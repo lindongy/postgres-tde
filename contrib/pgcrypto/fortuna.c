@@ -35,7 +35,7 @@
 #include <time.h>
 
 #include "px.h"
-#include "utils/rijndael.h"
+#include "rijndael.h"
 #include "sha2.h"
 #include "fortuna.h"
 

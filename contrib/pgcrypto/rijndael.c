@@ -44,7 +44,8 @@ Mean:		   500 cycles =    51.2 mbits/sec
 
 #include <sys/param.h>
 
-#include "utils/rijndael.h"
+#include "px.h"
+#include "rijndael.h"
 
 #define PRE_CALC_TABLES
 #define LARGE_TABLES

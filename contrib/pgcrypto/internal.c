@@ -37,7 +37,7 @@
 #include "md5.h"
 #include "sha1.h"
 #include "blf.h"
-#include "utils/rijndael.h"
+#include "rijndael.h"
 
 /*
  * System reseeds should be separated at least this much.
