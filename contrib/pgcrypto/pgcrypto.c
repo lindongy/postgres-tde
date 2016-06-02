@@ -34,6 +34,7 @@
 #include <ctype.h>
 
 #include "parser/scansup.h"
+#include "storage/encryption.h"
 #include "utils/backend_random.h"
 #include "utils/builtins.h"
 #include "utils/uuid.h"
@@ -48,6 +49,18 @@ PG_MODULE_MAGIC;
 
 typedef int (*PFN) (const char *name, void **res);
 static void *find_provider(text *name, PFN pf, char *desc, int silent);
+static bool pgcrypto_encryption_setup();
+static void pgcrypto_encryption_encryptblock(const char *input,
+		char *output,
+		Size size,
+		char *tweak);
+static void
+pgcrypto_encryption_decryptblock(char *input,
+		char *output,
+		Size size,
+		char *tweak);
+void _PG_init(void);
+
 
 /* SQL function: hash(bytea, text) returns bytea */
 PG_FUNCTION_INFO_V1(pg_digest);
@@ -494,4 +507,60 @@ find_provider(text *name,
 	pfree(buf);
 
 	return err ? NULL : res;
+}
+
+static bool
+pgcrypto_encryption_setup()
+{
+	char *key = getenv("PGENCRYPTIONKEY");
+	return (key != NULL && key[0] != '\0');
+}
+
+static void
+pgcrypto_encryption_encryptblock(const char *input,
+		char *output,
+		Size size,
+		char *tweak)
+{
+	// TODO: dummy implementation
+	Size i;
+	char any_nonzero = 0;
+
+	for (i = 0; i < size; i++)
+	{
+		output[i] = input[i] ^ 0xFF;
+		any_nonzero |= input[i];
+	}
+	if (any_nonzero == 0)
+		memset(output, 0, size);
+}
+
+static void
+pgcrypto_encryption_decryptblock(char *input,
+		char *output,
+		Size size,
+		char *tweak)
+{
+	Size i;
+	char any_nonzero = 0;
+
+	for (i = 0; i < size; i++)
+	{
+		output[i] = input[i] ^ 0xFF;
+		any_nonzero |= input[i];
+	}
+	if (any_nonzero == 0)
+		memset(output, 0, size);
+}
+
+void
+_PG_init(void)
+{
+	EncryptionRoutines routines;
+	routines.SetupEncryption = &pgcrypto_encryption_setup;
+	routines.EncryptBlock = &pgcrypto_encryption_encryptblock;
+	routines.DecryptBlock = &pgcrypto_encryption_decryptblock;
+
+	register_encryption_module("pgcrypto", &routines);
+	elog(WARNING, "pgcrypto init done");
 }

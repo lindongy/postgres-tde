@@ -1418,6 +1418,7 @@ ValidatePgVersion(const char *path)
  * GUC variables: lists of library names to be preloaded at postmaster
  * start and at backend start
  */
+char	   *encryption_library_string = NULL;
 char	   *session_preload_libraries_string = NULL;
 char	   *shared_preload_libraries_string = NULL;
 char	   *local_preload_libraries_string = NULL;

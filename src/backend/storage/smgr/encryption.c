@@ -15,15 +15,22 @@
 #include "postgres.h"
 
 #include "storage/encryption.h"
-#include "utils/rijndael.h"
+#include "miscadmin.h"
+#include "fmgr.h"
+#include "port.h"
 
 bool encryption_enabled = false;
+bool have_encryption_provider = false;
+EncryptionRoutines encryption_hooks;
 
-static rijndael_ctx encryption_key;
-static rijndael_ctx decryption_key;
+void
+register_encryption_module(char *name, EncryptionRoutines *enc)
+{
+	elog(LOG, "Registering encryption module %s", name);
 
-static void set_encryption_key(char *key);
-
+	encryption_hooks = *enc;
+	have_encryption_provider = true;
+}
 
 void
 sample_encryption(char *buf)
@@ -40,38 +47,38 @@ void
 encrypt_block(const char *input, char *output, Size size, char *tweak)
 {
 	Assert(size % 16 == 0);
+	Assert(encryption_enabled);
 
-	if (output != input)
-		memcpy(output, input, size);
-	aes_cbc_encrypt(&encryption_key, (uint8*) tweak, (uint8*) output, size);
+	encryption_hooks.EncryptBlock(input, output, size, tweak);
 }
 
 void
 decrypt_block(char *input, char *output, Size size, char *tweak)
 {
-	aes_cbc_decrypt(&decryption_key, (uint8*) tweak, (uint8*) input, size);
-	if (output != input)
-		memcpy(output, input, size);
+	encryption_hooks.DecryptBlock(input, output, size, tweak);
 }
 
 void
 setup_encryption()
 {
-	char* key = getenv("PGENCRYPTIONKEY");
-	if (key != NULL) {
-		set_encryption_key(key);
+	char *filename;
+
+	if (encryption_library_string == NULL || encryption_library_string[0] == '\0')
+		return;
+
+	filename = pstrdup(encryption_library_string);
+
+	canonicalize_path(filename);
+	load_file(filename, false);
+	ereport(DEBUG1,
+			(errmsg("loaded library \"%s\" for encryption", filename)));
+	pfree(filename);
+
+	elog(LOG, "setup encryption");
+	if (have_encryption_provider)
+	{
+		encryption_enabled = encryption_hooks.SetupEncryption();
+		elog(LOG, "encryption %s", encryption_enabled ? "enabled" : "disabled");
 	}
-}
-
-static void
-set_encryption_key(char *key)
-{
-	uint8 key_hash[16];
-	encryption_enabled = true;
-
-	pg_md5_binary(key, strlen(key), &key_hash);
-
-	aes_set_key(&encryption_key, key_hash, 128, 1);
-	aes_set_key(&decryption_key, key_hash, 128, 0);
 }
 

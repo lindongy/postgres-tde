@@ -140,6 +140,7 @@ static bool do_sync = true;
 static bool sync_only = false;
 static bool show_setting = false;
 static bool data_checksums = false;
+static char *data_encryption_module = NULL;
 static char *data_encryption_key = NULL;
 static char *xlog_dir = "";
 
@@ -1030,6 +1031,13 @@ setup_config(void)
 		snprintf(repltok, sizeof(repltok), "shared_buffers = %dkB",
 				 n_buffers * (BLCKSZ / 1024));
 	conflines = replace_token(conflines, "#shared_buffers = 32MB", repltok);
+
+	if (data_encryption_module != NULL)
+	{
+		snprintf(repltok, sizeof(repltok), "encryption_library = '%s'",
+						 data_encryption_module);
+		conflines = replace_token(conflines, "#encryption_library = ''", repltok);
+	}
 
 #ifdef HAVE_UNIX_SOCKETS
 	snprintf(repltok, sizeof(repltok), "#unix_socket_directories = '%s'",
@@ -2405,12 +2413,9 @@ setup_pgdata(void)
 void
 setup_encryption(void)
 {
-	if (data_encryption_key == NULL)
-	{
-		char *key = getenv("PGENCRYPTIONKEY");
-		if (key != NULL && strlen(key) != 0)
-			data_encryption_key = pg_strdup(key);
-	}
+	char *key = getenv("PGENCRYPTIONKEY");
+	if (key != NULL && strlen(key) != 0)
+		data_encryption_key = pg_strdup(key);
 
 	if (data_encryption_key != NULL)
 	{
@@ -3100,7 +3105,7 @@ main(int argc, char *argv[])
 				break;
 			case 'K':
 				if (strlen(optarg) > 0)
-					data_encryption_key = pg_strdup(optarg);
+					data_encryption_module = pg_strdup(optarg);
 				break;
 			case 'L':
 				share_path = pg_strdup(optarg);
@@ -3211,8 +3216,8 @@ main(int argc, char *argv[])
 
 	setup_encryption();
 
-	if (data_encryption_key != NULL)
-		printf(_("Data encryption is enabled.\n"));
+	if (data_encryption_module != NULL)
+		printf(_("Using %s for data encryption.\n"), data_encryption_module);
 	else
 		printf(_("Data encryption is disabled.\n"));
 

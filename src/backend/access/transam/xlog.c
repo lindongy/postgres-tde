@@ -4661,13 +4661,13 @@ ReadControlFile(void)
 				 errhint("It looks like you need to recompile or initdb.")));
 #endif
 
-	if (ControlFile->data_encrypted != encryption_enabled)
+	if (ControlFile->data_encrypted && !encryption_enabled)
 		ereport(FATAL,
 						(errmsg("database files are encrypted"),
 				errdetail("The database cluster was initialized with encryption"
 						  " but the server was started without an encryption key."),
 						 errhint("Set the key using PGENCRYPTIONKEY environment variable.")));
-	else
+	else if (encryption_enabled)
 	{
 		char sample[ENCRYPTION_SAMPLE_SIZE];
 		sample_encryption(sample);

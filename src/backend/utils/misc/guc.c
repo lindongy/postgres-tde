@@ -3230,6 +3230,17 @@ static struct config_string ConfigureNamesString[] =
 	},
 
 	{
+		{"encryption_library", PGC_POSTMASTER, CLIENT_CONN_PRELOAD,
+			gettext_noop("Encryption library to provide transparent data encryption."),
+			NULL,
+			GUC_SUPERUSER_ONLY
+		},
+		&encryption_library_string,
+		"",
+		NULL, NULL, NULL
+	},
+
+	{
 		{"session_preload_libraries", PGC_SUSET, CLIENT_CONN_PRELOAD,
 			gettext_noop("Lists shared libraries to preload into each backend."),
 			NULL,

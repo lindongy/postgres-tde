@@ -879,8 +879,6 @@ PostmasterMain(int argc, char *argv[])
 	/* And switch working directory into it */
 	ChangeToDataDir();
 
-	setup_encryption();
-
 	/*
 	 * Check for invalid combinations of GUC settings.
 	 */
@@ -963,6 +961,8 @@ PostmasterMain(int argc, char *argv[])
 		LoadedSSL = true;
 	}
 #endif
+
+	setup_encryption();
 
 	/*
 	 * Register the apply launcher.  Since it registers a background worker,
