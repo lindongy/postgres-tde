@@ -20,7 +20,7 @@ SRCS		= pgcrypto.c px.c px-hmac.c px-crypt.c \
 		mbuf.c pgp.c pgp-armor.c pgp-cfb.c pgp-compress.c \
 		pgp-decrypt.c pgp-encrypt.c pgp-info.c pgp-mpi.c \
 		pgp-pubdec.c pgp-pubenc.c pgp-pubkey.c pgp-s2k.c \
-		pgp-pgsql.c
+		pgp-pgsql.c xts.c
 
 MODULE_big	= pgcrypto
 OBJS		= $(SRCS:.c=.o) $(WIN32RES)

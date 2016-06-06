@@ -28,18 +28,17 @@
  assistance in debugging and testing this code.
 */
 
+#include "postgres.h"
+
 #include "mode_hdr.h"
 #include "xts.h"
 
-#if defined(__cplusplus)
-extern "C"
-{
-#endif
+static void gf_mulx(void *x);
 
 UNIT_TYPEDEF(buf_unit, UNIT_BITS);
 BUFR_TYPEDEF(buf_type, UNIT_BITS, AES_BLOCK_SIZE);
 
-void gf_mulx(void *x)
+static void gf_mulx(void *x)
 {
 #if UNIT_BITS == 8
 
@@ -115,9 +114,9 @@ INT_RETURN xts_encrypt_key(  const unsigned char key[], int key_len, xts_encrypt
     case 512:   aes_klen_by = 32; break;
     }
 
-    return aes_encrypt_key(key, aes_klen_by, ctx->enc_ctx) == EXIT_SUCCESS &&
-           aes_encrypt_key(key + aes_klen_by, aes_klen_by, ctx->twk_ctx) == EXIT_SUCCESS
-         ? EXIT_SUCCESS : EXIT_FAILURE;
+    rijndael_set_key(ctx->enc_ctx, UPTR_CAST(key, 32), aes_klen_by, 1);
+    rijndael_set_key(ctx->twk_ctx, UPTR_CAST(key + aes_klen_by, 32), aes_klen_by, 1);
+    return EXIT_SUCCESS;
 }
 
 INT_RETURN xts_decrypt_key( const unsigned char key[], int key_len, xts_decrypt_ctx ctx[1] )
@@ -132,13 +131,13 @@ INT_RETURN xts_decrypt_key( const unsigned char key[], int key_len, xts_decrypt_
     case 512:   aes_klen_by = 32; break;
     }
 
-    return aes_decrypt_key(key, aes_klen_by, ctx->dec_ctx) == EXIT_SUCCESS &&
-           aes_encrypt_key(key + aes_klen_by, aes_klen_by, ctx->twk_ctx) == EXIT_SUCCESS
-         ? EXIT_SUCCESS : EXIT_FAILURE;
+    rijndael_set_key(ctx->dec_ctx, UPTR_CAST(key, 32), aes_klen_by, 0);
+    rijndael_set_key(ctx->twk_ctx, UPTR_CAST(key + aes_klen_by, 32), aes_klen_by, 1);
+    return EXIT_SUCCESS;
 }
 
-INT_RETURN xts_encrypt_sector( unsigned char sector[],  lba_type sector_address, 
-                               unsigned int sector_len, const xts_encrypt_ctx ctx[1] )
+INT_RETURN xts_encrypt_block( unsigned char sector[],  unsigned char tweak[],
+                               unsigned int sector_len, xts_encrypt_ctx ctx[1] )
 {   
     buf_type hh;
     uint_8t *pos = sector, *hi = sector + sector_len;
@@ -148,22 +147,12 @@ INT_RETURN xts_encrypt_sector( unsigned char sector[],  lba_type sector_address,
     if( sector_len < AES_BLOCK_SIZE )
         return EXIT_FAILURE;
 
-#if defined( LONG_LBA )
-    *UPTR_CAST(hh, 64) = sector_address;
-    memset(UPTR_CAST(hh, 8) + 8, 0, 8);
-    uint_64t_to_le(*UPTR_CAST(hh, 64));
-#else
-    *UPTR_CAST(hh, 32) = sector_address;
-    memset(UPTR_CAST(hh, 8) + 4, 0, 12);
-    uint_32t_to_le(*UPTR_CAST(hh, 32));
-#endif
-
-    aes_encrypt(UPTR_CAST(hh, 8), UPTR_CAST(hh, 8), ctx->twk_ctx);
+    rijndael_encrypt(ctx->twk_ctx, UPTR_CAST(tweak, 32), UPTR_CAST(hh, 32));
 
     while(pos + AES_BLOCK_SIZE <= hi)
     {
         f_ptr(pos, pos, hh);
-        aes_encrypt(pos, pos, ctx->enc_ctx);
+        rijndael_encrypt(ctx->enc_ctx, UPTR_CAST(pos, 32), UPTR_CAST(pos, 32));
         f_ptr(pos, pos, hh);
         pos += AES_BLOCK_SIZE;
         gf_mulx(hh);
@@ -179,14 +168,14 @@ INT_RETURN xts_encrypt_sector( unsigned char sector[],  lba_type sector_address,
             *pos++ = tt;
         }
         f_ptr(tp, tp, hh);
-        aes_encrypt(tp, tp, ctx->enc_ctx);
+        rijndael_encrypt(ctx->enc_ctx, UPTR_CAST(tp, 32), UPTR_CAST(tp, 32));
         f_ptr(tp, tp, hh);
     }
     return EXIT_SUCCESS;
 }
 
-INT_RETURN xts_decrypt_sector( unsigned char sector[], lba_type sector_address, 
-                               unsigned int sector_len, const xts_decrypt_ctx ctx[1] )
+INT_RETURN xts_decrypt_block( unsigned char sector[], unsigned char tweak[],
+                               unsigned int sector_len, xts_decrypt_ctx ctx[1] )
 {   
     buf_type hh, hh2;
     uint_8t *pos = sector, *hi = sector + sector_len;
@@ -196,17 +185,7 @@ INT_RETURN xts_decrypt_sector( unsigned char sector[], lba_type sector_address,
     if( sector_len < AES_BLOCK_SIZE )
         return EXIT_FAILURE;
 
-#if defined( LONG_LBA )
-    *UPTR_CAST(hh, 64) = sector_address;
-    memset(UPTR_CAST(hh, 8) + 8, 0, 8);
-    uint_64t_to_le(*UPTR_CAST(hh, 64));
-#else
-    *UPTR_CAST(hh, 32) = sector_address;
-    memset(UPTR_CAST(hh, 8) + 4, 0, 12);
-    uint_32t_to_le(*UPTR_CAST(hh, 32));
-#endif
-
-    aes_encrypt(UPTR_CAST(hh, 8), UPTR_CAST(hh, 8), ctx->twk_ctx);
+    rijndael_encrypt(ctx->twk_ctx, UPTR_CAST(tweak, 32), UPTR_CAST(hh, 32));
 
     while(pos + AES_BLOCK_SIZE <= hi)
     {
@@ -216,7 +195,7 @@ INT_RETURN xts_decrypt_sector( unsigned char sector[], lba_type sector_address,
             gf_mulx(hh);
         }
         f_ptr(pos, pos, hh);
-        aes_decrypt(pos, pos, ctx->dec_ctx);
+        rijndael_decrypt(ctx->dec_ctx, UPTR_CAST(pos, 32), UPTR_CAST(pos, 32));
         f_ptr(pos, pos, hh);
         pos += AES_BLOCK_SIZE;
         gf_mulx(hh);
@@ -232,13 +211,10 @@ INT_RETURN xts_decrypt_sector( unsigned char sector[], lba_type sector_address,
             *pos++ = tt;
         }
         f_ptr(tp, tp, hh2);
-        aes_decrypt(tp, tp, ctx->dec_ctx);
+        rijndael_decrypt(ctx->dec_ctx, UPTR_CAST(tp, 32), UPTR_CAST(tp, 32));
         f_ptr(tp, tp, hh2);
     }
 
     return EXIT_SUCCESS;
 }
 
-#if defined(__cplusplus)
-}
-#endif

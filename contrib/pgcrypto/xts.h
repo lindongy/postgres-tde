@@ -28,48 +28,35 @@
 #ifndef _XTS_H
 #define _XTS_H
 
-#include "aes.h"
+#include "rijndael.h"
 
-#if defined(__cplusplus)
-extern "C"
-{
-#endif
+/* lifted from aes.h */
+#define AES_BLOCK_SIZE  16  /* the AES block size in bytes          */
 
-/* define if the logical block address needs a 64-bit value */
-#if 1
-#  define LONG_LBA
-#endif
+/* end */
 
 typedef struct
 {
-    aes_encrypt_ctx twk_ctx[1];
-    aes_encrypt_ctx enc_ctx[1];
+	rijndael_ctx twk_ctx[1];
+	rijndael_ctx enc_ctx[1];
 } xts_encrypt_ctx;
 
 typedef struct
 {
-    aes_encrypt_ctx twk_ctx[1];
-    aes_decrypt_ctx dec_ctx[1];
+	rijndael_ctx twk_ctx[1];
+	rijndael_ctx dec_ctx[1];
 } xts_decrypt_ctx;
 
-#if defined( LONG_LBA )
-  typedef uint_64t lba_type;
-#else
-  typedef uint_32t lba_type;
-#endif
+#define INT_RETURN int
 
 INT_RETURN xts_encrypt_key( const unsigned char key[], int key_len, xts_encrypt_ctx ctx[1] );
 
 INT_RETURN xts_decrypt_key( const unsigned char key[], int key_len, xts_decrypt_ctx ctx[1] );
 
-INT_RETURN xts_encrypt_sector( unsigned char sector[], lba_type sector_address, 
-                               unsigned int sector_len, const xts_encrypt_ctx ctx[1] );
+INT_RETURN xts_encrypt_block( unsigned char sector[], unsigned char tweak[],
+                               unsigned int sector_len, xts_encrypt_ctx ctx[1] );
 
-INT_RETURN xts_decrypt_sector( unsigned char sector[], lba_type sector_address, 
-                               unsigned int sector_len, const xts_decrypt_ctx ctx[1] );
-
-#if defined(__cplusplus)
-}
-#endif
+INT_RETURN xts_decrypt_block( unsigned char sector[], unsigned char tweak[],
+                               unsigned int sector_len, xts_decrypt_ctx ctx[1] );
 
 #endif

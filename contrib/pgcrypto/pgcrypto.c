@@ -42,6 +42,8 @@
 #include "px.h"
 #include "px-crypt.h"
 #include "pgcrypto.h"
+#include "sha2.h"
+#include "xts.h"
 
 PG_MODULE_MAGIC;
 
@@ -49,18 +51,29 @@ PG_MODULE_MAGIC;
 
 typedef int (*PFN) (const char *name, void **res);
 static void *find_provider(text *name, PFN pf, char *desc, int silent);
+static bool check_all_zero(const char *input, Size size);
 static bool pgcrypto_encryption_setup();
-static void pgcrypto_encryption_encryptblock(const char *input,
+static void pgcrypto_encrypt_block(const char *input,
 		char *output,
 		Size size,
 		char *tweak);
 static void
-pgcrypto_encryption_decryptblock(char *input,
+pgcrypto_decrypt_block(char *input,
 		char *output,
 		Size size,
 		char *tweak);
 void _PG_init(void);
 
+/*
+ * Encryption and decryption keys for full database encryption support.
+ */
+typedef struct {
+	xts_encrypt_ctx enc_ctx[1];
+	xts_decrypt_ctx dec_ctx[1];
+} db_encryption_ctx;
+
+/* Full database encryption key, initialized by pgcrypto_encryption_setup. */
+static db_encryption_ctx *db_key = NULL;
 
 /* SQL function: hash(bytea, text) returns bytea */
 PG_FUNCTION_INFO_V1(pg_digest);
@@ -512,45 +525,92 @@ find_provider(text *name,
 static bool
 pgcrypto_encryption_setup()
 {
-	char *key = getenv("PGENCRYPTIONKEY");
-	return (key != NULL && key[0] != '\0');
+	uint8 key[32];
+	char *passphrase = getenv("PGENCRYPTIONKEY");
+
+	/* Empty or missing passphrase means that encryption is not configured */
+	if (passphrase == NULL || passphrase[0] != '\0')
+		return false;
+
+	/* TODO: replace with PBKDF2 or scrypt */
+	{
+		SHA256_CTX sha_ctx;
+		SHA256_Init(&sha_ctx);
+		SHA256_Update(&sha_ctx, (uint8*) passphrase, strlen(passphrase));
+		SHA256_Final(key, &sha_ctx);
+	}
+
+	if (xts_encrypt_key(key, 32, db_key->enc_ctx) != EXIT_SUCCESS ||
+		xts_decrypt_key(key, 32, db_key->dec_ctx) != EXIT_SUCCESS)
+	{
+		elog(ERROR, "Encryption key setup failed.");
+		return false;
+	}
+
+	return true;
+}
+
+static bool check_all_zero(const char *input, Size size)
+{
+	const char *pos = input;
+	const char *aligned_start = (char*) MAXALIGN64(input);
+	const char *end = input + size;
+
+	/* Check 1 byte at a time until pos is 8 byte aligned */
+	while (pos < aligned_start)
+		if (*pos++ != 0)
+			return false;
+
+	/*
+	 * Run 8 parallel 8 byte checks in one iteration. On 2016 hardware
+	 * slightly faster than 4 parallel checks.
+	 **/
+	while (pos + 8*sizeof(uint64) <= end)
+	{
+		uint64 *p = (uint64*) pos;
+		if ((p[0] | p[1] | p[2] | p[3] | p[4] | p[5] | p[6] | p[7]) != 0)
+			return false;
+		pos += 8*sizeof(uint64);
+	}
+
+	/* Handle unaligned tail. */
+	while (pos < end)
+		if (*pos++ != 0)
+			return false;
+
+	return true;
 }
 
 static void
-pgcrypto_encryption_encryptblock(const char *input,
+pgcrypto_encrypt_block(const char *input,
 		char *output,
 		Size size,
 		char *tweak)
 {
-	// TODO: dummy implementation
-	Size i;
-	char any_nonzero = 0;
+	if (input != output)
+		memcpy(output, input, size);
 
-	for (i = 0; i < size; i++)
-	{
-		output[i] = input[i] ^ 0xFF;
-		any_nonzero |= input[i];
-	}
-	if (any_nonzero == 0)
-		memset(output, 0, size);
+	/* Empty blocks are not encrypted. */
+	if (check_all_zero(output, size))
+		return;
+
+	xts_encrypt_block((uint8*) output, (uint8*) tweak, size, db_key->enc_ctx);
 }
 
 static void
-pgcrypto_encryption_decryptblock(char *input,
+pgcrypto_decrypt_block(char *input,
 		char *output,
 		Size size,
 		char *tweak)
 {
-	Size i;
-	char any_nonzero = 0;
+	if (input != output)
+		memcpy(output, input, size);
 
-	for (i = 0; i < size; i++)
-	{
-		output[i] = input[i] ^ 0xFF;
-		any_nonzero |= input[i];
-	}
-	if (any_nonzero == 0)
-		memset(output, 0, size);
+	/* Empty blocks are not encrypted. */
+	if (check_all_zero(output, size))
+		return;
+
+	xts_decrypt_block((uint8*) output, (uint8*) tweak, size, db_key->dec_ctx);
 }
 
 void
@@ -558,8 +618,8 @@ _PG_init(void)
 {
 	EncryptionRoutines routines;
 	routines.SetupEncryption = &pgcrypto_encryption_setup;
-	routines.EncryptBlock = &pgcrypto_encryption_encryptblock;
-	routines.DecryptBlock = &pgcrypto_encryption_decryptblock;
+	routines.EncryptBlock = &pgcrypto_encrypt_block;
+	routines.DecryptBlock = &pgcrypto_decrypt_block;
 
 	register_encryption_module("pgcrypto", &routines);
 	elog(WARNING, "pgcrypto init done");
