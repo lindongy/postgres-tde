@@ -73,7 +73,7 @@ typedef struct {
 } db_encryption_ctx;
 
 /* Full database encryption key, initialized by pgcrypto_encryption_setup. */
-static db_encryption_ctx *db_key = NULL;
+static db_encryption_ctx db_key;
 
 /* SQL function: hash(bytea, text) returns bytea */
 PG_FUNCTION_INFO_V1(pg_digest);
@@ -528,8 +528,10 @@ pgcrypto_encryption_setup()
 	uint8 key[32];
 	char *passphrase = getenv("PGENCRYPTIONKEY");
 
+	elog(WARNING, "got pass %s", passphrase);
+
 	/* Empty or missing passphrase means that encryption is not configured */
-	if (passphrase == NULL || passphrase[0] != '\0')
+	if (passphrase == NULL || passphrase[0] == '\0')
 		return false;
 
 	/* TODO: replace with PBKDF2 or scrypt */
@@ -540,8 +542,8 @@ pgcrypto_encryption_setup()
 		SHA256_Final(key, &sha_ctx);
 	}
 
-	if (xts_encrypt_key(key, 32, db_key->enc_ctx) != EXIT_SUCCESS ||
-		xts_decrypt_key(key, 32, db_key->dec_ctx) != EXIT_SUCCESS)
+	if (xts_encrypt_key(key, 32, db_key.enc_ctx) != EXIT_SUCCESS ||
+		xts_decrypt_key(key, 32, db_key.dec_ctx) != EXIT_SUCCESS)
 	{
 		elog(ERROR, "Encryption key setup failed.");
 		return false;
@@ -594,7 +596,7 @@ pgcrypto_encrypt_block(const char *input,
 	if (check_all_zero(output, size))
 		return;
 
-	xts_encrypt_block((uint8*) output, (uint8*) tweak, size, db_key->enc_ctx);
+	xts_encrypt_block((uint8*) output, (uint8*) tweak, size, db_key.enc_ctx);
 }
 
 static void
@@ -610,7 +612,7 @@ pgcrypto_decrypt_block(char *input,
 	if (check_all_zero(output, size))
 		return;
 
-	xts_decrypt_block((uint8*) output, (uint8*) tweak, size, db_key->dec_ctx);
+	xts_decrypt_block((uint8*) output, (uint8*) tweak, size, db_key.dec_ctx);
 }
 
 void

@@ -114,8 +114,8 @@ INT_RETURN xts_encrypt_key(  const unsigned char key[], int key_len, xts_encrypt
     case 512:   aes_klen_by = 32; break;
     }
 
-    rijndael_set_key(ctx->enc_ctx, UPTR_CAST(key, 32), aes_klen_by, 1);
-    rijndael_set_key(ctx->twk_ctx, UPTR_CAST(key + aes_klen_by, 32), aes_klen_by, 1);
+    rijndael_set_key(ctx->enc_ctx, UPTR_CAST(key, 32), aes_klen_by*8, 1);
+    rijndael_set_key(ctx->twk_ctx, UPTR_CAST(key + aes_klen_by, 32), aes_klen_by*8, 1);
     return EXIT_SUCCESS;
 }
 
@@ -131,8 +131,8 @@ INT_RETURN xts_decrypt_key( const unsigned char key[], int key_len, xts_decrypt_
     case 512:   aes_klen_by = 32; break;
     }
 
-    rijndael_set_key(ctx->dec_ctx, UPTR_CAST(key, 32), aes_klen_by, 0);
-    rijndael_set_key(ctx->twk_ctx, UPTR_CAST(key + aes_klen_by, 32), aes_klen_by, 1);
+    rijndael_set_key(ctx->dec_ctx, UPTR_CAST(key, 32), aes_klen_by*8, 0);
+    rijndael_set_key(ctx->twk_ctx, UPTR_CAST(key + aes_klen_by, 32), aes_klen_by*8, 1);
     return EXIT_SUCCESS;
 }
 
