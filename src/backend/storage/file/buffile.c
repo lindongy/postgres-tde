@@ -279,7 +279,6 @@ BufFileDumpBuffer(BufFile *file)
 {
 	int			wpos = 0;
 	int			bytestowrite;
-	int			written = 0;
 	File		thisfile;
 
 	/*
@@ -342,21 +341,19 @@ BufFileDumpBuffer(BufFile *file)
 	 * logical file position, ie, original value + pos, in case that is less
 	 * (as could happen due to a small backwards seek in a dirty buffer!)
 	 */
-
-	if (file->nbytes < BLCKSZ) {
-		file->curOffset = file->curOffset & (BLCKSZ-1);
-	} else if (file->pos < file->nbytes) {
-		file->curOffset -= file->nbytes;
-		if (file->curOffset < 0)	/* handle possible segment crossing */
-		{
-			file->curFile--;
-			Assert(file->curFile >= 0);
-			file->curOffset += MAX_PHYSICAL_FILESIZE;
-		}
-	} else {
-		file->pos = 0;
-		file->nbytes = 0;
+	file->curOffset -= (file->nbytes - file->pos);
+	if (file->curOffset < 0)	/* handle possible segment crossing */
+	{
+		file->curFile--;
+		Assert(file->curFile >= 0);
+		file->curOffset += MAX_PHYSICAL_FILESIZE;
 	}
+
+	/*
+	 * Now we can set the buffer empty without changing the logical position
+	 */
+	file->pos = 0;
+	file->nbytes = 0;
 }
 
 /*
@@ -382,16 +379,11 @@ BufFileRead(BufFile *file, void *ptr, size_t size)
 		if (file->pos >= file->nbytes)
 		{
 			/* Try to load more data into buffer. */
-			Assert(file->pos == BLCKSZ);
-			if (file->pos >= BLCKSZ)
-			{
-				/* Advance buffer to next block */
-				file->curOffset += BLCKSZ;
-				file->pos -= BLCKSZ;
-				file->nbytes = 0;
-			}
+			file->curOffset += file->pos;
+			file->pos = 0;
+			file->nbytes = 0;
 			BufFileLoadBuffer(file);
-			if (file->nbytes <= file->pos)
+			if (file->nbytes <= 0)
 				break;			/* no more data available */
 		}
 
@@ -436,7 +428,6 @@ BufFileWrite(BufFile *file, void *ptr, size_t size)
 			else
 			{
 				/* Hmm, went directly from reading to writing? */
-				Assert(file->pos == BLCKSZ);
 				file->curOffset += file->pos;
 				file->pos = 0;
 				file->nbytes = 0;
@@ -570,8 +561,8 @@ BufFileSeek(BufFile *file, int fileno, off_t offset, int whence)
 		return EOF;
 	/* Seek is OK! */
 	file->curFile = newFile;
-	file->curOffset = newOffset & ~(BLCKSZ - 1);
-	file->pos = newOffset & (BLCKSZ - 1);
+	file->curOffset = newOffset;
+	file->pos = 0;
 	file->nbytes = 0;
 	return 0;
 }
