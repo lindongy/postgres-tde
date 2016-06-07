@@ -33,6 +33,7 @@
 
 #include <ctype.h>
 
+#include "access/xlog.h"
 #include "parser/scansup.h"
 #include "storage/encryption.h"
 #include "utils/backend_random.h"
@@ -531,8 +532,10 @@ pgcrypto_encryption_setup()
 	/* TODO: replace with PBKDF2 or scrypt */
 	{
 		SHA256_CTX sha_ctx;
+		uint64 sysid = GetSystemIdentifier();
 		SHA256_Init(&sha_ctx);
 		SHA256_Update(&sha_ctx, (uint8*) passphrase, strlen(passphrase));
+		SHA256_Update(&sha_ctx, (uint8*) &sysid, sizeof(sysid));
 		SHA256_Final(key, &sha_ctx);
 	}
 
