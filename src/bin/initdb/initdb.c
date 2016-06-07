@@ -3214,12 +3214,6 @@ main(int argc, char *argv[])
 
 	setup_bin_paths(argv[0]);
 
-	setup_encryption();
-
-	if (data_encryption_module != NULL)
-		printf(_("Using %s for data encryption.\n"), data_encryption_module);
-	else
-		printf(_("Data encryption is disabled.\n"));
 
 	effective_user = get_id();
 	if (strlen(username) == 0)
@@ -3253,6 +3247,13 @@ main(int argc, char *argv[])
 
 	if (pwprompt || pwfilename)
 		get_su_pwd();
+
+	setup_encryption();
+
+	if (data_encryption_module != NULL)
+		printf(_("Using %s for data encryption.\n"), data_encryption_module);
+	else
+		printf(_("Data encryption is disabled.\n"));
 
 	printf("\n");
 

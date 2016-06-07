@@ -53,10 +53,10 @@ INT_RETURN xts_encrypt_key( const unsigned char key[], int key_len, xts_encrypt_
 
 INT_RETURN xts_decrypt_key( const unsigned char key[], int key_len, xts_decrypt_ctx ctx[1] );
 
-INT_RETURN xts_encrypt_block( unsigned char sector[], unsigned char tweak[],
+INT_RETURN xts_encrypt_block( unsigned char sector[], const unsigned char tweak[],
                                unsigned int sector_len, xts_encrypt_ctx ctx[1] );
 
-INT_RETURN xts_decrypt_block( unsigned char sector[], unsigned char tweak[],
+INT_RETURN xts_decrypt_block( unsigned char sector[], const unsigned char tweak[],
                                unsigned int sector_len, xts_decrypt_ctx ctx[1] );
 
 #endif

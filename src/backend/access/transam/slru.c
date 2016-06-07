@@ -1433,8 +1433,13 @@ SlruScanDirectory(SlruCtl ctl, SlruScanCallback callback, void *data)
 	return retval;
 }
 
+/*
+ * SLRU data encryption is tweaked by page number.
+ */
 static void
 SlruEncryptionTweak(char *tweak, int pageno)
 {
+	/* TODO: would be nice to incorporate SLRU type in tweak */
 	memcpy(tweak, &pageno, sizeof(pageno));
+	memset(tweak + sizeof(pageno), 0, TWEAK_SIZE - sizeof(pageno));
 }

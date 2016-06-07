@@ -200,6 +200,7 @@ static MdfdVec *_mdfd_getseg(SMgrRelation reln, ForkNumber forkno,
 			 BlockNumber blkno, bool skipFsync, int behavior);
 static BlockNumber _mdnblocks(SMgrRelation reln, ForkNumber forknum,
 		   MdfdVec *seg);
+static void mdtweak(char *tweak, RelFileNode *relnode, ForkNumber forknum, BlockNumber blocknum);
 static void mdencrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer);
 static void mddecrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer);
 
@@ -1966,8 +1967,10 @@ _mdnblocks(SMgrRelation reln, ForkNumber forknum, MdfdVec *seg)
 	return (BlockNumber) (len / BLCKSZ);
 }
 
-static void mdtweak(char *tweak, RelFileNode *relnode, ForkNumber forknum, BlockNumber blocknum);
-
+/*
+ * md files are encrypted block at a time. Tweak will alias higher numbered
+ * forks for huge tables.
+ */
 static void
 mdtweak(char *tweak, RelFileNode *relnode, ForkNumber forknum, BlockNumber blocknum)
 {
@@ -1990,8 +1993,16 @@ mddecrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *des
 	decrypt_block(md_encryption_buffer, dest, BLCKSZ, md_encryption_tweak);
 }
 
+/*
+ * Copying relations between tablespaces/databases means that the tweak values
+ * of each block will change. This function transcodes a series of blocks with
+ * new tweak values. Returns the new block number for convenience.
+ */
 BlockNumber
-ReencryptBlock(char *buffer, int blocks, RelFileNode *srcNode, RelFileNode *dstNode, ForkNumber srcForkNum, ForkNumber dstForkNum, BlockNumber blockNum)
+ReencryptBlock(char *buffer, int blocks,
+		RelFileNode *srcNode, RelFileNode *dstNode,
+		ForkNumber srcForkNum, ForkNumber dstForkNum,
+		BlockNumber blockNum)
 {
 	char *cur;
 	char srcTweak[16];

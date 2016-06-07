@@ -4665,8 +4665,9 @@ ReadControlFile(void)
 		ereport(FATAL,
 						(errmsg("database files are encrypted"),
 				errdetail("The database cluster was initialized with encryption"
-						  " but the server was started without an encryption key."),
-						 errhint("Set the key using PGENCRYPTIONKEY environment variable.")));
+						  " but the server was started without an encryption module."),
+						 errhint("Set the encryption module using "
+								 "encryption_library configuration parameter.")));
 	else if (encryption_enabled)
 	{
 		char sample[ENCRYPTION_SAMPLE_SIZE];

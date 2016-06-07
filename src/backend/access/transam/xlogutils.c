@@ -1041,6 +1041,10 @@ read_local_xlog_page(XLogReaderState *state, XLogRecPtr targetPagePtr,
 	return count;
 }
 
+/*
+ * Xlog is encrypted page at a time. Each xlog page gets a unique tweak via
+ * timeline, segment and offset.
+ */
 void
 XLogEncryptionTweak(char *tweak, TimeLineID timeline, XLogSegNo segment, uint32 offset)
 {

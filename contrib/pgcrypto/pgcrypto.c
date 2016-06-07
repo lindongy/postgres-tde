@@ -53,9 +53,9 @@ typedef int (*PFN) (const char *name, void **res);
 static void *find_provider(text *name, PFN pf, char *desc, int silent);
 static bool pgcrypto_encryption_setup();
 static void pgcrypto_encrypt_block(const char *input,
-		char *output, Size size, char *tweak);
-static void pgcrypto_decrypt_block(char *input,
-		char *output, Size size, char *tweak);
+		char *output, Size size, const char *tweak);
+static void pgcrypto_decrypt_block(const char *input,
+		char *output, Size size, const char *tweak);
 void _PG_init(void);
 
 /*
@@ -516,6 +516,9 @@ find_provider(text *name,
 	return err ? NULL : res;
 }
 
+/*
+ * Pgcrypto module does AES-128-XTS encryption.
+ */
 static bool
 pgcrypto_encryption_setup()
 {
@@ -524,7 +527,14 @@ pgcrypto_encryption_setup()
 
 	/* Empty or missing passphrase means that encryption is not configured */
 	if (passphrase == NULL || passphrase[0] == '\0')
+	{
+		ereport(LOG,
+				(errmsg("encryption key not provided"),
+				errdetail("The database cluster was initialized with encryption"
+						  " but the server was started without an encryption key."),
+						 errhint("Set the key using PGENCRYPTIONKEY environment variable.")));
 		return false;
+	}
 
 	/* TODO: replace with PBKDF2 or scrypt */
 	{
@@ -545,27 +555,23 @@ pgcrypto_encryption_setup()
 }
 
 static void
-pgcrypto_encrypt_block(const char *input,
-		char *output,
-		Size size,
-		char *tweak)
+pgcrypto_encrypt_block(const char *input, char *output, Size size,
+		const char *tweak)
 {
 	if (input != output)
 		memcpy(output, input, size);
 
-	xts_encrypt_block((uint8*) output, (uint8*) tweak, size, db_key.enc_ctx);
+	xts_encrypt_block((uint8*) output, (const uint8*) tweak, size, db_key.enc_ctx);
 }
 
 static void
-pgcrypto_decrypt_block(char *input,
-		char *output,
-		Size size,
-		char *tweak)
+pgcrypto_decrypt_block(const char *input, char *output, Size size,
+		const char *tweak)
 {
 	if (input != output)
 		memcpy(output, input, size);
 
-	xts_decrypt_block((uint8*) output, (uint8*) tweak, size, db_key.dec_ctx);
+	xts_decrypt_block((uint8*) output, (const uint8*) tweak, size, db_key.dec_ctx);
 }
 
 void

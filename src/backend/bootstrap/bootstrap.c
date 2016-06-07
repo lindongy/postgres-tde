@@ -22,6 +22,7 @@
 #include "bootstrap/bootstrap.h"
 #include "catalog/index.h"
 #include "catalog/pg_collation.h"
+#include "catalog/pg_control.h"
 #include "catalog/pg_type.h"
 #include "libpq/pqsignal.h"
 #include "miscadmin.h"
@@ -346,16 +347,6 @@ AuxiliaryProcessMain(int argc, char *argv[])
 	if (!IsUnderPostmaster)
 		ChangeToDataDir();
 
-	if (!IsUnderPostmaster)
-		setup_encryption();
-
-	if (encryption_enabled)
-	{
-		bootstrap_data_encrypted = true;
-		bootstrap_encryption_sample = palloc0(16);
-		sample_encryption(bootstrap_encryption_sample);
-	}
-
 	/* If standalone, create lockfile for data directory */
 	if (!IsUnderPostmaster)
 		CreateDataDirLockFile(false);
@@ -366,6 +357,17 @@ AuxiliaryProcessMain(int argc, char *argv[])
 	/* Initialize MaxBackends (if under postmaster, was done already) */
 	if (!IsUnderPostmaster)
 		InitializeMaxBackends();
+
+	if (!IsUnderPostmaster)
+		setup_encryption();
+
+	if (encryption_enabled)
+	{
+		bootstrap_data_encrypted = true;
+		bootstrap_encryption_sample = palloc0(ENCRYPTION_SAMPLE_SIZE);
+		sample_encryption(bootstrap_encryption_sample);
+	}
+
 
 	BaseInit();
 

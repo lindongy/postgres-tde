@@ -33,8 +33,9 @@
 /*
  * copydir: copy a directory
  *
- * If recurse is false, subdirectories are ignored.  Anything that's not
- * a directory or a regular file is ignored.
+ * RelFileNode values must specify tablespace and database oids for source
+ * and target to support re-encryption if necessary. relNode value in provided
+ * structs will be clobbered.
  */
 void
 copydir(char *fromdir, char *todir, RelFileNode *fromNode, RelFileNode *toNode)
