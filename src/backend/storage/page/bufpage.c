@@ -118,26 +118,8 @@ PageIsVerified(Page page, BlockNumber blkno)
 			return true;
 	}
 
-	/*
-	 * Check all-zeroes case. Luckily BLCKSZ is guaranteed to always be a
-	 * multiple of size_t - and it's much faster to compare memory using the
-	 * native word size.
-	 */
-	StaticAssertStmt(BLCKSZ == (BLCKSZ / sizeof(size_t)) * sizeof(size_t),
-					 "BLCKSZ has to be a multiple of sizeof(size_t)");
-
-	all_zeroes = true;
-	pagebytes = (size_t *) page;
-	for (i = 0; i < (BLCKSZ / sizeof(size_t)); i++)
-	{
-		if (pagebytes[i] != 0)
-		{
-			all_zeroes = false;
-			break;
-		}
-	}
-
-	if (all_zeroes)
+	/* Check all-zeroes case */
+	if (IsAllZero((char *) page, BLCKSZ))
 		return true;
 
 	/*
@@ -1203,4 +1185,39 @@ PageSetChecksumInplace(Page page, BlockNumber blkno)
 		return;
 
 	((PageHeader) page)->pd_checksum = pg_checksum_page((char *) page, blkno);
+}
+
+/*
+ * Helper function to check if a page is completely empty.
+ */
+bool
+IsAllZero(const char *input, Size size)
+{
+	const char *pos = input;
+	const char *aligned_start = (char*) MAXALIGN64(input);
+	const char *end = input + size;
+
+	/* Check 1 byte at a time until pos is 8 byte aligned */
+	while (pos < aligned_start)
+		if (*pos++ != 0)
+			return false;
+
+	/*
+	 * Run 8 parallel 8 byte checks in one iteration. On 2016 hardware
+	 * slightly faster than 4 parallel checks.
+	 **/
+	while (pos + 8*sizeof(uint64) <= end)
+	{
+		uint64 *p = (uint64*) pos;
+		if ((p[0] | p[1] | p[2] | p[3] | p[4] | p[5] | p[6] | p[7]) != 0)
+			return false;
+		pos += 8*sizeof(uint64);
+	}
+
+	/* Handle unaligned tail. */
+	while (pos < end)
+		if (*pos++ != 0)
+			return false;
+
+	return true;
 }

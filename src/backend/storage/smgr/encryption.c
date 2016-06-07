@@ -14,6 +14,7 @@
  */
 #include "postgres.h"
 
+#include "storage/bufpage.h"
 #include "storage/encryption.h"
 #include "miscadmin.h"
 #include "fmgr.h"
@@ -49,13 +50,28 @@ encrypt_block(const char *input, char *output, Size size, char *tweak)
 	Assert(size % 16 == 0);
 	Assert(encryption_enabled);
 
-	encryption_hooks.EncryptBlock(input, output, size, tweak);
+	if (IsAllZero(input, size))
+	{
+		if (input != output)
+			memset(output, 0, size);
+	}
+	else
+		encryption_hooks.EncryptBlock(input, output, size, tweak);
 }
 
 void
 decrypt_block(char *input, char *output, Size size, char *tweak)
 {
-	encryption_hooks.DecryptBlock(input, output, size, tweak);
+	Assert(size % 16 == 0);
+	Assert(encryption_enabled);
+
+	if (IsAllZero(input, size))
+	{
+		if (input != output)
+			memset(output, 0, size);
+	}
+	else
+		encryption_hooks.DecryptBlock(input, output, size, tweak);
 }
 
 void

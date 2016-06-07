@@ -435,4 +435,6 @@ extern bool PageIndexTupleOverwrite(Page page, OffsetNumber offnum,
 extern char *PageSetChecksumCopy(Page page, BlockNumber blkno);
 extern void PageSetChecksumInplace(Page page, BlockNumber blkno);
 
-#endif							/* BUFPAGE_H */
+extern bool IsAllZero(const char *input, Size size);
+
+#endif   /* BUFPAGE_H */

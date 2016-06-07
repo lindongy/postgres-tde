@@ -51,17 +51,11 @@ PG_MODULE_MAGIC;
 
 typedef int (*PFN) (const char *name, void **res);
 static void *find_provider(text *name, PFN pf, char *desc, int silent);
-static bool check_all_zero(const char *input, Size size);
 static bool pgcrypto_encryption_setup();
 static void pgcrypto_encrypt_block(const char *input,
-		char *output,
-		Size size,
-		char *tweak);
-static void
-pgcrypto_decrypt_block(char *input,
-		char *output,
-		Size size,
-		char *tweak);
+		char *output, Size size, char *tweak);
+static void pgcrypto_decrypt_block(char *input,
+		char *output, Size size, char *tweak);
 void _PG_init(void);
 
 /*
@@ -552,37 +546,6 @@ pgcrypto_encryption_setup()
 	return true;
 }
 
-static bool check_all_zero(const char *input, Size size)
-{
-	const char *pos = input;
-	const char *aligned_start = (char*) MAXALIGN64(input);
-	const char *end = input + size;
-
-	/* Check 1 byte at a time until pos is 8 byte aligned */
-	while (pos < aligned_start)
-		if (*pos++ != 0)
-			return false;
-
-	/*
-	 * Run 8 parallel 8 byte checks in one iteration. On 2016 hardware
-	 * slightly faster than 4 parallel checks.
-	 **/
-	while (pos + 8*sizeof(uint64) <= end)
-	{
-		uint64 *p = (uint64*) pos;
-		if ((p[0] | p[1] | p[2] | p[3] | p[4] | p[5] | p[6] | p[7]) != 0)
-			return false;
-		pos += 8*sizeof(uint64);
-	}
-
-	/* Handle unaligned tail. */
-	while (pos < end)
-		if (*pos++ != 0)
-			return false;
-
-	return true;
-}
-
 static void
 pgcrypto_encrypt_block(const char *input,
 		char *output,
@@ -591,10 +554,6 @@ pgcrypto_encrypt_block(const char *input,
 {
 	if (input != output)
 		memcpy(output, input, size);
-
-	/* Empty blocks are not encrypted. */
-	if (check_all_zero(output, size))
-		return;
 
 	xts_encrypt_block((uint8*) output, (uint8*) tweak, size, db_key.enc_ctx);
 }
@@ -607,10 +566,6 @@ pgcrypto_decrypt_block(char *input,
 {
 	if (input != output)
 		memcpy(output, input, size);
-
-	/* Empty blocks are not encrypted. */
-	if (check_all_zero(output, size))
-		return;
 
 	xts_decrypt_block((uint8*) output, (uint8*) tweak, size, db_key.dec_ctx);
 }
