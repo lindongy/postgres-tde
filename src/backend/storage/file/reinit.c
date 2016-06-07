@@ -17,6 +17,7 @@
 #include <unistd.h>
 
 #include "catalog/catalog.h"
+#include "catalog/pg_tablespace.h"
 #include "common/relpath.h"
 #include "storage/copydir.h"
 #include "storage/fd.h"
@@ -25,9 +26,9 @@
 #include "utils/memutils.h"
 
 static void ResetUnloggedRelationsInTablespaceDir(const char *tsdirname,
-									  int op);
+									  int op, Oid spcOid);
 static void ResetUnloggedRelationsInDbspaceDir(const char *dbspacedirname,
-								   int op);
+								   int op, Oid spcOid, Oid dbOid);
 
 typedef struct
 {
@@ -69,7 +70,7 @@ ResetUnloggedRelations(int op)
 	/*
 	 * First process unlogged files in pg_default ($PGDATA/base)
 	 */
-	ResetUnloggedRelationsInTablespaceDir("base", op);
+	ResetUnloggedRelationsInTablespaceDir("base", op, DEFAULTTABLESPACE_OID);
 
 	/*
 	 * Cycle through directories for all non-default tablespaces.
@@ -78,13 +79,15 @@ ResetUnloggedRelations(int op)
 
 	while ((spc_de = ReadDir(spc_dir, "pg_tblspc")) != NULL)
 	{
+		Oid spcOid;
 		if (strcmp(spc_de->d_name, ".") == 0 ||
 			strcmp(spc_de->d_name, "..") == 0)
 			continue;
 
 		snprintf(temp_path, sizeof(temp_path), "pg_tblspc/%s/%s",
 				 spc_de->d_name, TABLESPACE_VERSION_DIRECTORY);
-		ResetUnloggedRelationsInTablespaceDir(temp_path, op);
+		spcOid = atoi(spc_de->d_name);
+		ResetUnloggedRelationsInTablespaceDir(temp_path, op, spcOid);
 	}
 
 	FreeDir(spc_dir);
@@ -98,7 +101,7 @@ ResetUnloggedRelations(int op)
 
 /* Process one tablespace directory for ResetUnloggedRelations */
 static void
-ResetUnloggedRelationsInTablespaceDir(const char *tsdirname, int op)
+ResetUnloggedRelationsInTablespaceDir(const char *tsdirname, int op, Oid spcOid)
 {
 	DIR		   *ts_dir;
 	struct dirent *de;
@@ -118,6 +121,7 @@ ResetUnloggedRelationsInTablespaceDir(const char *tsdirname, int op)
 	while ((de = ReadDir(ts_dir, tsdirname)) != NULL)
 	{
 		int			i = 0;
+		Oid			dbOid;
 
 		/*
 		 * We're only interested in the per-database directories, which have
@@ -129,9 +133,10 @@ ResetUnloggedRelationsInTablespaceDir(const char *tsdirname, int op)
 		if (de->d_name[i] != '\0' || i == 0)
 			continue;
 
+		dbOid = atoi(de->d_name);
 		snprintf(dbspace_path, sizeof(dbspace_path), "%s/%s",
 				 tsdirname, de->d_name);
-		ResetUnloggedRelationsInDbspaceDir(dbspace_path, op);
+		ResetUnloggedRelationsInDbspaceDir(dbspace_path, op, spcOid, dbOid);
 	}
 
 	FreeDir(ts_dir);
@@ -139,7 +144,8 @@ ResetUnloggedRelationsInTablespaceDir(const char *tsdirname, int op)
 
 /* Process one per-dbspace directory for ResetUnloggedRelations */
 static void
-ResetUnloggedRelationsInDbspaceDir(const char *dbspacedirname, int op)
+ResetUnloggedRelationsInDbspaceDir(const char *dbspacedirname, int op,
+		Oid spcOid, Oid dbOid)
 {
 	DIR		   *dbspace_dir;
 	struct dirent *de;
@@ -188,7 +194,7 @@ ResetUnloggedRelationsInDbspaceDir(const char *dbspacedirname, int op)
 
 			/* Skip anything that doesn't look like a relation data file. */
 			if (!parse_filename_for_nontemp_relation(de->d_name, &oidchars,
-													 &forkNum))
+													 &forkNum, NULL))
 				continue;
 
 			/* Also skip it unless this is the init fork. */
@@ -241,7 +247,7 @@ ResetUnloggedRelationsInDbspaceDir(const char *dbspacedirname, int op)
 
 			/* Skip anything that doesn't look like a relation data file. */
 			if (!parse_filename_for_nontemp_relation(de->d_name, &oidchars,
-													 &forkNum))
+													 &forkNum, NULL))
 				continue;
 
 			/* We never remove the init fork. */
@@ -305,13 +311,14 @@ ResetUnloggedRelationsInDbspaceDir(const char *dbspacedirname, int op)
 		{
 			ForkNumber	forkNum;
 			int			oidchars;
+			int			segment;
 			char		oidbuf[OIDCHARS + 1];
 			char		srcpath[MAXPGPATH * 2];
 			char		dstpath[MAXPGPATH];
 
 			/* Skip anything that doesn't look like a relation data file. */
 			if (!parse_filename_for_nontemp_relation(de->d_name, &oidchars,
-													 &forkNum))
+													 &forkNum, &segment))
 				continue;
 
 			/* Also skip it unless this is the init fork. */
@@ -332,10 +339,10 @@ ResetUnloggedRelationsInDbspaceDir(const char *dbspacedirname, int op)
 			/* OK, we're ready to perform the actual copy. */
 			elog(DEBUG2, "copying %s to %s", srcpath, dstpath);
 			{
-				RelFileNode srcNode = {InvalidOid, InvalidOid, atol(oidbuf)};
-				RelFileNode dstNode = {InvalidOid, InvalidOid, InvalidOid};
-				Assert(false); /* TODO Figure out how to get correct oids and forknums */
-				copy_file(srcpath, dstpath, &srcNode, &dstNode, INIT_FORKNUM, INIT_FORKNUM);
+				RelFileNode srcNode = {spcOid, dbOid, atol(oidbuf)};
+				RelFileNode dstNode = srcNode;
+				copy_file(srcpath, dstpath, &srcNode, &dstNode,
+						INIT_FORKNUM, MAIN_FORKNUM, segment);
 			}
 		}
 
@@ -367,7 +374,7 @@ ResetUnloggedRelationsInDbspaceDir(const char *dbspacedirname, int op)
 
 			/* Skip anything that doesn't look like a relation data file. */
 			if (!parse_filename_for_nontemp_relation(de->d_name, &oidchars,
-													 &forkNum))
+													 &forkNum, NULL))
 				continue;
 
 			/* Also skip it unless this is the init fork. */

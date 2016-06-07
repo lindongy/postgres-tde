@@ -80,6 +80,7 @@ copydir(char *fromdir, char *todir, RelFileNode *fromNode, RelFileNode *toNode)
 		{
 			int oidchars;
 			ForkNumber forkNum;
+			int segment;
 
 			/*
 			 * For encrypted databases we need to reencrypt files with new
@@ -87,7 +88,7 @@ copydir(char *fromdir, char *todir, RelFileNode *fromNode, RelFileNode *toNode)
 			 */
 			if (encryption_enabled &&
 					parse_filename_for_nontemp_relation(xlde->d_name,
-							&oidchars, &forkNum))
+							&oidchars, &forkNum, &segment))
 			{
 				char oidbuf[OIDCHARS+1];
 				memcpy(oidbuf, xlde->d_name, oidchars);
@@ -95,10 +96,10 @@ copydir(char *fromdir, char *todir, RelFileNode *fromNode, RelFileNode *toNode)
 
 				/* We scribble over the provided RelFileNodes here */
 				fromNode->relNode = toNode->relNode = atol(oidbuf);
-				copy_file(fromfile, tofile, fromNode, toNode, forkNum, forkNum);
+				copy_file(fromfile, tofile, fromNode, toNode, forkNum, forkNum, segment);
 			}
 			else
-				copy_file(fromfile, tofile, NULL, NULL, 0, 0);
+				copy_file(fromfile, tofile, NULL, NULL, 0, 0, 0);
 		}
 	}
 	FreeDir(xldir);
@@ -155,14 +156,15 @@ copydir(char *fromdir, char *todir, RelFileNode *fromNode, RelFileNode *toNode)
  */
 void
 copy_file(char *fromfile, char *tofile, RelFileNode *fromNode,
-		RelFileNode *toNode, ForkNumber fromForkNum, ForkNumber toForkNum)
+		RelFileNode *toNode, ForkNumber fromForkNum, ForkNumber toForkNum,
+		int segment)
 {
 	char	   *buffer;
 	int			srcfd;
 	int			dstfd;
 	int			nbytes;
 	int			bytesread;
-	BlockNumber blockNum = 0;
+	BlockNumber blockNum = segment*RELSEG_SIZE;
 	off_t		offset;
 
 	/* Use palloc to ensure we get a maxaligned buffer */
@@ -273,9 +275,10 @@ copy_file(char *fromfile, char *tofile, RelFileNode *fromNode,
  */
 bool
 parse_filename_for_nontemp_relation(const char *name, int *oidchars,
-									ForkNumber *fork)
+									ForkNumber *fork, int *segment)
 {
 	int			pos;
+	int			segstart = 0;
 
 	/* Look for a non-empty string of digits (that isn't too long). */
 	for (pos = 0; isdigit((unsigned char) name[pos]); ++pos)
@@ -302,6 +305,7 @@ parse_filename_for_nontemp_relation(const char *name, int *oidchars,
 	{
 		int			segchar;
 
+		segstart = pos + 1;
 		for (segchar = 1; isdigit((unsigned char) name[pos + segchar]); ++segchar)
 			;
 		if (segchar <= 1)
@@ -312,5 +316,14 @@ parse_filename_for_nontemp_relation(const char *name, int *oidchars,
 	/* Now we should be at the end. */
 	if (name[pos] != '\0')
 		return false;
+
+	if (segment != NULL)
+	{
+		if (segstart == 0)
+			*segment = 0;
+		else
+			*segment = atoi(name + segstart);
+	}
+
 	return true;
 }
