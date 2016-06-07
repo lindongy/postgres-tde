@@ -27,7 +27,7 @@ EncryptionRoutines encryption_hooks;
 void
 register_encryption_module(char *name, EncryptionRoutines *enc)
 {
-	elog(LOG, "Registering encryption module %s", name);
+	elog(DEBUG1, "Registering encryption module %s", name);
 
 	encryption_hooks = *enc;
 	have_encryption_provider = true;
@@ -94,7 +94,7 @@ setup_encryption()
 	if (have_encryption_provider)
 	{
 		encryption_enabled = encryption_hooks.SetupEncryption();
-		elog(LOG, "encryption %s", encryption_enabled ? "enabled" : "disabled");
+		elog(DEBUG1, "encryption %s", encryption_enabled ? "enabled" : "disabled");
 	}
 }
 
