@@ -2465,6 +2465,10 @@ XLogWrite(XLogwrtRqst WriteRqst, bool flexible)
 			nbytes = npages * (Size) XLOG_BLCKSZ;
 			if (encryption_enabled) {
 				int i;
+				/*
+				 * XXX: use larger encryption buffer to enable larger writes
+				 * and reduce number of syscalls?
+				 */
 				for (i = 0; i < npages; i++) {
 					char buf[XLOG_BLCKSZ];
 					char tweak[TWEAK_SIZE];

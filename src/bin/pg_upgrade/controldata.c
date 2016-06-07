@@ -448,8 +448,9 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 			if (strspn(p, "0123456789ABCDEF") != 32)
 				pg_fatal("%d: controldata retrieval problem\n", __LINE__);
 
-		    for(i = 0; i < 16; i++)
-		        sscanf(p + 2*i, "%2hhx", cluster->controldata.encryption_verification + i);
+			for(i = 0; i < 16; i++)
+				sscanf(p + 2*i, "%2hhx",
+						cluster->controldata.encryption_verification + i);
 			got_data_encrypted = true;
 		}
 	}

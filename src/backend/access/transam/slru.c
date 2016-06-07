@@ -126,6 +126,7 @@ static int	slru_errno;
 static char slru_encryption_buf[BLCKSZ];
 static char slru_encryption_tweak[TWEAK_SIZE];
 
+
 static void SimpleLruZeroLSNs(SlruCtl ctl, int slotno);
 static void SimpleLruWaitIO(SlruCtl ctl, int slotno);
 static void SlruInternalWritePage(SlruCtl ctl, int slotno, SlruFlush fdata);
