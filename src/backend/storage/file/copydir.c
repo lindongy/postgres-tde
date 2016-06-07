@@ -22,8 +22,11 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
+#include "catalog/catalog.h"
 #include "storage/copydir.h"
+#include "storage/encryption.h"
 #include "storage/fd.h"
+#include "storage/smgr.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 
@@ -34,12 +37,14 @@
  * a directory or a regular file is ignored.
  */
 void
-copydir(char *fromdir, char *todir, bool recurse)
+copydir(char *fromdir, char *todir, RelFileNode *fromNode, RelFileNode *toNode)
 {
 	DIR		   *xldir;
 	struct dirent *xlde;
 	char		fromfile[MAXPGPATH * 2];
 	char		tofile[MAXPGPATH * 2];
+
+	Assert(!encryption_enabled || (fromNode != NULL && toNode != NULL));
 
 	if (mkdir(todir, S_IRWXU) != 0)
 		ereport(ERROR,
@@ -71,14 +76,30 @@ copydir(char *fromdir, char *todir, bool recurse)
 					(errcode_for_file_access(),
 					 errmsg("could not stat file \"%s\": %m", fromfile)));
 
-		if (S_ISDIR(fst.st_mode))
+		if (S_ISREG(fst.st_mode))
 		{
-			/* recurse to handle subdirectories */
-			if (recurse)
-				copydir(fromfile, tofile, true);
+			int oidchars;
+			ForkNumber forkNum;
+
+			/*
+			 * For encrypted databases we need to reencrypt files with new
+			 * tweaks.
+			 */
+			if (encryption_enabled &&
+					parse_filename_for_nontemp_relation(xlde->d_name,
+							&oidchars, &forkNum))
+			{
+				char oidbuf[OIDCHARS+1];
+				memcpy(oidbuf, xlde->d_name, oidchars);
+				oidbuf[oidchars] = '\0';
+
+				/* We scribble over the provided RelFileNodes here */
+				fromNode->relNode = toNode->relNode = atol(oidbuf);
+				copy_file(fromfile, tofile, fromNode, toNode, forkNum, forkNum);
+			}
+			else
+				copy_file(fromfile, tofile, NULL, NULL, 0, 0);
 		}
-		else if (S_ISREG(fst.st_mode))
-			copy_file(fromfile, tofile);
 	}
 	FreeDir(xldir);
 
@@ -129,15 +150,19 @@ copydir(char *fromdir, char *todir, bool recurse)
 }
 
 /*
- * copy one file
+ * copy one file. If decryption and reencryption is needed specify
+ * relfilenodes for source and target.
  */
 void
-copy_file(char *fromfile, char *tofile)
+copy_file(char *fromfile, char *tofile, RelFileNode *fromNode,
+		RelFileNode *toNode, ForkNumber fromForkNum, ForkNumber toForkNum)
 {
 	char	   *buffer;
 	int			srcfd;
 	int			dstfd;
 	int			nbytes;
+	int			bytesread;
+	BlockNumber blockNum = 0;
 	off_t		offset;
 
 	/* Use palloc to ensure we get a maxaligned buffer */
@@ -169,16 +194,39 @@ copy_file(char *fromfile, char *tofile)
 		/* If we got a cancel signal during the copy of the file, quit */
 		CHECK_FOR_INTERRUPTS();
 
-		pgstat_report_wait_start(WAIT_EVENT_COPY_FILE_READ);
-		nbytes = read(srcfd, buffer, COPY_BUF_SIZE);
-		pgstat_report_wait_end();
-		if (nbytes < 0)
-			ereport(ERROR,
-					(errcode_for_file_access(),
-					 errmsg("could not read file \"%s\": %m", fromfile)));
+		/*
+		 * Try to read as much as we fit in the buffer so we can deal with
+		 * complete blocks if we need to reencrypt.
+		 */
+		nbytes = 0;
+		while (nbytes < COPY_BUF_SIZE)
+		{
+			pgstat_report_wait_start(WAIT_EVENT_COPY_FILE_READ);
+			bytesread = read(srcfd, buffer, COPY_BUF_SIZE);
+			pgstat_report_wait_end();
+			if (bytesread < 0)
+				ereport(ERROR,
+						(errcode_for_file_access(),
+						 errmsg("could not read file \"%s\": %m", fromfile)));
+			nbytes += bytesread;
+			if (bytesread == 0)
+				break;
+		}
 		if (nbytes == 0)
 			break;
 		errno = 0;
+
+		/*
+		 * If the database is encrypted we need to decrypt the data here
+		 * and reencrypt it to adjust the tweak values of blocks.
+		 */
+		if (fromNode != NULL)
+		{
+			Assert(toNode != NULL);
+			blockNum = ReencryptBlock(buffer, nbytes/BLCKSZ,
+					fromNode, toNode, fromForkNum, toForkNum, blockNum);
+		}
+
 		pgstat_report_wait_start(WAIT_EVENT_COPY_FILE_WRITE);
 		if ((int) write(dstfd, buffer, nbytes) != nbytes)
 		{
@@ -208,4 +256,61 @@ copy_file(char *fromfile, char *tofile)
 	CloseTransientFile(srcfd);
 
 	pfree(buffer);
+}
+
+
+/*
+ * Basic parsing of putative relation filenames.
+ *
+ * This function returns true if the file appears to be in the correct format
+ * for a non-temporary relation and false otherwise.
+ *
+ * NB: If this function returns true, the caller is entitled to assume that
+ * *oidchars has been set to the a value no more than OIDCHARS, and thus
+ * that a buffer of OIDCHARS+1 characters is sufficient to hold the OID
+ * portion of the filename.  This is critical to protect against a possible
+ * buffer overrun.
+ */
+bool
+parse_filename_for_nontemp_relation(const char *name, int *oidchars,
+									ForkNumber *fork)
+{
+	int			pos;
+
+	/* Look for a non-empty string of digits (that isn't too long). */
+	for (pos = 0; isdigit((unsigned char) name[pos]); ++pos)
+		;
+	if (pos == 0 || pos > OIDCHARS)
+		return false;
+	*oidchars = pos;
+
+	/* Check for a fork name. */
+	if (name[pos] != '_')
+		*fork = MAIN_FORKNUM;
+	else
+	{
+		int			forkchar;
+
+		forkchar = forkname_chars(&name[pos + 1], fork);
+		if (forkchar <= 0)
+			return false;
+		pos += forkchar + 1;
+	}
+
+	/* Check for a segment number. */
+	if (name[pos] == '.')
+	{
+		int			segchar;
+
+		for (segchar = 1; isdigit((unsigned char) name[pos + segchar]); ++segchar)
+			;
+		if (segchar <= 1)
+			return false;
+		pos += segchar;
+	}
+
+	/* Now we should be at the end. */
+	if (name[pos] != '\0')
+		return false;
+	return true;
 }

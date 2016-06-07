@@ -662,15 +662,15 @@ XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
 	Size		nbytes;
 	uint32		decryptOff;
 
-	/* We only support block aligned reads to support encryption */
-	Assert(startptr % XLOG_BLCKSZ == 0);
-	Assert(count % XLOG_BLCKSZ == 0);
-
 	/* state maintained across calls */
 	static int	sendFile = -1;
 	static XLogSegNo sendSegNo = 0;
 	static TimeLineID sendTLI = 0;
 	static uint32 sendOff = 0;
+
+	/* We only support block aligned reads to support encryption */
+	Assert(startptr % XLOG_BLCKSZ == 0);
+	Assert(count % XLOG_BLCKSZ == 0);
 
 	decrypt_p = p = buf;
 	recptr = startptr;

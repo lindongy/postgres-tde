@@ -28,8 +28,6 @@ static void ResetUnloggedRelationsInTablespaceDir(const char *tsdirname,
 									  int op);
 static void ResetUnloggedRelationsInDbspaceDir(const char *dbspacedirname,
 								   int op);
-static bool parse_filename_for_nontemp_relation(const char *name,
-									int *oidchars, ForkNumber *fork);
 
 typedef struct
 {
@@ -333,7 +331,12 @@ ResetUnloggedRelationsInDbspaceDir(const char *dbspacedirname, int op)
 
 			/* OK, we're ready to perform the actual copy. */
 			elog(DEBUG2, "copying %s to %s", srcpath, dstpath);
-			copy_file(srcpath, dstpath);
+			{
+				RelFileNode srcNode = {InvalidOid, InvalidOid, atol(oidbuf)};
+				RelFileNode dstNode = {InvalidOid, InvalidOid, InvalidOid};
+				Assert(false); /* TODO Figure out how to get correct oids and forknums */
+				copy_file(srcpath, dstpath, &srcNode, &dstNode, INIT_FORKNUM, INIT_FORKNUM);
+			}
 		}
 
 		FreeDir(dbspace_dir);
@@ -385,60 +388,4 @@ ResetUnloggedRelationsInDbspaceDir(const char *dbspacedirname, int op)
 
 		fsync_fname(dbspacedirname, true);
 	}
-}
-
-/*
- * Basic parsing of putative relation filenames.
- *
- * This function returns true if the file appears to be in the correct format
- * for a non-temporary relation and false otherwise.
- *
- * NB: If this function returns true, the caller is entitled to assume that
- * *oidchars has been set to the a value no more than OIDCHARS, and thus
- * that a buffer of OIDCHARS+1 characters is sufficient to hold the OID
- * portion of the filename.  This is critical to protect against a possible
- * buffer overrun.
- */
-static bool
-parse_filename_for_nontemp_relation(const char *name, int *oidchars,
-									ForkNumber *fork)
-{
-	int			pos;
-
-	/* Look for a non-empty string of digits (that isn't too long). */
-	for (pos = 0; isdigit((unsigned char) name[pos]); ++pos)
-		;
-	if (pos == 0 || pos > OIDCHARS)
-		return false;
-	*oidchars = pos;
-
-	/* Check for a fork name. */
-	if (name[pos] != '_')
-		*fork = MAIN_FORKNUM;
-	else
-	{
-		int			forkchar;
-
-		forkchar = forkname_chars(&name[pos + 1], fork);
-		if (forkchar <= 0)
-			return false;
-		pos += forkchar + 1;
-	}
-
-	/* Check for a segment number. */
-	if (name[pos] == '.')
-	{
-		int			segchar;
-
-		for (segchar = 1; isdigit((unsigned char) name[pos + segchar]); ++segchar)
-			;
-		if (segchar <= 1)
-			return false;
-		pos += segchar;
-	}
-
-	/* Now we should be at the end. */
-	if (name[pos] != '\0')
-		return false;
-	return true;
 }

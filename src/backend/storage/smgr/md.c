@@ -1975,34 +1975,56 @@ static bool iszero(char *buffer)
 	return true;
 }
 
-static void md_tweak(char *tweak, SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum);
+static void mdtweak(char *tweak, RelFileNode *relnode, ForkNumber forknum, BlockNumber blocknum);
 
-static void md_tweak(char *tweak, SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum)
+static void
+mdtweak(char *tweak, RelFileNode *relnode, ForkNumber forknum, BlockNumber blocknum)
 {
 	uint32 fork_and_block = (forknum << 24) ^ blocknum;
-	memcpy(tweak, &(reln->smgr_rnode.node), 12);
+	memcpy(tweak, relnode, 12);
 	memcpy(tweak+12, &fork_and_block, 4);
 }
 
-static void mdencrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer)
+static void
+mdencrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer)
 {
 	if (iszero(buffer))
 		memset(md_encryption_buffer, 0, BLCKSZ);
 	else
 	{
-		md_tweak(md_encryption_tweak, reln, forknum, blocknum);
+		mdtweak(md_encryption_tweak, &(reln->smgr_rnode.node), forknum, blocknum);
 		encrypt_block(buffer, md_encryption_buffer, BLCKSZ, md_encryption_tweak);
 	}
 }
 
-static void mddecrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *dest)
+static void
+mddecrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *dest)
 {
 	if (iszero(md_encryption_buffer))
 		memset(dest, 0, BLCKSZ);
 	else
 	{
-		md_tweak(md_encryption_tweak, reln, forknum, blocknum);
+		mdtweak(md_encryption_tweak, &(reln->smgr_rnode.node), forknum, blocknum);
 		decrypt_block(md_encryption_buffer, dest, BLCKSZ, md_encryption_tweak);
 	}
 }
 
+BlockNumber
+ReencryptBlock(char *buffer, int blocks, RelFileNode *srcNode, RelFileNode *dstNode, ForkNumber srcForkNum, ForkNumber dstForkNum, BlockNumber blockNum)
+{
+	char *cur;
+	char srcTweak[16];
+	char dstTweak[16];
+	for (cur = buffer; cur < buffer + blocks * BLCKSZ; cur += BLCKSZ)
+	{
+		if (!iszero(cur))
+		{
+			mdtweak(srcTweak, srcNode, srcForkNum, blockNum);
+			mdtweak(dstTweak, dstNode, dstForkNum, blockNum);
+			decrypt_block(cur, cur, BLCKSZ, srcTweak);
+			encrypt_block(cur, cur, BLCKSZ, dstTweak);
+		}
+		blockNum++;
+	}
+	return blockNum;
+}

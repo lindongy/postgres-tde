@@ -144,4 +144,15 @@ extern void RememberFsyncRequest(RelFileNode rnode, ForkNumber forknum,
 extern void ForgetRelationFsyncRequests(RelFileNode rnode, ForkNumber forknum);
 extern void ForgetDatabaseFsyncRequests(Oid dbid);
 
-#endif							/* SMGR_H */
+extern BlockNumber ReencryptBlock(char *buffer, int blocks,
+		RelFileNode *srcNode, RelFileNode *dstNode,
+		ForkNumber srcForkNum, ForkNumber dstForkNum,
+		BlockNumber blockNum);
+
+/* smgrtype.c */
+extern Datum smgrout(PG_FUNCTION_ARGS);
+extern Datum smgrin(PG_FUNCTION_ARGS);
+extern Datum smgreq(PG_FUNCTION_ARGS);
+extern Datum smgrne(PG_FUNCTION_ARGS);
+
+#endif   /* SMGR_H */
