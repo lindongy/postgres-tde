@@ -38,9 +38,12 @@
 
 #include "executor/instrument.h"
 #include "pgstat.h"
+#include "miscadmin.h"
+#include "storage/encryption.h"
 #include "storage/fd.h"
 #include "storage/buffile.h"
 #include "storage/buf_internals.h"
+#include "utils/datetime.h"
 #include "utils/resowner.h"
 
 /*
@@ -88,6 +91,8 @@ struct BufFile
 	int			pos;			/* next read/write position in buffer */
 	int			nbytes;			/* total # of valid bytes in buffer */
 	char		buffer[BLCKSZ];
+	char		tweakBase[TWEAK_SIZE];
+	off_t		maxOffset;
 };
 
 static BufFile *makeBufFile(File firstfile);
@@ -95,7 +100,7 @@ static void extendBufFile(BufFile *file);
 static void BufFileLoadBuffer(BufFile *file);
 static void BufFileDumpBuffer(BufFile *file);
 static int	BufFileFlush(BufFile *file);
-
+static void BufFileTweak(char *tweak, BufFile *file, int curFile, off_t offset);
 
 /*
  * Create a BufFile given the first underlying physical file.
@@ -119,6 +124,7 @@ makeBufFile(File firstfile)
 	file->curOffset = 0L;
 	file->pos = 0;
 	file->nbytes = 0;
+	file->maxOffset = 0L;
 
 	return file;
 }
@@ -149,6 +155,7 @@ extendBufFile(BufFile *file)
 	file->files[file->numFiles] = pfile;
 	file->offsets[file->numFiles] = 0L;
 	file->numFiles++;
+	file->maxOffset = 0L;
 }
 
 /*
@@ -175,6 +182,14 @@ BufFileCreateTemp(bool interXact)
 	file = makeBufFile(pfile);
 	file->isTemp = true;
 	file->isInterXact = interXact;
+
+	if (encryption_enabled)
+	{
+		TimestampTz ts = GetCurrentTimestamp();
+		memset(file->tweakBase, 0, sizeof(file->tweakBase));
+		memcpy(file->tweakBase + sizeof(uint32), &MyProcPid, sizeof(MyProcPid));
+		memcpy(file->tweakBase + sizeof(uint32) + sizeof(MyProcPid), &ts, sizeof(ts));
+	}
 
 	return file;
 }
@@ -266,6 +281,13 @@ BufFileLoadBuffer(BufFile *file)
 	file->offsets[file->curFile] += file->nbytes;
 	/* we choose not to advance curOffset here */
 
+	if (encryption_enabled)
+	{
+		char tweak[TWEAK_SIZE];
+		BufFileTweak(tweak, file, file->curFile, file->curOffset);
+		decrypt_block(file->buffer, file->buffer, file->nbytes, tweak);
+	}
+
 	pgBufferUsage.temp_blks_read++;
 }
 
@@ -281,6 +303,8 @@ BufFileDumpBuffer(BufFile *file)
 {
 	int			wpos = 0;
 	File		thisfile;
+	char 		writeBuffer[BLCKSZ];
+	char		*writePtr;
 
 	Assert(file->curOffset % BLCKSZ == 0);
 	Assert(file->dirty);
@@ -299,6 +323,22 @@ BufFileDumpBuffer(BufFile *file)
 	}
 
 	/*
+	 * When overwriting a portion of an encrypted block we need the rest
+	 * of the block to be available, because we need to overwrite the whole
+	 * block. We can skip this on the final block.
+	 */
+	if (encryption_enabled && file->nbytes < BLCKSZ &&
+		file->curFile + 1 == file->numFiles &&
+		file->curOffset + file->nbytes < file->maxOffset)
+	{
+		char tmpBuf[BLCKSZ];
+		int tmpBytes = file->nbytes;
+		memcpy(tmpBuf, file->buffer, tmpBytes);
+		BufFileLoadBuffer(file);
+		memcpy(file->buffer, tmpBuf, tmpBytes);
+	}
+
+	/*
 	 * May need to reposition physical file.
 	 */
 	thisfile = file->files[file->curFile];
@@ -308,6 +348,20 @@ BufFileDumpBuffer(BufFile *file)
 			return;			/* seek failed, give up */
 		file->offsets[file->curFile] = file->curOffset;
 	}
+
+	if (encryption_enabled)
+	{
+		char tweak[TWEAK_SIZE];
+		/*
+		 *  FIXME: figure out how to handle nbytes < smallest encryption block
+		 * size
+		 **/
+		BufFileTweak(tweak, file, file->curFile, file->curOffset);
+		encrypt_block(file->buffer, writeBuffer, file->nbytes, tweak);
+		writePtr = writeBuffer;
+	} else
+		writePtr = file->buffer;
+
 
 	/*
 	 * Unlike BufFileLoadBuffer, we must dump the whole buffer even if it
@@ -329,7 +383,7 @@ BufFileDumpBuffer(BufFile *file)
 				bytestowrite = (int) availbytes;
 		}*/
 
-		written = FileWrite(thisfile, file->buffer + wpos, file->nbytes - wpos, WAIT_EVENT_BUFFILE_WRITE);
+		written = FileWrite(thisfile, writePtr + wpos, file->nbytes - wpos, WAIT_EVENT_BUFFILE_WRITE);
 		if (written<= 0)
 			return;				/* failed to write */
 		file->offsets[file->curFile] += written;
@@ -405,6 +459,13 @@ BufFileWrite(BufFile *file, void *ptr, size_t size)
 	size_t		nwritten = 0;
 	size_t		nthistime;
 
+	/* Need to load prefix when overwriting starting from the middle */
+	if (file->pos > file->nbytes)
+	{
+		Assert(file->dirty == false);
+		BufFileLoadBuffer(file);
+	}
+
 	while (size > 0)
 	{
 		if (file->pos >= BLCKSZ)
@@ -444,6 +505,10 @@ BufFileWrite(BufFile *file, void *ptr, size_t size)
 		size -= nthistime;
 		nwritten += nthistime;
 	}
+
+	if (file->curFile + 1 == file->numFiles &&
+		file->curOffset + file->nbytes > file->maxOffset)
+		file->maxOffset = file->curOffset + file->nbytes;
 
 	return nwritten;
 }
@@ -590,6 +655,14 @@ BufFileSeekBlock(BufFile *file, long blknum)
 					   (int) (blknum / BUFFILE_SEG_SIZE),
 					   (off_t) (blknum % BUFFILE_SEG_SIZE) * BLCKSZ,
 					   SEEK_SET);
+}
+
+static void
+BufFileTweak(char *tweak, BufFile *file, int curFile, off_t offset)
+{
+	off_t block = (curFile * (MAX_PHYSICAL_FILESIZE/BLCKSZ)) + offset/BLCKSZ;
+	memcpy(tweak, file->tweakBase, TWEAK_SIZE);
+	*((off_t*) tweak) = *((off_t*) tweak) ^ block;
 }
 
 #ifdef NOT_USED
