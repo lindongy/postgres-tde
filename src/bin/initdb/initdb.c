@@ -67,6 +67,8 @@
 #include "common/restricted_token.h"
 #include "common/username.h"
 #include "fe_utils/string_utils.h"
+#include "lib/ilist.h"
+#include "mb/pg_wchar.h"
 #include "getaddrinfo.h"
 #include "getopt_long.h"
 #include "mb/pg_wchar.h"
@@ -75,6 +77,11 @@
 
 /* Ideally this would be in a .h file, but it hardly seems worth the trouble */
 extern const char *select_default_timezone(const char *share_path);
+
+typedef struct {
+	dlist_node list_node;
+	char *value;
+} extra_option;
 
 static const char *const auth_methods_host[] = {
 	"trust", "reject", "scram-sha-256", "md5", "password", "ident", "radius",
@@ -143,7 +150,7 @@ static bool data_checksums = false;
 static char *data_encryption_module = NULL;
 static char *data_encryption_key = NULL;
 static char *xlog_dir = "";
-
+static dlist_head extra_options = DLIST_STATIC_INIT(extra_options);
 
 /* internal vars */
 static const char *progname;
@@ -478,6 +485,7 @@ readfile(const char *path)
 
 	fclose(infile);
 	free(buffer);
+
 	result[n] = NULL;
 
 	return result;
@@ -1002,6 +1010,37 @@ test_config_settings(void)
 	printf("%s\n", dynamic_shared_memory_type);
 }
 
+static void
+append_extra_options(char ***conflines)
+{
+	dlist_iter	iter;
+	int n_extra = 0;
+	int n_current = 0;
+	int i = 0;
+	char **new_conflines;
+
+	dlist_foreach(iter, &extra_options)
+	{
+		n_extra++;
+	}
+	while ((*conflines)[i++] != NULL)
+		n_current++;
+
+	new_conflines = (char**) pg_malloc((n_current + n_extra + 1) * sizeof(char*));
+	for (i = 0; i < n_current; i++)
+		new_conflines[i] = (*conflines)[i];
+
+	dlist_foreach(iter, &extra_options)
+	{
+		extra_option *opt = dlist_container(extra_option, list_node, iter.cur);
+		new_conflines[i++] = opt->value;
+	}
+
+	new_conflines[i] = NULL;
+	pg_free(*conflines);
+	*conflines = new_conflines;
+}
+
 /*
  * set up all the config files
  */
@@ -1020,6 +1059,8 @@ setup_config(void)
 	/* postgresql.conf */
 
 	conflines = readfile(conf_file);
+
+	append_extra_options(&conflines);
 
 	snprintf(repltok, sizeof(repltok), "max_connections = %d", n_connections);
 	conflines = replace_token(conflines, "#max_connections = 100", repltok);
@@ -2977,6 +3018,24 @@ initialize_data_directory(void)
 	check_ok();
 }
 
+static void
+parse_extra_option_arg(char *optarg)
+{
+	extra_option *opt;
+
+	if (!strchr(optarg, '='))
+	{
+		fprintf(stderr, _("Option value is not in key=value format"));
+		exit(1);
+	}
+
+	opt = malloc(sizeof(extra_option));
+	if (asprintf(&opt->value, "%s\n", optarg) < 0)
+		exit(1);
+
+	dlist_push_tail(&extra_options, &opt->list_node);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -3010,6 +3069,7 @@ main(int argc, char *argv[])
 		{"waldir", required_argument, NULL, 'X'},
 		{"data-checksums", no_argument, NULL, 'k'},
 		{"data-encryption", required_argument, NULL, 'K'},
+		{"option", required_argument, NULL, 'c'},
 		{NULL, 0, NULL, 0}
 	};
 
@@ -3051,7 +3111,7 @@ main(int argc, char *argv[])
 
 	/* process command-line options */
 
-	while ((c = getopt_long(argc, argv, "dD:E:kK:L:nNU:WA:sST:X:", long_options, &option_index)) != -1)
+	while ((c = getopt_long(argc, argv, "c:dD:E:kK:L:nNU:WA:sST:X:", long_options, &option_index)) != -1)
 	{
 		switch (c)
 		{
@@ -3107,6 +3167,9 @@ main(int argc, char *argv[])
 				if (strlen(optarg) > 0)
 					data_encryption_module = pg_strdup(optarg);
 				break;
+			case 'c':
+				 parse_extra_option_arg(optarg);
+				 break;
 			case 'L':
 				share_path = pg_strdup(optarg);
 				break;
