@@ -123,7 +123,12 @@ setup_encryption()
 	filename = pstrdup(encryption_library_string);
 
 	canonicalize_path(filename);
+
+	/* Make encryption libraries loading behave as if loaded via s_p_l */
+	process_shared_preload_libraries_in_progress = true;
 	load_file(filename, false);
+	process_shared_preload_libraries_in_progress = false;
+
 	ereport(DEBUG1,
 			(errmsg("loaded library \"%s\" for encryption", filename)));
 	pfree(filename);
