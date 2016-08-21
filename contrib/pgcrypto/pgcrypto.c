@@ -37,6 +37,7 @@
 #include "storage/encryption.h"
 #include "utils/backend_random.h"
 #include "utils/builtins.h"
+#include "utils/guc.h"
 #include "utils/uuid.h"
 
 #include "px.h"
@@ -68,6 +69,9 @@ typedef struct {
 
 /* Full database encryption key, initialized by pgcrypto_encryption_setup. */
 static db_encryption_ctx db_key;
+
+/* GUC variables */
+static char	*pgcrypto_keysetup_command = NULL;
 
 /* SQL function: hash(bytea, text) returns bytea */
 PG_FUNCTION_INFO_V1(pg_digest);
@@ -516,36 +520,99 @@ find_provider(text *name,
 	return err ? NULL : res;
 }
 
+const char* encryptionkey_prefix = "encryptionkey=";
+const int encryption_key_length = 32;
+
+static bool pgcrypto_run_keysetup_command(uint8 *key)
+{
+	FILE *fp;
+	char buf[encryption_key_length*2+1];
+	int bytes_read;
+	int i;
+
+	if (pgcrypto_keysetup_command == NULL)
+		return false;
+
+	if (!strlen(pgcrypto_keysetup_command))
+		return false;
+
+	elog(INFO, "Executing \"%s\" to set up encryption key", pgcrypto_keysetup_command);
+
+	fp = popen(pgcrypto_keysetup_command, "r");
+	if (fp == NULL)
+		elog(ERROR, "Failed to execute pgcrypto.keysetup_command \"%s\"",
+			pgcrypto_keysetup_command);
+
+	if (fread(buf, 1, strlen(encryptionkey_prefix), fp) != strlen(encryptionkey_prefix))
+		elog(ERROR, "Not enough data received from pgcrypto.keysetup_command");
+
+	if (strncmp(buf, encryptionkey_prefix, strlen(encryptionkey_prefix)) != 0)
+		elog(ERROR, "Unknown data received from pgcrypto.keysetup_command");
+
+	bytes_read = fread(buf, 1, encryption_key_length*2 + 1, fp);
+	if (bytes_read < encryption_key_length*2)
+	{
+		if (feof(fp))
+			elog(ERROR, "Encryption key provided by pgcrypto.keysetup_command too short");
+		else
+			elog(ERROR, "pgcrypto.keysetup_command returned error code %d", ferror(fp));
+	}
+
+	for (i = 0; i < encryption_key_length; i++)
+	{
+		if (sscanf(buf+2*i, "%2hhx", key + i) == 0)
+			elog(ERROR, "Invalid character in encryption key at position %d", 2*i);
+	}
+	if (bytes_read > encryption_key_length*2)
+	{
+		if (buf[encryption_key_length*2] != '\n')
+			elog(ERROR, "Encryption key too long '%s' %d.", buf, buf[encryption_key_length*2]);
+	}
+
+	while (fread(buf, 1, sizeof(buf), fp) != 0)
+	{
+		/* Discard rest of the output */
+	}
+
+	pclose(fp);
+
+	return true;
+}
+
 /*
  * Pgcrypto module does AES-128-XTS encryption.
  */
 static bool
 pgcrypto_encryption_setup()
 {
-	uint8 key[32];
-	char *passphrase = getenv("PGENCRYPTIONKEY");
+	uint8 key[encryption_key_length];
 
-	/* Empty or missing passphrase means that encryption is not configured */
-	if (passphrase == NULL || passphrase[0] == '\0')
+	if (!pgcrypto_run_keysetup_command(key))
 	{
-		ereport(LOG,
-				(errmsg("encryption key not provided"),
-				errdetail("The database cluster was initialized with encryption"
-						  " but the server was started without an encryption key."),
-						 errhint("Set the key using PGENCRYPTIONKEY environment variable.")));
-		return false;
+		char *passphrase = getenv("PGENCRYPTIONKEY");
+
+		/* Empty or missing passphrase means that encryption is not configured */
+		if (passphrase == NULL || passphrase[0] == '\0')
+		{
+			ereport(LOG,
+					(errmsg("encryption key not provided"),
+					errdetail("The database cluster was initialized with encryption"
+							  " but the server was started without an encryption key."),
+							 errhint("Set the key using PGENCRYPTIONKEY environment variable.")));
+			return false;
+		}
+
+		/* TODO: replace with PBKDF2 or scrypt */
+		{
+			SHA256_CTX sha_ctx;
+			SHA256_Init(&sha_ctx);
+			SHA256_Update(&sha_ctx, (uint8*) passphrase, strlen(passphrase));
+			SHA256_Final(key, &sha_ctx);
+		}
 	}
 
-	/* TODO: replace with PBKDF2 or scrypt */
-	{
-		SHA256_CTX sha_ctx;
-		SHA256_Init(&sha_ctx);
-		SHA256_Update(&sha_ctx, (uint8*) passphrase, strlen(passphrase));
-		SHA256_Final(key, &sha_ctx);
-	}
-
-	if (xts_encrypt_key(key, 32, db_key.enc_ctx) != EXIT_SUCCESS ||
-		xts_decrypt_key(key, 32, db_key.dec_ctx) != EXIT_SUCCESS)
+	if (xts_encrypt_key(key, encryption_key_length, db_key.enc_ctx) != EXIT_SUCCESS ||
+		xts_decrypt_key(key, encryption_key_length, db_key.dec_ctx) != EXIT_SUCCESS)
 	{
 		elog(ERROR, "Encryption key setup failed.");
 		return false;
@@ -583,4 +650,18 @@ _PG_init(void)
 	routines.DecryptBlock = &pgcrypto_decrypt_block;
 
 	register_encryption_module("pgcrypto", &routines);
+
+	DefineCustomStringVariable("pgcrypto.keysetup_command",
+			   "Command to fetch database encryption key",
+			   "This command will be run at database startup to set up database"
+			   " encryption key.",
+			   &pgcrypto_keysetup_command,
+			   "",
+			   PGC_POSTMASTER,
+			   0,
+			   NULL,
+			   NULL,
+			   NULL);
+
+	EmitWarningsOnPlaceholders("pgcrypto");
 }
