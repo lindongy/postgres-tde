@@ -152,7 +152,7 @@ copydir(char *fromdir, char *todir, RelFileNode *fromNode, RelFileNode *toNode)
 }
 
 /*
- * copy one file. If decryption and reencryption is needed specify
+ * copy one file. If decryption and reencryption may be needed specify
  * relfilenodes for source and target.
  */
 void
@@ -223,7 +223,7 @@ copy_file(char *fromfile, char *tofile, RelFileNode *fromNode,
 		 * If the database is encrypted we need to decrypt the data here
 		 * and reencrypt it to adjust the tweak values of blocks.
 		 */
-		if (fromNode != NULL)
+		if (encryption_enabled && fromNode != NULL)
 		{
 			Assert(toNode != NULL);
 			blockNum = ReencryptBlock(buffer, nbytes/BLCKSZ,
