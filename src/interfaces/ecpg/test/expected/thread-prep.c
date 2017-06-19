@@ -153,7 +153,7 @@ static void* fn(void* arg)
 if (sqlca.sqlcode < 0) sqlprint();}
 #line 47 "prep.pgc"
 
-	{ ECPGsetcommit(__LINE__, "on", NULL);
+	{ ECPGsetcommit(__LINE__, 1, NULL);
 #line 48 "prep.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint();}
@@ -210,7 +210,7 @@ int main ()
 if (sqlca.sqlcode < 0) sqlprint();}
 #line 69 "prep.pgc"
 
-	{ ECPGsetcommit(__LINE__, "on", NULL);
+	{ ECPGsetcommit(__LINE__, 1, NULL);
 #line 70 "prep.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint();}

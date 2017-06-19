@@ -15,8 +15,8 @@ include $(top_builddir)/src/Makefile.global
 
 PGFILEDESC = "ECPG - embedded SQL in C"
 NAME= ecpg
-SO_MAJOR_VERSION= 6
-SO_MINOR_VERSION= $(MAJORVERSION)
+SO_MAJOR_VERSION= 7
+SO_MINOR_VERSION= 0
 
 override CPPFLAGS := -I../include -I$(top_srcdir)/src/interfaces/ecpg/include \
 	-I$(libpq_srcdir) -I$(top_builddir)/src/port -DFRONTEND $(CPPFLAGS)
@@ -26,7 +26,7 @@ override CFLAGS += $(PTHREAD_CFLAGS)
 LIBS := $(filter-out -lpgport, $(LIBS))
 
 OBJS= execute.o typename.o descriptor.o sqlda.o data.o error.o prepare.o memory.o \
-	connect.o misc.o path.o pgstrcasecmp.o \
+	connect.o misc.o path.o cursor.o pgstrcasecmp.o \
 	$(filter snprintf.o strlcpy.o win32setlocale.o isinf.o, $(LIBOBJS)) $(WIN32RES)
 
 # thread.c is needed only for non-WIN32 implementation of path.c

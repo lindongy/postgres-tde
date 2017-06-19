@@ -19,7 +19,8 @@
 
 
 extern void PerformCursorOpen(DeclareCursorStmt *cstmt, ParamListInfo params,
-				  const char *queryString, bool isTopLevel);
+							  const char *queryString, bool isTopLevel,
+							  bool *scrollable);
 
 extern void PerformPortalFetch(FetchStmt *stmt, DestReceiver *dest,
 				   char *completionTag);

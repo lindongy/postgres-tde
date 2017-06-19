@@ -111,7 +111,7 @@ if (sqlca.sqlcode < 0) sqlprint ( );}
 if (sqlca.sqlcode < 0) sqlprint ( );}
 #line 33 "rnull.pgc"
 
-	{ ECPGtrans(__LINE__, NULL, "commit");
+	{ ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);
 #line 34 "rnull.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint ( );}
@@ -138,7 +138,7 @@ if (sqlca.sqlcode < 0) sqlprint ( );}
 if (sqlca.sqlcode < 0) sqlprint ( );}
 #line 38 "rnull.pgc"
 
-	{ ECPGtrans(__LINE__, NULL, "commit");
+	{ ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);
 #line 39 "rnull.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint ( );}
@@ -182,7 +182,7 @@ if (sqlca.sqlcode < 0) sqlprint ( );}
 if (sqlca.sqlcode < 0) sqlprint ( );}
 #line 54 "rnull.pgc"
 
-	{ ECPGtrans(__LINE__, NULL, "commit");
+	{ ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);
 #line 55 "rnull.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint ( );}
@@ -275,7 +275,7 @@ if (sqlca.sqlcode < 0) sqlprint ( );}
 if (sqlca.sqlcode < 0) sqlprint ( );}
 #line 91 "rnull.pgc"
 
-	{ ECPGtrans(__LINE__, NULL, "commit");
+	{ ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);
 #line 92 "rnull.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint ( );}

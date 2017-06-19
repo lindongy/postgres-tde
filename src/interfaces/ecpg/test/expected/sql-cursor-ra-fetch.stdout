@@ -1,0 +1,395 @@
+test scroll_cur for move absolute n (every 4th tuple forward, positive positions)
+	row 1: id: 1	t: a
+	row 5: id: 5	t: e
+	row 9: id: 9	t: i
+	row 13: id: 13	t: m
+	row 17: id: 17	t: q
+	row 21: id: 21	t: u
+	row 25: id: 25	t: y
+	row 29 does not exist
+
+test scroll_cur for move absolute n (every 4th tuple backward, positive positions)
+	row 33 does not exist
+	row 29 does not exist
+	row 25: id: 25	t: y
+	row 21: id: 21	t: u
+	row 17: id: 17	t: q
+	row 13: id: 13	t: m
+	row 9: id: 9	t: i
+	row 5: id: 5	t: e
+	row 1: id: 1	t: a
+
+test scroll_cur for move absolute n (every 4th tuple backward, negative positions)
+	row -1: id: 26	t: z
+	row -5: id: 22	t: v
+	row -9: id: 18	t: r
+	row -13: id: 14	t: n
+	row -17: id: 10	t: j
+	row -21: id: 6	t: f
+	row -25: id: 2	t: b
+	row -29 does not exist
+
+test scroll_cur for move absolute n (every 4th tuple forward, negative positions)
+	row -33 does not exist
+	row -29 does not exist
+	row -25: id: 2	t: b
+	row -21: id: 6	t: f
+	row -17: id: 10	t: j
+	row -13: id: 14	t: n
+	row -9: id: 18	t: r
+	row -5: id: 22	t: v
+	row -1: id: 26	t: z
+
+test scroll_cur for fetch relative 4 (positive positions)
+fetch relative 4 in scroll_cur succeeded, sqlerrd[2] 1
+	id: 4	t: d
+fetch relative 4 in scroll_cur succeeded, sqlerrd[2] 1
+	id: 8	t: h
+fetch relative 4 in scroll_cur succeeded, sqlerrd[2] 1
+	id: 12	t: l
+fetch relative 4 in scroll_cur succeeded, sqlerrd[2] 1
+	id: 16	t: p
+fetch relative 4 in scroll_cur succeeded, sqlerrd[2] 1
+	id: 20	t: t
+fetch relative 4 in scroll_cur succeeded, sqlerrd[2] 1
+	id: 24	t: x
+fetch relative 4 in scroll_cur succeeded, sqlerrd[2] 0
+
+test scroll_cur for fetch relative -4 (positive positions)
+fetch relative -4 in scroll_cur succeeded, sqlerrd[2] 1
+	id: 23	t: w
+fetch relative -4 in scroll_cur succeeded, sqlerrd[2] 1
+	id: 19	t: s
+fetch relative -4 in scroll_cur succeeded, sqlerrd[2] 1
+	id: 15	t: o
+fetch relative -4 in scroll_cur succeeded, sqlerrd[2] 1
+	id: 11	t: k
+fetch relative -4 in scroll_cur succeeded, sqlerrd[2] 1
+	id: 7	t: g
+fetch relative -4 in scroll_cur succeeded, sqlerrd[2] 1
+	id: 3	t: c
+fetch relative -4 in scroll_cur succeeded, sqlerrd[2] 0
+
+test scroll_cur for fetch relative -4 (negative positions)
+fetch relative -4 in scroll_cur succeeded, sqlerrd[2] 1
+	id: 23	t: w
+fetch relative -4 in scroll_cur succeeded, sqlerrd[2] 1
+	id: 19	t: s
+fetch relative -4 in scroll_cur succeeded, sqlerrd[2] 1
+	id: 15	t: o
+fetch relative -4 in scroll_cur succeeded, sqlerrd[2] 1
+	id: 11	t: k
+fetch relative -4 in scroll_cur succeeded, sqlerrd[2] 1
+	id: 7	t: g
+fetch relative -4 in scroll_cur succeeded, sqlerrd[2] 1
+	id: 3	t: c
+fetch relative -4 in scroll_cur succeeded, sqlerrd[2] 0
+
+test scroll_cur for fetch relative 4 (negative positions)
+fetch relative 4 in scroll_cur succeeded, sqlerrd[2] 1
+	id: 4	t: d
+fetch relative 4 in scroll_cur succeeded, sqlerrd[2] 1
+	id: 8	t: h
+fetch relative 4 in scroll_cur succeeded, sqlerrd[2] 1
+	id: 12	t: l
+fetch relative 4 in scroll_cur succeeded, sqlerrd[2] 1
+	id: 16	t: p
+fetch relative 4 in scroll_cur succeeded, sqlerrd[2] 1
+	id: 20	t: t
+fetch relative 4 in scroll_cur succeeded, sqlerrd[2] 1
+	id: 24	t: x
+fetch relative 4 in scroll_cur succeeded, sqlerrd[2] 0
+
+test scroll_cur for fetch forward 4 (positive positions)
+fetch forward 4 in scroll_cur succeeded, sqlerrd[2] 4
+	id: 1	t: a
+	id: 2	t: b
+	id: 3	t: c
+	id: 4	t: d
+fetch forward 4 in scroll_cur succeeded, sqlerrd[2] 4
+	id: 5	t: e
+	id: 6	t: f
+	id: 7	t: g
+	id: 8	t: h
+fetch forward 4 in scroll_cur succeeded, sqlerrd[2] 4
+	id: 9	t: i
+	id: 10	t: j
+	id: 11	t: k
+	id: 12	t: l
+fetch forward 4 in scroll_cur succeeded, sqlerrd[2] 4
+	id: 13	t: m
+	id: 14	t: n
+	id: 15	t: o
+	id: 16	t: p
+fetch forward 4 in scroll_cur succeeded, sqlerrd[2] 4
+	id: 17	t: q
+	id: 18	t: r
+	id: 19	t: s
+	id: 20	t: t
+fetch forward 4 in scroll_cur succeeded, sqlerrd[2] 4
+	id: 21	t: u
+	id: 22	t: v
+	id: 23	t: w
+	id: 24	t: x
+fetch forward 4 in scroll_cur succeeded, sqlerrd[2] 2
+	id: 25	t: y
+	id: 26	t: z
+fetch forward 4 in scroll_cur succeeded, sqlerrd[2] 0
+
+test scroll_cur for fetch forward -4 (positive positions)
+fetch forward -4 in scroll_cur succeeded, sqlerrd[2] 4
+	id: 26	t: z
+	id: 25	t: y
+	id: 24	t: x
+	id: 23	t: w
+fetch forward -4 in scroll_cur succeeded, sqlerrd[2] 4
+	id: 22	t: v
+	id: 21	t: u
+	id: 20	t: t
+	id: 19	t: s
+fetch forward -4 in scroll_cur succeeded, sqlerrd[2] 4
+	id: 18	t: r
+	id: 17	t: q
+	id: 16	t: p
+	id: 15	t: o
+fetch forward -4 in scroll_cur succeeded, sqlerrd[2] 4
+	id: 14	t: n
+	id: 13	t: m
+	id: 12	t: l
+	id: 11	t: k
+fetch forward -4 in scroll_cur succeeded, sqlerrd[2] 4
+	id: 10	t: j
+	id: 9	t: i
+	id: 8	t: h
+	id: 7	t: g
+fetch forward -4 in scroll_cur succeeded, sqlerrd[2] 4
+	id: 6	t: f
+	id: 5	t: e
+	id: 4	t: d
+	id: 3	t: c
+fetch forward -4 in scroll_cur succeeded, sqlerrd[2] 2
+	id: 2	t: b
+	id: 1	t: a
+fetch forward -4 in scroll_cur succeeded, sqlerrd[2] 0
+
+test scroll_cur for fetch forward -4 (negative positions)
+fetch forward -4 in scroll_cur succeeded, sqlerrd[2] 4
+	id: 26	t: z
+	id: 25	t: y
+	id: 24	t: x
+	id: 23	t: w
+fetch forward -4 in scroll_cur succeeded, sqlerrd[2] 4
+	id: 22	t: v
+	id: 21	t: u
+	id: 20	t: t
+	id: 19	t: s
+fetch forward -4 in scroll_cur succeeded, sqlerrd[2] 4
+	id: 18	t: r
+	id: 17	t: q
+	id: 16	t: p
+	id: 15	t: o
+fetch forward -4 in scroll_cur succeeded, sqlerrd[2] 4
+	id: 14	t: n
+	id: 13	t: m
+	id: 12	t: l
+	id: 11	t: k
+fetch forward -4 in scroll_cur succeeded, sqlerrd[2] 4
+	id: 10	t: j
+	id: 9	t: i
+	id: 8	t: h
+	id: 7	t: g
+fetch forward -4 in scroll_cur succeeded, sqlerrd[2] 4
+	id: 6	t: f
+	id: 5	t: e
+	id: 4	t: d
+	id: 3	t: c
+fetch forward -4 in scroll_cur succeeded, sqlerrd[2] 2
+	id: 2	t: b
+	id: 1	t: a
+fetch forward -4 in scroll_cur succeeded, sqlerrd[2] 0
+
+test scroll_cur for fetch forward 4 (negative positions)
+fetch forward 4 in scroll_cur succeeded, sqlerrd[2] 4
+	id: 1	t: a
+	id: 2	t: b
+	id: 3	t: c
+	id: 4	t: d
+fetch forward 4 in scroll_cur succeeded, sqlerrd[2] 4
+	id: 5	t: e
+	id: 6	t: f
+	id: 7	t: g
+	id: 8	t: h
+fetch forward 4 in scroll_cur succeeded, sqlerrd[2] 4
+	id: 9	t: i
+	id: 10	t: j
+	id: 11	t: k
+	id: 12	t: l
+fetch forward 4 in scroll_cur succeeded, sqlerrd[2] 4
+	id: 13	t: m
+	id: 14	t: n
+	id: 15	t: o
+	id: 16	t: p
+fetch forward 4 in scroll_cur succeeded, sqlerrd[2] 4
+	id: 17	t: q
+	id: 18	t: r
+	id: 19	t: s
+	id: 20	t: t
+fetch forward 4 in scroll_cur succeeded, sqlerrd[2] 4
+	id: 21	t: u
+	id: 22	t: v
+	id: 23	t: w
+	id: 24	t: x
+fetch forward 4 in scroll_cur succeeded, sqlerrd[2] 2
+	id: 25	t: y
+	id: 26	t: z
+fetch forward 4 in scroll_cur succeeded, sqlerrd[2] 0
+
+test scroll_cur4 for move absolute n (every 5th tuple forward, positive positions)
+	row 1: id: 1	t: a
+	row 6: id: 6	t: f
+	row 11: id: 11	t: k
+	row 16: id: 16	t: p
+	row 21: id: 21	t: u
+	row 26: id: 26	t: z
+	row 31 does not exist
+
+test fetch backward 8 from scroll_cur4 after the cursor switched to ecpg_execute()
+	id: 26 t: z
+	id: 25 t: y
+	id: 24 t: x
+	id: 23 t: w
+	id: 22 t: v
+	id: 21 t: u
+	id: 20 t: t
+	id: 19 t: s
+
+test scroll_cur4 for move absolute n (every 5th tuple backward, positive positions)
+	row 36 does not exist
+	row 31 does not exist
+	row 26: id: 26	t: z
+	row 21: id: 21	t: u
+	row 16: id: 16	t: p
+	row 11: id: 11	t: k
+	row 6: id: 6	t: f
+	row 1: id: 1	t: a
+
+test fetch forward 8 from scroll_cur4 after the cursor switched to ecpg_execute()
+	id: 2 t: b
+	id: 3 t: c
+	id: 4 t: d
+	id: 5 t: e
+	id: 6 t: f
+	id: 7 t: g
+	id: 8 t: h
+	id: 9 t: i
+
+test scroll_cur4 for move absolute n (every 5th tuple backward, negative positions)
+	row -1: id: 26	t: z
+	row -6: id: 21	t: u
+	row -11: id: 16	t: p
+	row -16: id: 11	t: k
+	row -21: id: 6	t: f
+	row -26: id: 1	t: a
+	row -31 does not exist
+
+test fetch forward 8 from scroll_cur4 after the cursor switched to ecpg_execute()
+	id: 1 t: a
+	id: 2 t: b
+	id: 3 t: c
+	id: 4 t: d
+	id: 5 t: e
+	id: 6 t: f
+	id: 7 t: g
+	id: 8 t: h
+
+test scroll_cur4 for move absolute n (every 5th tuple forward, negative positions)
+	row -36 does not exist
+	row -31 does not exist
+	row -26: id: 1	t: a
+	row -21: id: 6	t: f
+	row -16: id: 11	t: k
+	row -11: id: 16	t: p
+	row -6: id: 21	t: u
+	row -1: id: 26	t: z
+
+test fetch backward 8 from scroll_cur4 after the cursor switched to ecpg_execute()
+	id: 25 t: y
+	id: 24 t: x
+	id: 23 t: w
+	id: 22 t: v
+	id: 21 t: u
+	id: 20 t: t
+	id: 19 t: s
+	id: 18 t: r
+
+test scroll_cur4 for fetch relative 5 (positive positions)
+	id: 5	t: e
+	id: 10	t: j
+	id: 15	t: o
+	id: 20	t: t
+	id: 25	t: y
+	fetch returned empty
+
+test fetch backward 8 from scroll_cur4 after the cursor switched to ecpg_execute()
+	id: 26 t: z
+	id: 25 t: y
+	id: 24 t: x
+	id: 23 t: w
+	id: 22 t: v
+	id: 21 t: u
+	id: 20 t: t
+	id: 19 t: s
+
+test scroll_cur4 for fetch relative -5 (positive positions)
+	id: 22	t: v
+	id: 17	t: q
+	id: 12	t: l
+	id: 7	t: g
+	id: 2	t: b
+	fetch returned empty
+
+test fetch forward 8 from scroll_cur4 after the cursor switched to ecpg_execute()
+	id: 1 t: a
+	id: 2 t: b
+	id: 3 t: c
+	id: 4 t: d
+	id: 5 t: e
+	id: 6 t: f
+	id: 7 t: g
+	id: 8 t: h
+
+test scroll_cur4 for move relative -5 (negative positions)
+	id: 22	t: v
+	id: 17	t: q
+	id: 12	t: l
+	id: 7	t: g
+	id: 2	t: b
+	fetch returned empty
+
+test fetch forward 8 from scroll_cur4 after the cursor switched to ecpg_execute()
+	id: 1 t: a
+	id: 2 t: b
+	id: 3 t: c
+	id: 4 t: d
+	id: 5 t: e
+	id: 6 t: f
+	id: 7 t: g
+	id: 8 t: h
+
+test scroll_cur for move relative 5 (negative positions)
+	id: 5	t: e
+	id: 10	t: j
+	id: 15	t: o
+	id: 20	t: t
+	id: 25	t: y
+	fetch returned empty
+
+test fetch backward 8 from scroll_cur4 after the cursor switched to ecpg_execute()
+	id: 26 t: z
+	id: 25 t: y
+	id: 24 t: x
+	id: 23 t: w
+	id: 22 t: v
+	id: 21 t: u
+	id: 20 t: t
+	id: 19 t: s

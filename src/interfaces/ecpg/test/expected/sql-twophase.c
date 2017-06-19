@@ -39,7 +39,7 @@ int main(void)
 if (sqlca.sqlcode < 0) sqlprint();}
 #line 16 "twophase.pgc"
 
-	{ ECPGsetcommit(__LINE__, "off", NULL);
+	{ ECPGsetcommit(__LINE__, 0, NULL);
 #line 17 "twophase.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint();}
@@ -55,7 +55,7 @@ if (sqlca.sqlcode < 0) sqlprint();}
 
 
 	strcpy(msg, "commit");
-	{ ECPGtrans(__LINE__, NULL, "commit");
+	{ ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);
 #line 23 "twophase.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint();}
@@ -63,7 +63,7 @@ if (sqlca.sqlcode < 0) sqlprint();}
 
 
 	strcpy(msg, "begin");
-	{ ECPGtrans(__LINE__, NULL, "begin");
+	{ ECPGtrans(__LINE__, NULL, "begin", 0, 1, 0, NULL);
 #line 26 "twophase.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint();}
@@ -79,7 +79,7 @@ if (sqlca.sqlcode < 0) sqlprint();}
 
 
 	strcpy(msg, "prepare transaction");
-	{ ECPGtrans(__LINE__, NULL, "prepare transaction 'gxid'");
+	{ ECPGtrans(__LINE__, NULL, "prepare transaction 'gxid'", 0, 1, 0, NULL);
 #line 32 "twophase.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint();}
@@ -87,7 +87,7 @@ if (sqlca.sqlcode < 0) sqlprint();}
 
 
 	strcpy(msg, "commit prepared");
-	{ ECPGtrans(__LINE__, NULL, "commit prepared 'gxid'");
+	{ ECPGtrans(__LINE__, NULL, "commit prepared 'gxid'", 0, 1, 0, NULL);
 #line 35 "twophase.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint();}

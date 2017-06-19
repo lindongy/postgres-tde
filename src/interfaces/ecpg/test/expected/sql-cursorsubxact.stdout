@@ -1,0 +1,42 @@
+test case insensitive cursor name
+
+open MyCur (case insensitive) succeeded
+close myCur (case insensitive) succeeded
+
+test case sensitive cursor name
+
+open "MyCur" (case sensitive) succeeded
+close "myCur" (case sensitive) failed with SQLSTATE 34000 (expected 34000)
+close "MyCur" (case sensitive) failed with SQLSTATE 25P02 (expected 25P02)
+
+test case sensitive cursor name in savepoint
+
+close "MyCur" (case sensitive) succeeded
+close "MyCur" failed with SQLSTATE 34000 (expected 34000)
+
+test savepoint handling
+
+"savepoint a" succeeded
+open "MyCur" (case sensitive) succeeded
+"savepoint a" succeeded
+"rollback to c" failed with SQLSTATE 3B001 (expected 3B001)
+"rollback to a" succeeded
+"rollback to b" failed with SQLSTATE 3B001 (expected 3B001)
+"rollback to a" succeeded
+fetch from "MyCur" (case sensitive) failed with SQLSTATE 34000 (expected 34000)
+"rollback to a" succeeded
+"release savepoint a" succeeded
+"rollback to a" failed with SQLSTATE 3B001 (expected 3B001)
+
+test implicit "release savepoint a" for a second "savepoint a"
+
+"savepoint a" succeeded
+open "MyCur" (case sensitive) succeeded
+fetch from "MyCur" (case sensitive) result 1 'a'
+"rollback to a" succeeded
+fetch from "MyCur" (case sensitive) failed with SQLSTATE 34000 (expected 34000)
+open "MyCur" (case sensitive) failed with SQLSTATE 25P02 (expected 25P02)
+"rollback to a" succeeded
+open "MyCur" (case sensitive) succeeded
+"release savepoint a" succeeded
+fetch "MyCur" (case sensitive) result 1 'a'

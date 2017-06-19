@@ -83,7 +83,7 @@ if (sqlca.sqlcode < 0) sqlprint();}
 if (sqlca.sqlcode < 0) sqlprint();}
 #line 36 "define.pgc"
 
-	{ ECPGtrans(__LINE__, NULL, "commit");
+	{ ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);
 #line 37 "define.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint();}
@@ -102,7 +102,7 @@ if (sqlca.sqlcode < 0) sqlprint();}
 if (sqlca.sqlcode < 0) sqlprint();}
 #line 40 "define.pgc"
 
-	{ ECPGtrans(__LINE__, NULL, "commit");
+	{ ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);
 #line 41 "define.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint();}
@@ -151,7 +151,7 @@ if (sqlca.sqlcode < 0) sqlprint();}
 if (sqlca.sqlcode < 0) sqlprint();}
 #line 57 "define.pgc"
 
-	{ ECPGtrans(__LINE__, NULL, "commit");
+	{ ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);
 #line 58 "define.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint();}

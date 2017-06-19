@@ -1,0 +1,30 @@
+test scroll_cur for move absolute -1
+move absolute -1 in scroll_cur succeeded
+test noscroll_cur for move absolute -1
+move absolute -1 in noscroll_cur failed with SQLSTATE 55000
+test unspec_cur1 for move absolute -1
+move absolute -1 in unspec_cur1 succeeded
+test unspec_cur2 for move absolute -1
+move absolute -1 in unspec_cur2 failed with SQLSTATE 55000
+test scroll_cur for move relative 8
+move relative 8 in scroll_cur succeeded, sqlerrd[2] 1
+move relative 8 in scroll_cur succeeded, sqlerrd[2] 1
+move relative 8 in scroll_cur succeeded, sqlerrd[2] 1
+move relative 8 in scroll_cur succeeded, sqlerrd[2] 0
+test scroll_cur for move relative -8
+move relative -8 in scroll_cur succeeded, sqlerrd[2] 1
+move relative -8 in scroll_cur succeeded, sqlerrd[2] 1
+move relative -8 in scroll_cur succeeded, sqlerrd[2] 1
+move relative -8 in scroll_cur succeeded, sqlerrd[2] 0
+test scroll_cur for move forward 8
+move forward 8 in scroll_cur succeeded, sqlerrd[2] 8
+move forward 8 in scroll_cur succeeded, sqlerrd[2] 8
+move forward 8 in scroll_cur succeeded, sqlerrd[2] 8
+move forward 8 in scroll_cur succeeded, sqlerrd[2] 2
+move forward 8 in scroll_cur succeeded, sqlerrd[2] 0
+test scroll_cur for move forward -8
+move forward -8 in scroll_cur succeeded, sqlerrd[2] 8
+move forward -8 in scroll_cur succeeded, sqlerrd[2] 8
+move forward -8 in scroll_cur succeeded, sqlerrd[2] 8
+move forward -8 in scroll_cur succeeded, sqlerrd[2] 2
+move forward -8 in scroll_cur succeeded, sqlerrd[2] 0

@@ -49,7 +49,7 @@ main(void)
 	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "alter user regress_ecpg_user1 encrypted password 'connectpw'", ECPGt_EOIT, ECPGt_EORT);}
 #line 25 "test5.pgc"
 
-	{ ECPGtrans(__LINE__, NULL, "commit");}
+	{ ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);}
 #line 26 "test5.pgc"
 
 	{ ECPGdisconnect(__LINE__, "CURRENT");}

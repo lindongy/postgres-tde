@@ -1,0 +1,288 @@
+#include <stdlib.h>
+#include <string.h>
+
+EXEC SQL INCLUDE ../regression;
+
+exec sql whenever sqlerror sqlprint;
+
+#define CURNAME "MyCur"
+#define CURNAME_BAD "myCur"
+
+#define QUOTED_CURNAME "\"MyCur\""
+#define QUOTED_CURNAME_BAD "\"myCur\""
+
+int main(void)
+{
+exec sql begin declare section;
+	char	*curname;
+	int	id[3];
+	varchar	t[3][50];
+exec sql end declare section;
+
+	ECPGdebug(1, stderr);
+
+	exec sql connect to REGRESSDB1;
+
+	exec sql create table t1 (id serial primary key, t text);
+	exec sql insert into t1 (t) values ('a'), ('b'), ('c');
+	exec sql commit;
+
+	/*
+	 * Cursor name passed in a variable unquoted.
+	 * It has to be treated as case-insensitive.
+	 */
+
+	printf("test case insensitive cursor name\n\n");
+
+	curname = CURNAME;
+
+	exec sql declare :curname cursor for select id, t from t1;
+
+	exec sql open :curname;
+	if (sqlca.sqlcode < 0)
+		printf("open %s (case insensitive) failed with SQLSTATE %5s\n", curname, sqlca.sqlstate);
+	else
+		printf("open %s (case insensitive) succeeded\n", curname);
+
+	curname = CURNAME_BAD;
+
+	exec sql close :curname;
+	if (sqlca.sqlcode < 0)
+		printf("close %s (case insensitive)  failed with SQLSTATE %5s\n", curname, sqlca.sqlstate);
+	else
+		printf("close %s (case insensitive) succeeded\n", curname);
+
+	/*
+	 * Cursor name passed in a variable quoted.
+	 * It has to be treated as case-sensitive.
+	 */
+
+	printf("\ntest case sensitive cursor name\n\n");
+
+	curname = QUOTED_CURNAME;
+
+	exec sql open :curname;
+	if (sqlca.sqlcode < 0)
+		printf("open %s (case sensitive) failed with SQLSTATE %5s\n", curname, sqlca.sqlstate);
+	else
+		printf("open %s (case sensitive) succeeded\n", curname);
+
+	curname = QUOTED_CURNAME_BAD;
+
+	/* Try to close the wrong cursor name, it has to fail with 34000. */
+	exec sql close :curname; 
+	if (sqlca.sqlcode < 0)
+		printf("close %s (case sensitive) failed with SQLSTATE %5s (expected 34000)\n", curname, sqlca.sqlstate);
+	else
+		printf("close %s (case sensitive) succeeded\n", curname);
+
+	/* Try to close the right cursor name, it has to fail with 25P02 */
+	curname = QUOTED_CURNAME;
+	exec sql close :curname;
+	if (sqlca.sqlcode < 0)
+		printf("close %s (case sensitive) failed with SQLSTATE %5s (expected 25P02)\n", curname, sqlca.sqlstate);
+	else
+		printf("close %s (case sensitive) succeeded\n", curname);
+
+	exec sql rollback;
+
+	/*
+	 * Try a new transaction and watch the cursor name disappear
+	 * after ROLLBACK TO SAVEPOINT.
+	 */
+
+	printf("\ntest case sensitive cursor name in savepoint\n\n");
+
+	curname = QUOTED_CURNAME;
+
+	exec sql savepoint a;
+
+	exec sql open :curname;
+	if (sqlca.sqlcode < 0)
+		printf("open %s (case sensitive) failed with SQLSTATE %5s\n", curname, sqlca.sqlstate);
+	else
+		printf("close %s (case sensitive) succeeded\n", curname);
+
+	/* The cursor name must be forgotten */
+	exec sql rollback to a;
+
+	/* It has to fail with 34000 */
+	exec sql close :curname;
+	if (sqlca.sqlcode < 0)
+		printf("close %s failed with SQLSTATE %5s (expected 34000)\n", curname, sqlca.sqlstate);
+	else
+		printf("close %s succeeded unexpectedly, expected sqlstate 34000\n", curname);
+
+	exec sql rollback;
+
+	/*
+	 * Try a new transaction and play games with savepoints.
+	 */
+
+	printf("\ntest savepoint handling\n\n");
+
+	exec sql savepoint a;
+	if (sqlca.sqlcode < 0)
+		printf("\"savepoint a\" failed with SQLSTATE %5s\n", sqlca.sqlstate);
+	else
+		printf("\"savepoint a\" succeeded\n");
+
+	exec sql open :curname;
+	if (sqlca.sqlcode < 0)
+		printf("open %s (case sensitive) failed with SQLSTATE %5s\n", curname, sqlca.sqlstate);
+	else
+		printf("open %s (case sensitive) succeeded\n", curname);
+
+	exec sql savepoint b;
+	if (sqlca.sqlcode < 0)
+		printf("\"savepoint a\" failed with SQLSTATE %5s\n", sqlca.sqlstate);
+	else
+		printf("\"savepoint a\" succeeded\n");
+
+	/* Try to rollback to an unknown savepoint */
+
+	exec sql rollback to c;
+	if (sqlca.sqlcode < 0)
+		printf("\"rollback to c\" failed with SQLSTATE %5s (expected 3B001)\n", sqlca.sqlstate);
+	else
+		printf("\"rollback to c\" succeeded unexpectedly (expected 3B001)\n");
+
+	/* "rollback to a" implicitly rolls back "b" */
+
+	exec sql rollback to a;
+	if (sqlca.sqlcode < 0)
+		printf("\"rollback to a\" failed with SQLSTATE %5s\n", sqlca.sqlstate);
+	else
+		printf("\"rollback to a\" succeeded\n");
+
+	/* savepoint "b" is now unknown, fails with 3B001 */
+	exec sql rollback to b;
+	if (sqlca.sqlcode < 0)
+		printf("\"rollback to b\" failed with SQLSTATE %5s (expected 3B001)\n", sqlca.sqlstate);
+	else
+		printf("\"rollback to b\" succeeded unexpectedly (expected 3B001)\n");
+
+	/* "rollback to a" has to succeed again, it's still alive */
+
+	exec sql rollback to a;
+	if (sqlca.sqlcode < 0)
+		printf("\"rollback to a\" failed with SQLSTATE %5s\n", sqlca.sqlstate);
+	else
+		printf("\"rollback to a\" succeeded\n");
+
+	/* the cursor was declared under savepoint "a", was forgotten */
+
+	exec sql fetch from :curname into :id[0], :t[0];
+	if (sqlca.sqlcode < 0)
+		printf("fetch from %s (case sensitive) failed with SQLSTATE %5s (expected 34000)\n", curname, sqlca.sqlstate);
+	else
+		printf("fetch from %s (case sensitive) succeeded unexpectedly (expected 34000)\n", curname);
+
+	/* "rollback to a" has to succeed again, it's still alive */
+
+	exec sql rollback to a;
+	if (sqlca.sqlcode < 0)
+		printf("\"rollback to a\" failed with SQLSTATE %5s\n", sqlca.sqlstate);
+	else
+		printf("\"rollback to a\" succeeded\n");
+
+	/* "release savepoint a" forgets about the savepoint name */
+
+	exec sql release savepoint a;
+	if (sqlca.sqlcode < 0)
+		printf("\"release savepoint a\" failed with SQLSTATE %5s\n", sqlca.sqlstate);
+	else
+		printf("\"release savepoint a\" succeeded\n");
+
+	/* prove the above */
+
+	exec sql rollback to a;
+	if (sqlca.sqlcode < 0)
+		printf("\"rollback to a\" failed with SQLSTATE %5s (expected 3B001)\n", sqlca.sqlstate);
+	else
+		printf("\"rollback to a\" succeeded unexpectedly (expected 3B001)\n");
+
+	exec sql rollback;
+
+	/*
+	 * Test the implicit RELEASE SAVEPOINT if a SAVEPOINT
+	 * is used with an already existing name.
+	 */
+
+	printf("\ntest implicit \"release savepoint a\" for a second \"savepoint a\"\n\n");
+
+	exec sql savepoint a;
+	if (sqlca.sqlcode < 0)
+		printf("\"savepoint a\" failed with SQLSTATE %5s\n", sqlca.sqlstate);
+	else
+		printf("\"savepoint a\" succeeded\n");
+
+	exec sql open :curname;
+	if (sqlca.sqlcode < 0)
+		printf("open %s (case sensitive) failed with SQLSTATE %5s\n", curname, sqlca.sqlstate);
+	else
+		printf("open %s (case sensitive) succeeded\n", curname);
+
+	exec sql fetch from :curname into :id[0], :t[0];
+	if (sqlca.sqlcode < 0)
+		printf("fetch from %s (case sensitive) failed with SQLSTATE %5s\n", curname, sqlca.sqlstate);
+	else
+		printf("fetch from %s (case sensitive) result %d '%s'\n", curname, id[0], t[0].arr);
+
+	exec sql rollback to a;
+	if (sqlca.sqlcode < 0)
+		printf("\"rollback to a\" failed with SQLSTATE %5s\n", sqlca.sqlstate);
+	else
+		printf("\"rollback to a\" succeeded\n");
+
+	/* there's no cursor now */
+
+	exec sql fetch from :curname into :id[1], :t[1];
+	if (sqlca.sqlcode < 0)
+		printf("fetch from %s (case sensitive) failed with SQLSTATE %5s (expected 34000)\n", curname, sqlca.sqlstate);
+	else
+		printf("fetch from %s (case sensitive) unexpectedly succeeded (expected 34000)\n", curname);
+
+	exec sql open :curname;
+	if (sqlca.sqlcode < 0)
+		printf("open %s (case sensitive) failed with SQLSTATE %5s (expected 25P02)\n", curname, sqlca.sqlstate);
+	else
+		printf("open %s (case sensitive) succeeded unexpectedly\n", curname);
+
+	exec sql rollback to a;
+	if (sqlca.sqlcode < 0)
+		printf("\"rollback to a\" failed with SQLSTATE %5s\n", sqlca.sqlstate);
+	else
+		printf("\"rollback to a\" succeeded\n");
+
+	exec sql open :curname;
+	if (sqlca.sqlcode < 0)
+		printf("open %s (case sensitive) failed with SQLSTATE %5s\n", curname, sqlca.sqlstate);
+	else
+		printf("open %s (case sensitive) succeeded\n", curname);
+
+	exec sql release savepoint a;
+	if (sqlca.sqlcode < 0)
+		printf("\"release savepoint a\" failed with SQLSTATE %5s\n", sqlca.sqlstate);
+	else
+		printf("\"release savepoint a\" succeeded\n");
+
+	/* release savepoint propagated the cursor to the toplevel transaction */
+
+	exec sql fetch from :curname into :id[2], :t[2];
+	if (sqlca.sqlcode < 0)
+		printf("fetch %s (case sensitive) failed with SQLSTATE %5s\n", curname, sqlca.sqlstate);
+	else
+		printf("fetch %s (case sensitive) result %d '%s'\n", curname, id[2], t[2].arr);
+
+	exec sql rollback;
+
+	/* Drop the test table */
+
+	exec sql drop table t1;
+	exec sql commit;
+
+	exec sql disconnect all;
+
+	return 0;
+}

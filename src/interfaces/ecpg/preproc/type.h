@@ -129,6 +129,11 @@ struct cursor
 	char	   *command;
 	char	   *connection;
 	bool		opened;
+	bool		with_hold;
+	bool		allow_ra_override;
+	long		fetch_readahead;
+	enum ECPGttype	vartype;
+	enum ECPG_cursor_scroll scrollable;
 	struct arguments *argsinsert;
 	struct arguments *argsinsert_oos;
 	struct arguments *argsresult;
