@@ -59,7 +59,7 @@ ECPG: stmtTransactionStmt block
 		else
 			tr_name = mm_strdup("NULL");
 
-		fprintf(yyout, "{ ECPGtrans(__LINE__, %s, \"%s\", %d, %d, %d, %s);",
+		fprintf(base_yyout, "{ ECPGtrans(__LINE__, %s, \"%s\", %d, %d, %d, %s);",
 					connection ? connection : "NULL",
 					$1,
 					transact_prepared,
@@ -228,7 +228,7 @@ ECPG: stmtViewStmt rule
 	}
 	| ECPGSetAutocommit
 	{
-		fprintf(yyout, "{ ECPGsetcommit(__LINE__, %d, %s);", (strcmp($1, "on") == 0), connection ? connection : "NULL");
+		fprintf(base_yyout, "{ ECPGsetcommit(__LINE__, %d, %s);", (strcmp($1, "on") == 0), connection ? connection : "NULL");
 		whenever_action(2);
 		free($1);
 	}
