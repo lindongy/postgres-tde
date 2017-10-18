@@ -33,6 +33,7 @@
 
 #include <ctype.h>
 
+#include "common/sha2.h"
 #include "parser/scansup.h"
 #include "storage/encryption.h"
 #include "utils/backend_random.h"
@@ -43,7 +44,6 @@
 #include "px.h"
 #include "px-crypt.h"
 #include "pgcrypto.h"
-#include "sha2.h"
 #include "xts.h"
 
 PG_MODULE_MAGIC;
@@ -604,10 +604,10 @@ pgcrypto_encryption_setup()
 
 		/* TODO: replace with PBKDF2 or scrypt */
 		{
-			SHA256_CTX sha_ctx;
-			SHA256_Init(&sha_ctx);
-			SHA256_Update(&sha_ctx, (uint8*) passphrase, strlen(passphrase));
-			SHA256_Final(key, &sha_ctx);
+			pg_sha256_ctx sha_ctx;
+			pg_sha256_init(&sha_ctx);
+			pg_sha256_update(&sha_ctx, (uint8*) passphrase, strlen(passphrase));
+			pg_sha256_final(&sha_ctx, key);
 		}
 	}
 
