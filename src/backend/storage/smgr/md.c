@@ -29,7 +29,6 @@
 #include "access/xlog.h"
 #include "catalog/catalog.h"
 #include "pgstat.h"
-#include "libpq/md5.h"
 #include "portability/instr_time.h"
 #include "postmaster/bgwriter.h"
 #include "storage/fd.h"
