@@ -4,8 +4,8 @@ INT_SRCS = md5.c sha1.c internal.c internal-sha2.c blf.c rijndael.c \
 		pgp-mpi-internal.c imath.c
 INT_TESTS = sha2
 
-OSSL_SRCS = openssl.c pgp-mpi-openssl.c rijndael.c sha2.c
-OSSL_TESTS = sha2 des 3des cast5
+OSSL_SRCS = openssl.c pgp-mpi-openssl.c rijndael.c
+OSSL_TESTS = des 3des cast5
 
 ZLIB_TST = pgp-compression
 ZLIB_OFF_TST = pgp-zlib-DISABLED
