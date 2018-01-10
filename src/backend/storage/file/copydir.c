@@ -167,10 +167,24 @@ copy_file(char *fromfile, char *tofile, RelFileNode *fromNode,
 	int			bytesread;
 	BlockNumber blockNum = segment*RELSEG_SIZE;
 	off_t		offset;
+	off_t		flush_offset;
 
-	/* Use palloc to ensure we get a maxaligned buffer */
+	/* Size of copy buffer (read and write requests) */
 #define COPY_BUF_SIZE (8 * BLCKSZ)
 
+	/*
+	 * Size of data flush requests.  It seems beneficial on most platforms to
+	 * do this every 1MB or so.  But macOS, at least with early releases of
+	 * APFS, is really unfriendly to small mmap/msync requests, so there do it
+	 * only every 32MB.
+	 */
+#if defined(__darwin__)
+#define FLUSH_DISTANCE (32 * 1024 * 1024)
+#else
+#define FLUSH_DISTANCE (1024 * 1024)
+#endif
+
+	/* Use palloc to ensure we get a maxaligned buffer */
 	buffer = palloc(COPY_BUF_SIZE);
 
 	/*
@@ -192,6 +206,7 @@ copy_file(char *fromfile, char *tofile, RelFileNode *fromNode,
 	/*
 	 * Do the data copying.
 	 */
+	flush_offset = 0;
 	for (offset = 0;; offset += nbytes)
 	{
 		/* If we got a cancel signal during the copy of the file, quit */
@@ -242,14 +257,10 @@ copy_file(char *fromfile, char *tofile, RelFileNode *fromNode,
 					 errmsg("could not write to file \"%s\": %m", tofile)));
 		}
 		pgstat_report_wait_end();
-
-		/*
-		 * We fsync the files later but first flush them to avoid spamming the
-		 * cache and hopefully get the kernel to start writing them out before
-		 * the fsync comes.
-		 */
-		pg_flush_data(dstfd, offset, nbytes);
 	}
+
+	if (offset > flush_offset)
+		pg_flush_data(dstfd, flush_offset, offset - flush_offset);
 
 	if (CloseTransientFile(dstfd))
 		ereport(ERROR,
