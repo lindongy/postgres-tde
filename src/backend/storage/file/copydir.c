@@ -213,6 +213,17 @@ copy_file(char *fromfile, char *tofile, RelFileNode *fromNode,
 		CHECK_FOR_INTERRUPTS();
 
 		/*
+		 * We fsync the files later, but during the copy, flush them every so
+		 * often to avoid spamming the cache and hopefully get the kernel to
+		 * start writing them out before the fsync comes.
+		 */
+		if (offset - flush_offset >= FLUSH_DISTANCE)
+		{
+			pg_flush_data(dstfd, flush_offset, offset - flush_offset);
+			flush_offset = offset;
+		}
+
+		/*
 		 * Try to read as much as we fit in the buffer so we can deal with
 		 * complete blocks if we need to reencrypt.
 		 */
