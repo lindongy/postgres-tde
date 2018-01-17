@@ -231,7 +231,7 @@ copy_file(char *fromfile, char *tofile, RelFileNode *fromNode,
 		while (nbytes < COPY_BUF_SIZE)
 		{
 			pgstat_report_wait_start(WAIT_EVENT_COPY_FILE_READ);
-			bytesread = read(srcfd, buffer, COPY_BUF_SIZE);
+			bytesread = read(srcfd, buffer + nbytes, COPY_BUF_SIZE - nbytes);
 			pgstat_report_wait_end();
 			if (bytesread < 0)
 				ereport(ERROR,
