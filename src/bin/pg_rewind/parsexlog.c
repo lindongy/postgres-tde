@@ -23,7 +23,12 @@
 #include "catalog/pg_control.h"
 #include "catalog/storage_xlog.h"
 #include "commands/dbcommands_xlog.h"
+#include "storage/encryption.h"
 
+/*
+ * TODO Determine the value.
+ */
+bool encryption_enabled = false;
 
 /*
  * RmgrNames is an array of resource manager names, to make error messages

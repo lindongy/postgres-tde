@@ -21,6 +21,34 @@
 
 extern PGDLLIMPORT bool encryption_enabled;
 
+/*
+ * Should XLOG records be aligned to ENCRYPTION_BLOCK bytes?
+ *
+ * The encrypted data is a series of blocks of size ENCRYPTION_BLOCK. If one
+ * XLOG record ended and the following one started in the same block, we'd
+ * have to either encrypt and decrypt both records together, or encrypt (after
+ * having zeroed the part of the block occupied by the other record) and
+ * decrypt them separate. Neither approach is compatible with streaming
+ * replication. In the first case we can't ask standby not to decrypt the
+ * first record until the second has been streamed. The second approach would
+ * imply streaming of two different versions of the same block two times.
+ *
+ * We avoid this problem by aligning XLOG records to the encryption block
+ * size. This way no adjacent XLOG records should appear in the same block.
+ *
+ * TODO If the configuration allows walsender to decrypt the XLOG stream
+ * before sending it, adjust this expression so that the additional padding of
+ * is not added to XLOG records in that case. (Since the XLOG alignment cannot
+ * change without initdb, the same would apply to the configuration variable
+ * that makes walsender perform the decryption. Does such a variable make
+ * sense?)
+ */
+#define DO_ENCRYPTION_BLOCK_ALIGN	encryption_enabled
+
+/*
+ * Use TYPEALIGN64 since besides record size we also need to align XLogRecPtr.
+ */
+#define ENCRYPTION_BLOCK_ALIGN(LEN)		TYPEALIGN64(ENCRYPTION_BLOCK, (LEN))
 
 void setup_encryption(void);
 void sample_encryption(char *buf);

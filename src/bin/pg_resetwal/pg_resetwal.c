@@ -53,9 +53,17 @@
 #include "catalog/pg_control.h"
 #include "common/fe_memutils.h"
 #include "common/restricted_token.h"
+#include "storage/encryption.h"
 #include "storage/large_object.h"
 #include "pg_getopt.h"
 
+/*
+ * Instead of constant false, either set the variable according to the
+ * existing ControlFileData.data_encrypted field or guess it the depending
+ * constants (SizeOfXLogShortPHD, SizeOfXLogLongPHD) are used in
+ * GuessControlValues().
+ */
+bool encryption_enabled = false;
 
 static ControlFileData ControlFile; /* pg_control values */
 static XLogSegNo newXlogSegNo;	/* new XLOG segment # */

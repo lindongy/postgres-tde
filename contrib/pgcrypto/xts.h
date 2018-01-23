@@ -31,6 +31,7 @@
 #include "rijndael.h"
 
 /* lifted from aes.h */
+/* TODO Include storage/encryption.h and use ENCRYPTION_BLOCK instead? */
 #define AES_BLOCK_SIZE  16  /* the AES block size in bytes          */
 
 /* end */
