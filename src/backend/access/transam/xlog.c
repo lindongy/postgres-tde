@@ -1231,13 +1231,7 @@ ReserveXLogInsertLocation(int size, XLogRecPtr *StartPos, XLogRecPtr *EndPos,
 	uint64		endbytepos;
 	uint64		prevbytepos;
 
-	/*
-	 * Extra padding may be needed for encrypted XLOG.
-	 */
-	if (!DO_ENCRYPTION_BLOCK_ALIGN)
-		size = MAXALIGN(size);
-	else
-		size = ENCRYPTION_BLOCK_ALIGN(size);
+	size = XLOG_REC_ALIGN(size);
 
 	/* All (non xlog-switch) records should contain data. */
 	Assert(size > SizeOfXLogRecord);
@@ -1291,17 +1285,9 @@ ReserveXLogSwitch(XLogRecPtr *StartPos, XLogRecPtr *EndPos, XLogRecPtr *PrevPtr)
 	uint64		startbytepos;
 	uint64		endbytepos;
 	uint64		prevbytepos;
-	uint32		size;
+	uint32		size = XLOG_REC_ALIGN(SizeOfXLogRecord);
 	XLogRecPtr	ptr;
 	uint32		segleft;
-
-	/*
-	 * Extra padding may be needed for encrypted XLOG.
-	 */
-	if (!DO_ENCRYPTION_BLOCK_ALIGN)
-		size = MAXALIGN(SizeOfXLogRecord);
-	else
-		size = ENCRYPTION_BLOCK_ALIGN(SizeOfXLogRecord);
 
 	/*
 	 * These calculations are a bit heavy-weight to be done while holding a
@@ -1575,10 +1561,7 @@ CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rdata,
 	else
 	{
 		/* Align the end position, so that the next record starts aligned */
-		if (!DO_ENCRYPTION_BLOCK_ALIGN)
-			CurrPos = MAXALIGN64(CurrPos);
-		else
-			CurrPos = ENCRYPTION_BLOCK_ALIGN(CurrPos);
+		CurrPos = XLOG_REC_ALIGN(CurrPos);
 	}
 
 	if (CurrPos != EndPos)

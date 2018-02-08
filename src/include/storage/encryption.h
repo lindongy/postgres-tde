@@ -50,6 +50,12 @@ extern PGDLLIMPORT bool encryption_enabled;
  */
 #define ENCRYPTION_BLOCK_ALIGN(LEN)		TYPEALIGN64(ENCRYPTION_BLOCK, (LEN))
 
+/*
+ * Universal computation of XLOG record alignment.
+ */
+#define XLOG_REC_ALIGN(LEN) ((DO_ENCRYPTION_BLOCK_ALIGN) ?\
+							 ENCRYPTION_BLOCK_ALIGN(LEN) : MAXALIGN64(LEN))
+
 void setup_encryption(void);
 void sample_encryption(char *buf);
 void encrypt_block(const char *input, char *output, Size size,
