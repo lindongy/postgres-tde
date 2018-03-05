@@ -64,6 +64,7 @@
 #include "replication/slot.h"
 #include "replication/snapbuild.h"	/* just for SnapBuildSnapDecRefcount */
 #include "storage/bufmgr.h"
+#include "storage/encryption.h"
 #include "storage/fd.h"
 #include "storage/sinval.h"
 #include "utils/builtins.h"
@@ -193,7 +194,7 @@ static void ReorderBufferExecuteInvalidations(ReorderBuffer *rb, ReorderBufferTX
 static void ReorderBufferCheckSerializeTXN(ReorderBuffer *rb, ReorderBufferTXN *txn);
 static void ReorderBufferSerializeTXN(ReorderBuffer *rb, ReorderBufferTXN *txn);
 static void ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
-							 int fd, ReorderBufferChange *change);
+										 int fd, XLogSegNo segno, ReorderBufferChange *change);
 static Size ReorderBufferRestoreChanges(ReorderBuffer *rb, ReorderBufferTXN *txn,
 							int *fd, XLogSegNo *segno);
 static void ReorderBufferRestoreChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
@@ -215,6 +216,22 @@ static void ReorderBufferToastReplace(ReorderBuffer *rb, ReorderBufferTXN *txn,
 static void ReorderBufferToastAppendChunk(ReorderBuffer *rb, ReorderBufferTXN *txn,
 							  Relation relation, ReorderBufferChange *change);
 
+
+/* ----------------------------------------------
+ * encryption / decryption of serialized changes
+ * ----------------------------------------------
+ */
+
+static void ensure_encryption_buffer_size(ReorderBuffer *rb, Size size);
+
+/*
+ * Compute encryption tweak for buffer change.
+ */
+#define REORDER_BUFFER_CHANGE_TWEAK(tweak, segno) \
+	StaticAssertStmt(sizeof(XLogSegNo) <= TWEAK_SIZE, \
+					 "XLogSegNo does not fit into encryption tweak"); \
+	memset((tweak), 0, TWEAK_SIZE); \
+	memcpy((tweak), (char *) &segno, sizeof(XLogSegNo))
 
 /*
  * Allocate a new ReorderBuffer
@@ -262,6 +279,9 @@ ReorderBufferAllocate(void)
 
 	buffer->outbuf = NULL;
 	buffer->outbufsize = 0;
+
+	buffer->encryption_buffer = NULL;
+	buffer->encryption_buffer_size = 0;
 
 	buffer->current_restart_decoding_lsn = InvalidXLogRecPtr;
 
@@ -2128,7 +2148,7 @@ ReorderBufferSerializeTXN(ReorderBuffer *rb, ReorderBufferTXN *txn)
 								path)));
 		}
 
-		ReorderBufferSerializeChange(rb, txn, fd, change);
+		ReorderBufferSerializeChange(rb, txn, fd, curOpenSegNo, change);
 		dlist_delete(&change->node);
 		ReorderBufferReturnChange(rb, change);
 
@@ -2149,12 +2169,25 @@ ReorderBufferSerializeTXN(ReorderBuffer *rb, ReorderBufferTXN *txn)
  */
 static void
 ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
-							 int fd, ReorderBufferChange *change)
+							 int fd, XLogSegNo segno,
+							 ReorderBufferChange *change)
 {
 	ReorderBufferDiskChange *ondisk;
-	Size		sz = sizeof(ReorderBufferDiskChange);
+	Size		sz, sz_hdr;
+	char		*outbuf;
 
-	ReorderBufferSerializeReserve(rb, sz);
+	sz = sizeof(ReorderBufferDiskChange);
+
+	/*
+	 * As the on-disk change has variable length, the header will have to be
+	 * de-serialized separate, see ReorderBufferRestoreChanges(). Therefore we
+	 * also need to encrypt it separate. Make sure the size is appropriate.
+	 */
+	if (encryption_enabled)
+		sz = TYPEALIGN(ENCRYPTION_BLOCK, sz);
+
+	sz_hdr = sz;
+	ReorderBufferSerializeReserve(rb, sz_hdr);
 
 	ondisk = (ReorderBufferDiskChange *) rb->outbuf;
 	memcpy(&ondisk->change, change, sizeof(ReorderBufferChange));
@@ -2191,6 +2224,15 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 				}
 
 				/* make sure we have enough space */
+				if (encryption_enabled)
+				{
+					/*
+					 * Encryption works with blocks. As the changes are stored
+					 * and retrieved separately, we also have to decrypt them
+					 * alone.
+					 */
+					sz = TYPEALIGN(ENCRYPTION_BLOCK, sz);
+				}
 				ReorderBufferSerializeReserve(rb, sz);
 
 				data = ((char *) rb->outbuf) + sizeof(ReorderBufferDiskChange);
@@ -2223,6 +2265,9 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 
 				sz += prefix_size + change->data.msg.message_size +
 					sizeof(Size) + sizeof(Size);
+
+				if (encryption_enabled)
+					sz = TYPEALIGN(ENCRYPTION_BLOCK, sz);
 				ReorderBufferSerializeReserve(rb, sz);
 
 				data = ((char *) rb->outbuf) + sizeof(ReorderBufferDiskChange);
@@ -2259,7 +2304,10 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 					;
 
 				/* make sure we have enough space */
+				if (encryption_enabled)
+					sz = TYPEALIGN(ENCRYPTION_BLOCK, sz);
 				ReorderBufferSerializeReserve(rb, sz);
+
 				data = ((char *) rb->outbuf) + sizeof(ReorderBufferDiskChange);
 				/* might have been reallocated above */
 				ondisk = (ReorderBufferDiskChange *) rb->outbuf;
@@ -2291,8 +2339,40 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 
 	ondisk->size = sz;
 
+	/*
+	 * Encrypt the change if encryption is required.
+	 */
+	if (encryption_enabled)
+	{
+		char	tweak[TWEAK_SIZE];
+
+		REORDER_BUFFER_CHANGE_TWEAK(tweak, segno);
+
+		ensure_encryption_buffer_size(rb, ondisk->size);
+
+		/*
+		 * Encrypt the header and the payload separate as explained at the top
+		 * of the function.
+		 */
+		encrypt_block((char*) rb->outbuf, rb->encryption_buffer, sz_hdr,
+					  tweak);
+
+		if (ondisk->size > sz_hdr)
+			encrypt_block((char*) rb->outbuf + sz_hdr,
+						  rb->encryption_buffer + sz_hdr,
+						  ondisk->size - sz_hdr, tweak);
+	}
+
+	/*
+	 * Make sure the correct buffer is written to disk.
+	 */
+	if (encryption_enabled)
+		outbuf = rb->encryption_buffer;
+	else
+		outbuf = rb->outbuf;
+
 	pgstat_report_wait_start(WAIT_EVENT_REORDER_BUFFER_WRITE);
-	if (write(fd, rb->outbuf, ondisk->size) != ondisk->size)
+	if (write(fd, outbuf, ondisk->size) != ondisk->size)
 	{
 		int			save_errno = errno;
 
@@ -2318,6 +2398,8 @@ ReorderBufferRestoreChanges(ReorderBuffer *rb, ReorderBufferTXN *txn,
 	Size		restored = 0;
 	XLogSegNo	last_segno;
 	dlist_mutable_iter cleanup_iter;
+	Size	sz_hdr;
+	char	encryption_tweak[TWEAK_SIZE];
 
 	Assert(txn->first_lsn != InvalidXLogRecPtr);
 	Assert(txn->final_lsn != InvalidXLogRecPtr);
@@ -2335,6 +2417,13 @@ ReorderBufferRestoreChanges(ReorderBuffer *rb, ReorderBufferTXN *txn,
 	Assert(dlist_is_empty(&txn->changes));
 
 	XLByteToSeg(txn->final_lsn, last_segno);
+
+	/*
+	 * See ReorderBufferSerializeChange for explanation.
+	 */
+	sz_hdr = sizeof(ReorderBufferDiskChange);
+	if (encryption_enabled)
+		sz_hdr = TYPEALIGN(ENCRYPTION_BLOCK, sz_hdr);
 
 	while (restored < max_changes_in_memory && *segno <= last_segno)
 	{
@@ -2383,9 +2472,9 @@ ReorderBufferRestoreChanges(ReorderBuffer *rb, ReorderBufferTXN *txn,
 		 * about the total size. If we couldn't read a record, we're at the
 		 * end of this file.
 		 */
-		ReorderBufferSerializeReserve(rb, sizeof(ReorderBufferDiskChange));
+		ReorderBufferSerializeReserve(rb, sz_hdr);
 		pgstat_report_wait_start(WAIT_EVENT_REORDER_BUFFER_READ);
-		readBytes = read(*fd, rb->outbuf, sizeof(ReorderBufferDiskChange));
+		readBytes = read(*fd, rb->outbuf, sz_hdr);
 		pgstat_report_wait_end();
 
 		/* eof */
@@ -2400,38 +2489,53 @@ ReorderBufferRestoreChanges(ReorderBuffer *rb, ReorderBufferTXN *txn,
 			ereport(ERROR,
 					(errcode_for_file_access(),
 					 errmsg("could not read from reorderbuffer spill file: %m")));
-		else if (readBytes != sizeof(ReorderBufferDiskChange))
+		else if (readBytes != sz_hdr)
 			ereport(ERROR,
 					(errcode_for_file_access(),
 					 errmsg("could not read from reorderbuffer spill file: read %d instead of %u bytes",
 							readBytes,
-							(uint32) sizeof(ReorderBufferDiskChange))));
+							(uint32) sz_hdr)));
+
+		/*
+		 * Decrypt the header if the change is decrypted, so that we know the
+		 * change size.
+		 */
+		if (encryption_enabled)
+		{
+			REORDER_BUFFER_CHANGE_TWEAK(encryption_tweak, *segno);
+			decrypt_block(rb->outbuf, rb->outbuf, sz_hdr, encryption_tweak);
+		}
 
 		ondisk = (ReorderBufferDiskChange *) rb->outbuf;
 
-		ReorderBufferSerializeReserve(rb,
-									  sizeof(ReorderBufferDiskChange) + ondisk->size);
+		ReorderBufferSerializeReserve(rb, ondisk->size);
 		ondisk = (ReorderBufferDiskChange *) rb->outbuf;
 
 		pgstat_report_wait_start(WAIT_EVENT_REORDER_BUFFER_READ);
-		readBytes = read(*fd, rb->outbuf + sizeof(ReorderBufferDiskChange),
-						 ondisk->size - sizeof(ReorderBufferDiskChange));
+		readBytes = read(*fd, rb->outbuf + sz_hdr, ondisk->size - sz_hdr);
 		pgstat_report_wait_end();
 
 		if (readBytes < 0)
 			ereport(ERROR,
 					(errcode_for_file_access(),
 					 errmsg("could not read from reorderbuffer spill file: %m")));
-		else if (readBytes != ondisk->size - sizeof(ReorderBufferDiskChange))
+		else if (readBytes != ondisk->size - sz_hdr)
 			ereport(ERROR,
 					(errcode_for_file_access(),
 					 errmsg("could not read from reorderbuffer spill file: read %d instead of %u bytes",
 							readBytes,
-							(uint32) (ondisk->size - sizeof(ReorderBufferDiskChange)))));
+							(uint32) (ondisk->size - sz_hdr))));
 
 		/*
-		 * ok, read a full change from disk, now restore it into proper
-		 * in-memory format
+		 * ok, read a full change from disk, now decrypt it if it's encrypted
+		 * and if there's some data beyond the header.
+		 */
+		if (encryption_enabled && ondisk->size > sz_hdr)
+			decrypt_block(rb->outbuf + sz_hdr, rb->outbuf + sz_hdr,
+						  ondisk->size - sz_hdr, encryption_tweak);
+
+		/*
+		 * Restore the change into proper in-memory format
 		 */
 		ReorderBufferRestoreChange(rb, txn, rb->outbuf);
 		restored++;
@@ -3310,4 +3414,31 @@ restart:
 	if (cmax)
 		*cmax = ent->cmax;
 	return true;
+}
+
+
+/*
+ * Make sure there's enough space in the encryption buffer.
+ */
+static void
+ensure_encryption_buffer_size(ReorderBuffer *rb, Size size)
+{
+	/*
+	 * Allocate the buffer if not allocated yet or reallocate if the current
+	 * size is not sufficient.
+	 */
+	if (rb->encryption_buffer == NULL)
+	{
+		Assert(rb->encryption_buffer_size == 0);
+
+		rb->encryption_buffer_size = size;
+		rb->encryption_buffer = MemoryContextAlloc(rb->context,
+												   rb->encryption_buffer_size);
+	}
+	else if (size > rb->encryption_buffer_size)
+	{
+		rb->encryption_buffer_size = size;
+		rb->encryption_buffer = repalloc(rb->encryption_buffer,
+										 rb->encryption_buffer_size);
+	}
 }

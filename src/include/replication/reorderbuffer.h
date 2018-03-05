@@ -366,6 +366,10 @@ struct ReorderBuffer
 	/* buffer for disk<->memory conversions */
 	char	   *outbuf;
 	Size		outbufsize;
+
+	/* output buffer for encryption */
+	char	*encryption_buffer;
+	Size	encryption_buffer_size;
 };
 
 
