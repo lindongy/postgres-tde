@@ -11,5 +11,5 @@
 #define COMMON_STRING_H
 
 extern bool pg_str_endswith(const char *str, const char *end);
-
+extern bool IsAllZero(const char *input, Size size);
 #endif							/* COMMON_STRING_H */

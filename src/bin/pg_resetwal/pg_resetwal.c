@@ -57,14 +57,6 @@
 #include "storage/large_object.h"
 #include "pg_getopt.h"
 
-/*
- * Instead of constant false, either set the variable according to the
- * existing ControlFileData.data_encrypted field or guess it the depending
- * constants (SizeOfXLogShortPHD, SizeOfXLogLongPHD) are used in
- * GuessControlValues().
- */
-bool encryption_enabled = false;
-
 static ControlFileData ControlFile; /* pg_control values */
 static XLogSegNo newXlogSegNo;	/* new XLOG segment # */
 static bool guessed = false;	/* T if we had to guess at any values */
@@ -89,6 +81,8 @@ static void FindEndOfXLOG(void);
 static void KillExistingXLOG(void);
 static void KillExistingArchiveStatus(void);
 static void WriteEmptyXLOG(void);
+static void XLogEncryptionTweak(char *tweak, TimeLineID timeline,
+								XLogSegNo segment, uint32 offset);
 static void usage(void);
 
 
@@ -357,6 +351,13 @@ main(int argc, char *argv[])
 	 */
 	if (!ReadControlFile())
 		GuessControlValues();
+
+	/*
+	 * If the data is encrypted, we'll also have to encrypt the XLOG record
+	 * below.
+	 */
+	if (ControlFile.data_encrypted && !data_encrypted)
+		setup_encryption();
 
 	/*
 	 * Also look at existing segment files to set up newXlogSegNo
@@ -1183,6 +1184,14 @@ WriteEmptyXLOG(void)
 	FIN_CRC32C(crc);
 	record->xl_crc = crc;
 
+	if (data_encrypted)
+	{
+		char tweak[TWEAK_SIZE];
+
+		XLogEncryptionTweak(tweak, page->xlp_tli, 1, 0);
+		encrypt_block(buffer, buffer, XLOG_BLCKSZ, tweak);
+	}
+
 	/* Write the first page */
 	XLogFilePath(path, ControlFile.checkPointCopy.ThisTimeLineID, newXlogSegNo);
 
@@ -1232,6 +1241,17 @@ WriteEmptyXLOG(void)
 	close(fd);
 }
 
+/*
+ * Just copy & pasted from xlogutils.c instead of adjusting that module for
+ * linking to front-end.
+ */
+static void
+XLogEncryptionTweak(char *tweak, TimeLineID timeline, XLogSegNo segment, uint32 offset)
+{
+	memcpy(tweak, &segment, sizeof(XLogSegNo));
+	memcpy(tweak  + sizeof(XLogSegNo), &offset, sizeof(offset));
+	memcpy(tweak + sizeof(XLogSegNo) + sizeof(uint32), &timeline, sizeof(timeline));
+}
 
 static void
 usage(void)

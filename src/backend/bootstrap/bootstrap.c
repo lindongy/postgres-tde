@@ -49,8 +49,6 @@
 #include "utils/tqual.h"
 
 uint32		bootstrap_data_checksum_version = 0;	/* No checksum */
-bool		bootstrap_data_encrypted = false;
-char	   *bootstrap_encryption_sample = NULL;
 
 #define ALLOC(t, c) \
 	((t *) MemoryContextAllocZero(TopMemoryContext, (unsigned)(c) * sizeof(t)))
@@ -225,7 +223,7 @@ AuxiliaryProcessMain(int argc, char *argv[])
 	/* If no -x argument, we are a CheckerProcess */
 	MyAuxProcType = CheckerProcess;
 
-	while ((flag = getopt(argc, argv, "B:c:d:D:Fkr:x:-:")) != -1)
+	while ((flag = getopt(argc, argv, "B:c:d:D:FkKr:x:-:")) != -1)
 	{
 		switch (flag)
 		{
@@ -250,6 +248,16 @@ AuxiliaryProcessMain(int argc, char *argv[])
 				break;
 			case 'F':
 				SetConfigOption("fsync", "false", PGC_POSTMASTER, PGC_S_ARGV);
+				break;
+			case 'K':
+				/*
+				 * Postmaster should not set this option. Instead, it just
+				 * sets data_encrypted according to the control file and child
+				 * processes inherit that.
+				 */
+				Assert(!IsUnderPostmaster);
+
+				data_encrypted = true;
 				break;
 			case 'k':
 				bootstrap_data_checksum_version = PG_DATA_CHECKSUM_VERSION;
@@ -358,16 +366,13 @@ AuxiliaryProcessMain(int argc, char *argv[])
 	if (!IsUnderPostmaster)
 		InitializeMaxBackends();
 
-	if (!IsUnderPostmaster)
+	/*
+	 * If data_encryption is set because of command line argument, do the
+	 * setup now. (If set by postmaster, postmaster should have performed the
+	 * setup.)
+	 */
+	if (data_encrypted && !IsUnderPostmaster)
 		setup_encryption();
-
-	if (encryption_enabled)
-	{
-		bootstrap_data_encrypted = true;
-		bootstrap_encryption_sample = palloc0(ENCRYPTION_SAMPLE_SIZE);
-		sample_encryption(bootstrap_encryption_sample);
-	}
-
 
 	BaseInit();
 

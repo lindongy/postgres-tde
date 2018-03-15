@@ -544,10 +544,10 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 				 errmsg("could not seek to block %u in file \"%s\": %m",
 						blocknum, FilePathName(v->mdfd_vfd))));
 
-	if (encryption_enabled)
+	if (data_encrypted)
 		mdencrypt(reln, forknum, blocknum, buffer);
 
-	if ((nbytes = FileWrite(v->mdfd_vfd, encryption_enabled ? md_encryption_buffer : buffer, BLCKSZ, WAIT_EVENT_DATA_FILE_EXTEND)) != BLCKSZ)
+	if ((nbytes = FileWrite(v->mdfd_vfd, data_encrypted ? md_encryption_buffer : buffer, BLCKSZ, WAIT_EVENT_DATA_FILE_EXTEND)) != BLCKSZ)
 	{
 		if (nbytes < 0)
 			ereport(ERROR,
@@ -764,7 +764,7 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 				 errmsg("could not seek to block %u in file \"%s\": %m",
 						blocknum, FilePathName(v->mdfd_vfd))));
 
-	nbytes = FileRead(v->mdfd_vfd, encryption_enabled ? md_encryption_buffer : buffer, BLCKSZ, WAIT_EVENT_DATA_FILE_READ);
+	nbytes = FileRead(v->mdfd_vfd, data_encrypted ? md_encryption_buffer : buffer, BLCKSZ, WAIT_EVENT_DATA_FILE_READ);
 
 	TRACE_POSTGRESQL_SMGR_MD_READ_DONE(forknum, blocknum,
 									   reln->smgr_rnode.node.spcNode,
@@ -799,7 +799,7 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 							blocknum, FilePathName(v->mdfd_vfd),
 							nbytes, BLCKSZ)));
 	}
-	else if (encryption_enabled)
+	else if (data_encrypted)
 		mddecrypt(reln, forknum, blocknum, buffer);
 }
 
@@ -842,9 +842,9 @@ mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 				 errmsg("could not seek to block %u in file \"%s\": %m",
 						blocknum, FilePathName(v->mdfd_vfd))));
 
-	if (encryption_enabled)
+	if (data_encrypted)
 		mdencrypt(reln, forknum, blocknum, buffer);
-	nbytes = FileWrite(v->mdfd_vfd, encryption_enabled ? md_encryption_buffer : buffer, BLCKSZ, WAIT_EVENT_DATA_FILE_WRITE);
+	nbytes = FileWrite(v->mdfd_vfd, data_encrypted ? md_encryption_buffer : buffer, BLCKSZ, WAIT_EVENT_DATA_FILE_WRITE);
 
 	TRACE_POSTGRESQL_SMGR_MD_WRITE_DONE(forknum, blocknum,
 										reln->smgr_rnode.node.spcNode,

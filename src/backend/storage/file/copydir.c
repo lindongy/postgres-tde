@@ -45,7 +45,7 @@ copydir(char *fromdir, char *todir, RelFileNode *fromNode, RelFileNode *toNode)
 	char		fromfile[MAXPGPATH * 2];
 	char		tofile[MAXPGPATH * 2];
 
-	Assert(!encryption_enabled || (fromNode != NULL && toNode != NULL));
+	Assert(!data_encrypted || (fromNode != NULL && toNode != NULL));
 
 	if (mkdir(todir, S_IRWXU) != 0)
 		ereport(ERROR,
@@ -87,7 +87,7 @@ copydir(char *fromdir, char *todir, RelFileNode *fromNode, RelFileNode *toNode)
 			 * For encrypted databases we need to reencrypt files with new
 			 * tweaks.
 			 */
-			if (encryption_enabled &&
+			if (data_encrypted &&
 					parse_filename_for_nontemp_relation(xlde->d_name,
 							&oidchars, &forkNum, &segment))
 			{
@@ -249,7 +249,7 @@ copy_file(char *fromfile, char *tofile, RelFileNode *fromNode,
 		 * If the database is encrypted we need to decrypt the data here
 		 * and reencrypt it to adjust the tweak values of blocks.
 		 */
-		if (encryption_enabled && fromNode != NULL)
+		if (data_encrypted && fromNode != NULL)
 		{
 			Assert(toNode != NULL);
 			blockNum = ReencryptBlock(buffer, nbytes/BLCKSZ,

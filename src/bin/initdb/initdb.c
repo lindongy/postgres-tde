@@ -67,6 +67,7 @@
 #include "common/restricted_token.h"
 #include "common/username.h"
 #include "fe_utils/string_utils.h"
+#include "storage/encryption.h"
 #include "lib/ilist.h"
 #include "mb/pg_wchar.h"
 #include "getaddrinfo.h"
@@ -147,7 +148,6 @@ static bool do_sync = true;
 static bool sync_only = false;
 static bool show_setting = false;
 static bool data_checksums = false;
-static char *data_encryption_module = NULL;
 static char *data_encryption_key = NULL;
 static char *xlog_dir = "";
 static dlist_head extra_options = DLIST_STATIC_INIT(extra_options);
@@ -278,7 +278,7 @@ static bool check_locale_encoding(const char *locale, int encoding);
 static void setlocales(void);
 static void usage(const char *progname);
 void		setup_pgdata(void);
-void		setup_encryption(void);
+void		setup_encryption_initdb(void);
 void		setup_bin_paths(const char *argv0);
 void		setup_data_file_paths(void);
 void		setup_locale_encoding(void);
@@ -1073,13 +1073,6 @@ setup_config(void)
 				 n_buffers * (BLCKSZ / 1024));
 	conflines = replace_token(conflines, "#shared_buffers = 32MB", repltok);
 
-	if (data_encryption_module != NULL)
-	{
-		snprintf(repltok, sizeof(repltok), "encryption_library = '%s'",
-						 data_encryption_module);
-		conflines = replace_token(conflines, "#encryption_library = ''", repltok);
-	}
-
 #ifdef HAVE_UNIX_SOCKETS
 	snprintf(repltok, sizeof(repltok), "#unix_socket_directories = '%s'",
 			 DEFAULT_PGSOCKET_DIR);
@@ -1407,9 +1400,10 @@ bootstrap_template1(void)
 	unsetenv("PGCLIENTENCODING");
 
 	snprintf(cmd, sizeof(cmd),
-			 "\"%s\" --boot -x1 %s %s %s",
+			 "\"%s\" --boot -x1 %s %s %s %s",
 			 backend_exec,
 			 data_checksums ? "-k" : "",
+			 data_encrypted ? "-K" : "",
 			 boot_options, talkargs);
 
 	PG_CMD_OPEN;
@@ -2452,7 +2446,7 @@ setup_pgdata(void)
 }
 
 void
-setup_encryption(void)
+setup_encryption_initdb(void)
 {
 	char *key = getenv("PGENCRYPTIONKEY");
 	if (key != NULL && strlen(key) != 0)
@@ -2463,6 +2457,12 @@ setup_encryption(void)
 		char *pgencryptionkey_set_env;
 		pgencryptionkey_set_env = psprintf("PGENCRYPTIONKEY=%s", data_encryption_key);
 		putenv(pgencryptionkey_set_env);
+	}
+	else
+	{
+		printf(_("PGENCRYPTIONKEY environment variable is not set.\n"));
+		fflush(stdout);
+		exit_nicely();
 	}
 }
 
@@ -3068,7 +3068,7 @@ main(int argc, char *argv[])
 		{"sync-only", no_argument, NULL, 'S'},
 		{"waldir", required_argument, NULL, 'X'},
 		{"data-checksums", no_argument, NULL, 'k'},
-		{"data-encryption", required_argument, NULL, 'K'},
+		{"data-encryption", no_argument, NULL, 'K'},
 		{"option", required_argument, NULL, 'c'},
 		{NULL, 0, NULL, 0}
 	};
@@ -3164,8 +3164,7 @@ main(int argc, char *argv[])
 				data_checksums = true;
 				break;
 			case 'K':
-				if (strlen(optarg) > 0)
-					data_encryption_module = pg_strdup(optarg);
+				data_encrypted = true;
 				break;
 			case 'c':
 				 parse_extra_option_arg(optarg);
@@ -3311,14 +3310,13 @@ main(int argc, char *argv[])
 	if (pwprompt || pwfilename)
 		get_su_pwd();
 
-	setup_encryption();
-
-	if (data_encryption_module != NULL)
-		printf(_("Using %s for data encryption.\n"), data_encryption_module);
+	if (data_encrypted)
+	{
+		setup_encryption_initdb();
+		printf(_("Data encryption is enabled.\n"));
+	}
 	else
 		printf(_("Data encryption is disabled.\n"));
-
-	printf("\n");
 
 	initialize_data_directory();
 

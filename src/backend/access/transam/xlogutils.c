@@ -763,7 +763,7 @@ XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
 		p += readbytes;
 
 		/* Decrypt completed blocks */
-		if (encryption_enabled)
+		if (data_encrypted)
 		{
 			while (decrypt_p + XLOG_BLCKSZ <= p)
 			{

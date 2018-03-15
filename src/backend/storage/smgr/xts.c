@@ -30,8 +30,8 @@
 
 #include "postgres.h"
 
-#include "mode_hdr.h"
-#include "xts.h"
+#include "storage/mode_hdr.h"
+#include "storage/xts.h"
 
 static void gf_mulx(void *x);
 
@@ -136,7 +136,8 @@ INT_RETURN xts_decrypt_key( const unsigned char key[], int key_len, xts_decrypt_
     return EXIT_SUCCESS;
 }
 
-INT_RETURN xts_encrypt_block( unsigned char sector[],  const unsigned char tweak[],
+INT_RETURN
+xts_encrypt_block( unsigned char sector[],  const unsigned char tweak[],
                                unsigned int sector_len, xts_encrypt_ctx ctx[1] )
 {   
     buf_type hh;
@@ -174,7 +175,8 @@ INT_RETURN xts_encrypt_block( unsigned char sector[],  const unsigned char tweak
     return EXIT_SUCCESS;
 }
 
-INT_RETURN xts_decrypt_block( unsigned char sector[], const unsigned char tweak[],
+INT_RETURN
+xts_decrypt_block( unsigned char sector[], const unsigned char tweak[],
                                unsigned int sector_len, xts_decrypt_ctx ctx[1] )
 {   
     buf_type hh, hh2;

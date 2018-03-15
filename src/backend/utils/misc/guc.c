@@ -69,6 +69,7 @@
 #include "replication/walsender.h"
 #include "storage/bufmgr.h"
 #include "storage/dsm_impl.h"
+#include "storage/encryption.h"
 #include "storage/standby.h"
 #include "storage/fd.h"
 #include "storage/pg_shmem.h"
@@ -191,6 +192,7 @@ static void assign_application_name(const char *newval, void *extra);
 static bool check_cluster_name(char **newval, void **extra, GucSource source);
 static const char *show_unix_socket_permissions(void);
 static const char *show_log_file_mode(void);
+static const char *show_key_setup_command(void);
 
 /* Private functions in guc-file.l that need to be called from guc.c */
 static ConfigVariable *ProcessConfigFileInternal(GucContext context,
@@ -1642,6 +1644,17 @@ static struct config_bool ConfigureNamesBool[] =
 			GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE
 		},
 		&data_checksums,
+		false,
+		NULL, NULL, NULL
+	},
+
+	{
+		{"data_encryption", PGC_INTERNAL, PRESET_OPTIONS,
+			gettext_noop("Shows whether data encryption is turned on for this cluster."),
+			NULL,
+			GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE
+		},
+		&data_encrypted,
 		false,
 		NULL, NULL, NULL
 	},
@@ -3230,17 +3243,6 @@ static struct config_string ConfigureNamesString[] =
 	},
 
 	{
-		{"encryption_library", PGC_POSTMASTER, CLIENT_CONN_PRELOAD,
-			gettext_noop("Encryption library to provide transparent data encryption."),
-			NULL,
-			GUC_SUPERUSER_ONLY
-		},
-		&encryption_library_string,
-		"",
-		NULL, NULL, NULL
-	},
-
-	{
 		{"session_preload_libraries", PGC_SUSET, CLIENT_CONN_PRELOAD,
 			gettext_noop("Lists shared libraries to preload into each backend."),
 			NULL,
@@ -3659,6 +3661,17 @@ static struct config_string ConfigureNamesString[] =
 		&wal_consistency_checking_string,
 		"",
 		check_wal_consistency_checking, assign_wal_consistency_checking, NULL
+	},
+
+	{
+		{"key_setup_command", PGC_POSTMASTER, 0,
+			gettext_noop("Sets the shell command that will be called to fetch database encryption key."),
+			NULL,
+			GUC_IS_NAME
+		},
+		&key_setup_command,
+		NULL,
+		NULL, NULL, show_key_setup_command
 	},
 
 	/* End-of-list marker */
@@ -10512,6 +10525,15 @@ show_log_file_mode(void)
 
 	snprintf(buf, sizeof(buf), "%04o", Log_file_mode);
 	return buf;
+}
+
+static const char *
+show_key_setup_command(void)
+{
+	if (key_setup_command)
+		return key_setup_command;
+	else
+		return "(disabled)";
 }
 
 #include "guc-file.c"

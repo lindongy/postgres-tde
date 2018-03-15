@@ -14,35 +14,46 @@
  * IDENTIFICATION
  *	  src/backend/storage/smgr/encryption.c
  *
+ * NOTES
+ *		This file is compiled as both front-end and backend code, so it
+ *		may not use ereport, server-defined static variables, etc.
+ *
  *-------------------------------------------------------------------------
  */
 #include "postgres.h"
 
+#include "common/fe_memutils.h"
+#include "common/sha2.h"
+#include "common/string.h"
 #include "catalog/pg_control.h"
 #include "storage/bufpage.h"
 #include "storage/encryption.h"
+#include "storage/xts.h"
 #include "miscadmin.h"
 #include "fmgr.h"
 #include "port.h"
 
-bool encryption_enabled = false;
-bool have_encryption_provider = false;
-EncryptionRoutines encryption_hooks;
-
 /*
- * Hook function for encryption providers. The first library to call this
- * function gets to provide encryption capability.
+ * Encryption and decryption keys for full database encryption support.
  */
-void
-register_encryption_module(char *name, EncryptionRoutines *enc)
-{
-	if (!have_encryption_provider)
-	{
-		elog(DEBUG1, "Registering encryption module %s", name);
-		encryption_hooks = *enc;
-		have_encryption_provider = true;
-	}
-}
+typedef struct {
+	xts_encrypt_ctx enc_ctx[1];
+	xts_decrypt_ctx dec_ctx[1];
+} db_encryption_ctx;
+
+/* Full database encryption key. */
+static db_encryption_ctx db_key;
+
+bool data_encrypted = false;
+char	*key_setup_command = NULL;
+
+static bool initialized = false;
+
+const char* encryptionkey_prefix = "encryptionkey=";
+const int encryption_key_length = 32;
+
+static bool run_keysetup_command(uint8 *key);
+static void raise_error(int elevel, char *message);
 
 /*
  * Encrypts a fixed value into *buf to verify that encryption key is correct.
@@ -73,8 +84,10 @@ sample_encryption(char *buf)
 void
 encrypt_block(const char *input, char *output, Size size, const char *tweak)
 {
+#ifndef FRONTEND
 	Assert(size >= ENCRYPTION_BLOCK);
-	Assert(encryption_enabled);
+	Assert(initialized);
+#endif
 
 	if (IsAllZero(input, size))
 	{
@@ -82,7 +95,13 @@ encrypt_block(const char *input, char *output, Size size, const char *tweak)
 			memset(output, 0, size);
 	}
 	else
-		encryption_hooks.EncryptBlock(input, output, size, tweak);
+	{
+		if (input != output)
+			memcpy(output, input, size);
+
+		xts_encrypt_block((uint8*) output, (const uint8*) tweak, size,
+						  db_key.enc_ctx);
+	}
 }
 
 /*
@@ -96,7 +115,7 @@ void
 decrypt_block(const char *input, char *output, Size size, const char *tweak)
 {
 	Assert(size >= ENCRYPTION_BLOCK);
-	Assert(encryption_enabled);
+	Assert(initialized);
 
 	if (IsAllZero(input, size))
 	{
@@ -104,7 +123,13 @@ decrypt_block(const char *input, char *output, Size size, const char *tweak)
 			memset(output, 0, size);
 	}
 	else
-		encryption_hooks.DecryptBlock(input, output, size, tweak);
+	{
+		if (input != output)
+			memcpy(output, input, size);
+
+		xts_decrypt_block((uint8*) output, (const uint8*) tweak, size,
+						  db_key.dec_ctx);
+	}
 }
 
 /*
@@ -114,37 +139,136 @@ decrypt_block(const char *input, char *output, Size size, const char *tweak)
 void
 setup_encryption()
 {
-	char *filename;
+	uint8 key[encryption_key_length];
 
-	if (encryption_library_string == NULL || encryption_library_string[0] == '\0')
-		return;
+	/*
+	 * XXX Is this necessary?
+	 */
+	memset(key, 0, encryption_key_length);
+	memset(&db_key, 0, sizeof(db_encryption_ctx));
 
-	/* Try to load encryption library */
-	filename = pstrdup(encryption_library_string);
+	/*
+	 * It makes no sense to initialize the encryption multiple times.
+	 */
+	Assert(!initialized);
 
-	canonicalize_path(filename);
-
-	/* Make encryption libraries loading behave as if loaded via s_p_l */
-	process_shared_preload_libraries_in_progress = true;
-	load_file(filename, false);
-	process_shared_preload_libraries_in_progress = false;
-
-	ereport(DEBUG1,
-			(errmsg("loaded library \"%s\" for encryption", filename)));
-	pfree(filename);
-
-	if (have_encryption_provider)
+	if (!run_keysetup_command(key))
 	{
-		encryption_enabled = encryption_hooks.SetupEncryption();
-		if (encryption_enabled)
+		char *passphrase = getenv("PGENCRYPTIONKEY");
+
+		/* Empty or missing passphrase means that encryption is not configured */
+		if (passphrase == NULL || passphrase[0] == '\0')
 		{
-			if (!IsBootstrapProcessingMode())
-				elog(LOG, "data encryption performed by %s", encryption_library_string);
+#ifndef FRONTEND
+			ereport(FATAL,
+					(errmsg("encryption key not provided"),
+					errdetail("The database cluster was initialized with encryption"
+							  " but the server was started without an encryption key."),
+							 errhint("Set the key using PGENCRYPTIONKEY environment variable.")));
+#else
+			fprintf(stderr,
+					"The database cluster was initialized with encryption"
+					" but the server was started without an encryption key. "
+					"Set the key using PGENCRYPTIONKEY environment variable.\n");
+			exit(EXIT_FAILURE);
+#endif
 		}
-		else
-			elog(FATAL, "data encryption could not be initialized");
+
+		/* TODO: replace with PBKDF2 or scrypt */
+		{
+			pg_sha256_ctx sha_ctx;
+
+			pg_sha256_init(&sha_ctx);
+			pg_sha256_update(&sha_ctx, (uint8*) passphrase, strlen(passphrase));
+			pg_sha256_final(&sha_ctx, key);
+		}
 	}
-	else
-		elog(ERROR, "Specified encryption library %s did not provide encryption hooks.", encryption_library_string);
+
+	if (xts_encrypt_key(key, encryption_key_length, db_key.enc_ctx) != EXIT_SUCCESS ||
+		xts_decrypt_key(key, encryption_key_length, db_key.dec_ctx) != EXIT_SUCCESS)
+		raise_error(FATAL, "Encryption key setup failed.");
+
+	initialized = true;
 }
 
+static bool
+run_keysetup_command(uint8 *key)
+{
+	FILE *fp;
+	char buf[encryption_key_length*2+1];
+	int bytes_read;
+	int i;
+
+	if (key_setup_command == NULL)
+		return false;
+
+	if (!strlen(key_setup_command))
+		return false;
+
+	raise_error(INFO,
+				psprintf("Executing \"%s\" to set up encryption key",
+						 key_setup_command));
+
+	fp = popen(key_setup_command, "r");
+	if (fp == NULL)
+		raise_error(ERROR,
+					psprintf("Failed to execute key_setup_command \"%s\"",
+							 key_setup_command));
+
+	if (fread(buf, 1, strlen(encryptionkey_prefix), fp) != strlen(encryptionkey_prefix))
+		raise_error(ERROR, "Not enough data received from key_setup_command");
+
+	if (strncmp(buf, encryptionkey_prefix, strlen(encryptionkey_prefix)) != 0)
+		raise_error(ERROR, "Unknown data received from key_setup_command");
+
+	bytes_read = fread(buf, 1, encryption_key_length*2 + 1, fp);
+	if (bytes_read < encryption_key_length*2)
+	{
+		if (feof(fp))
+			raise_error(ERROR,
+						"Encryption key provided by key_setup_command too short");
+		else
+			raise_error(ERROR,
+						psprintf("key_setup_command returned error code %d",
+								 ferror(fp)));
+	}
+
+	for (i = 0; i < encryption_key_length; i++)
+	{
+		if (sscanf(buf+2*i, "%2hhx", key + i) == 0)
+			raise_error(ERROR,
+						psprintf("Invalid character in encryption key at position %d",
+								 2 * i));
+	}
+	if (bytes_read > encryption_key_length*2)
+	{
+		if (buf[encryption_key_length*2] != '\n')
+			raise_error(ERROR,
+						psprintf("Encryption key too long '%s' %d.",
+								 buf, buf[encryption_key_length*2]));
+	}
+
+	while (fread(buf, 1, sizeof(buf), fp) != 0)
+	{
+		/* Discard rest of the output */
+	}
+
+	pclose(fp);
+
+	return true;
+}
+
+/*
+ * Report an error in an universal way so that caller does not have to care
+ * whether it executes in backend or front-end.
+ */
+static void
+raise_error(int elevel, char *message)
+{
+#ifndef FRONTEND
+	elog(elevel, "%s", message);
+#else
+	fprintf(stderr, "%s\n", message);
+	exit(EXIT_FAILURE);
+#endif
+}

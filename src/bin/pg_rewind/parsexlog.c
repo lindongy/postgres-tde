@@ -26,11 +26,6 @@
 #include "storage/encryption.h"
 
 /*
- * TODO Determine the value.
- */
-bool encryption_enabled = false;
-
-/*
  * RmgrNames is an array of resource manager names, to make error messages
  * a bit nicer.
  */
@@ -42,6 +37,8 @@ static const char *RmgrNames[RM_MAX_ID + 1] = {
 };
 
 static void extractPageInfo(XLogReaderState *record);
+static void XLogEncryptionTweak(char *tweak, TimeLineID timeline,
+								XLogSegNo segment, uint32 offset);
 
 static int	xlogreadfd = -1;
 static XLogSegNo xlogreadsegno = -1;
@@ -311,6 +308,15 @@ SimpleXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr,
 		return -1;
 	}
 
+	if (data_encrypted)
+	{
+		char tweak[TWEAK_SIZE];
+
+		XLogEncryptionTweak(tweak, targetHistory[private->tliIndex].tli,
+							xlogreadsegno, targetPageOff);
+		decrypt_block(readBuf, readBuf, XLOG_BLCKSZ, tweak);
+	}
+
 	Assert(targetSegNo == xlogreadsegno);
 
 	*pageTLI = targetHistory[private->tliIndex].tli;
@@ -395,4 +401,16 @@ extractPageInfo(XLogReaderState *record)
 
 		process_block_change(forknum, rnode, blkno);
 	}
+}
+
+/*
+ * Just copy & pasted from xlogutils.c instead of adjusting that module for
+ * linking to fron-end.
+ */
+static void
+XLogEncryptionTweak(char *tweak, TimeLineID timeline, XLogSegNo segment, uint32 offset)
+{
+	memcpy(tweak, &segment, sizeof(XLogSegNo));
+	memcpy(tweak  + sizeof(XLogSegNo), &offset, sizeof(offset));
+	memcpy(tweak + sizeof(XLogSegNo) + sizeof(uint32), &timeline, sizeof(timeline));
 }

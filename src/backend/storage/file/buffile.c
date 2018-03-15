@@ -183,7 +183,7 @@ BufFileCreateTemp(bool interXact)
 	file->isTemp = true;
 	file->isInterXact = interXact;
 
-	if (encryption_enabled)
+	if (data_encrypted)
 	{
 		TimestampTz ts = GetCurrentTimestamp();
 		memset(file->tweakBase, 0, sizeof(file->tweakBase));
@@ -281,7 +281,7 @@ BufFileLoadBuffer(BufFile *file)
 	file->offsets[file->curFile] += file->nbytes;
 	/* we choose not to advance curOffset here */
 
-	if (encryption_enabled)
+	if (data_encrypted)
 	{
 		char tweak[TWEAK_SIZE];
 		BufFileTweak(tweak, file, file->curFile, file->curOffset);
@@ -327,7 +327,7 @@ BufFileDumpBuffer(BufFile *file)
 	 * of the block to be available, because we need to overwrite the whole
 	 * block. We can skip this on the final block.
 	 */
-	if (encryption_enabled && file->nbytes < BLCKSZ &&
+	if (data_encrypted && file->nbytes < BLCKSZ &&
 		file->curFile + 1 == file->numFiles &&
 		file->curOffset + file->nbytes < file->maxOffset)
 	{
@@ -349,7 +349,7 @@ BufFileDumpBuffer(BufFile *file)
 		file->offsets[file->curFile] = file->curOffset;
 	}
 
-	if (encryption_enabled)
+	if (data_encrypted)
 	{
 		char tweak[TWEAK_SIZE];
 		/*

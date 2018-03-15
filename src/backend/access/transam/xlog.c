@@ -78,7 +78,6 @@
 #include "pg_trace.h"
 
 extern uint32 bootstrap_data_checksum_version;
-extern bool	  bootstrap_data_encrypted;
 extern char  *bootstrap_encryption_sample;
 
 /* File path names (all relative to $PGDATA) */
@@ -2463,7 +2462,7 @@ XLogWrite(XLogwrtRqst WriteRqst, bool flexible)
 			/* OK to write the page(s) */
 			from = XLogCtl->pages + startidx * (Size) XLOG_BLCKSZ;
 			nbytes = npages * (Size) XLOG_BLCKSZ;
-			if (encryption_enabled) {
+			if (data_encrypted) {
 				int i;
 				/*
 				 * XXX: use larger encryption buffer to enable larger writes
@@ -4673,16 +4672,17 @@ ReadControlFile(void)
 				 errhint("It looks like you need to recompile or initdb.")));
 #endif
 
-	if (ControlFile->data_encrypted && !encryption_enabled)
-		ereport(FATAL,
-						(errmsg("database files are encrypted"),
-				errdetail("The database cluster was initialized with encryption"
-						  " but the server was started without an encryption module."),
-						 errhint("Set the encryption module using "
-								 "encryption_library configuration parameter.")));
-	else if (encryption_enabled)
+	/*
+	 * Initialize encryption, but not if the current backend have already done
+	 * that.
+	 */
+	if (ControlFile->data_encrypted && !data_encrypted)
 	{
 		char sample[ENCRYPTION_SAMPLE_SIZE];
+
+		setup_encryption();
+
+		memset(sample, 0, ENCRYPTION_SAMPLE_SIZE);
 		sample_encryption(sample);
 		if (memcmp(ControlFile->encryption_verification, sample, ENCRYPTION_SAMPLE_SIZE))
 			ereport(FATAL,
@@ -4693,6 +4693,8 @@ ReadControlFile(void)
 
 	/* Make the initdb settings visible as GUC variables, too */
 	SetConfigOption("data_checksums", DataChecksumsEnabled() ? "yes" : "no",
+					PGC_INTERNAL, PGC_S_OVERRIDE);
+	SetConfigOption("data_encryption", DataEncryptionEnabled() ? "yes" : "no",
 					PGC_INTERNAL, PGC_S_OVERRIDE);
 }
 
@@ -4770,6 +4772,16 @@ DataChecksumsEnabled(void)
 {
 	Assert(ControlFile != NULL);
 	return (ControlFile->data_checksum_version > 0);
+}
+
+/*
+ * Is this cluster encrypted?
+ */
+bool
+DataEncryptionEnabled(void)
+{
+	Assert(ControlFile != NULL);
+	return (ControlFile->data_encrypted);
 }
 
 /*
@@ -5122,9 +5134,10 @@ BootStrapXLOG(void)
 	use_existent = false;
 	openLogFile = XLogFileInit(1, &use_existent, false);
 
-	if (encryption_enabled)
+	if (data_encrypted)
 	{
 		char tweak[TWEAK_SIZE];
+
 		XLogEncryptionTweak(tweak, ThisTimeLineID, 1, 0);
 		encrypt_block((char*)page, (char*)page, XLOG_BLCKSZ, tweak);
 	}
@@ -5178,11 +5191,22 @@ BootStrapXLOG(void)
 	ControlFile->wal_log_hints = wal_log_hints;
 	ControlFile->track_commit_timestamp = track_commit_timestamp;
 	ControlFile->data_checksum_version = bootstrap_data_checksum_version;
-	ControlFile->data_encrypted = bootstrap_data_encrypted;
-	if (bootstrap_data_encrypted)
-		memcpy(ControlFile->encryption_verification, bootstrap_encryption_sample, 16);
+	ControlFile->data_encrypted = data_encrypted;
+
+	if (data_encrypted)
+	{
+		char	*sample;
+
+		sample = palloc0(ENCRYPTION_SAMPLE_SIZE);
+		sample_encryption(sample);
+
+		memcpy(ControlFile->encryption_verification, sample,
+			   ENCRYPTION_SAMPLE_SIZE);
+		pfree(sample);
+	}
 	else
-		memset(ControlFile->encryption_verification, 0, 16);
+		memset(ControlFile->encryption_verification, 0,
+			ENCRYPTION_SAMPLE_SIZE);
 
 	/* some additional ControlFile fields are set in WriteControlFile() */
 
@@ -11659,9 +11683,10 @@ retry:
 	Assert(targetPageOff == readOff);
 	Assert(reqLen <= readLen);
 
-	if (encryption_enabled)
+	if (data_encrypted)
 	{
 		char tweak[TWEAK_SIZE];
+
 		XLogEncryptionTweak(tweak, curFileTLI, readSegNo, readOff);
 		decrypt_block(readBuf, readBuf, XLOG_BLCKSZ, tweak);
 	}

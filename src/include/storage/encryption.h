@@ -19,7 +19,8 @@
 #define ENCRYPTION_BLOCK 16
 #define TWEAK_SIZE 16
 
-extern PGDLLIMPORT bool encryption_enabled;
+extern PGDLLIMPORT bool data_encrypted;
+extern PGDLLIMPORT char	*key_setup_command;
 
 /*
  * Should XLOG records be aligned to ENCRYPTION_BLOCK bytes?
@@ -43,7 +44,7 @@ extern PGDLLIMPORT bool encryption_enabled;
  * that makes walsender perform the decryption. Does such a variable make
  * sense?)
  */
-#define DO_ENCRYPTION_BLOCK_ALIGN	encryption_enabled
+#define DO_ENCRYPTION_BLOCK_ALIGN	data_encrypted
 
 /*
  * Use TYPEALIGN64 since besides record size we also need to align XLogRecPtr.
@@ -56,39 +57,17 @@ extern PGDLLIMPORT bool encryption_enabled;
 #define XLOG_REC_ALIGN(LEN) ((DO_ENCRYPTION_BLOCK_ALIGN) ?\
 							 ENCRYPTION_BLOCK_ALIGN(LEN) : MAXALIGN64(LEN))
 
-void setup_encryption(void);
-void sample_encryption(char *buf);
-void encrypt_block(const char *input, char *output, Size size,
-		const char *tweak);
-void decrypt_block(const char *input, char *output, Size size,
-		const char *tweak);
+extern void setup_encryption(void);
+extern void sample_encryption(char *buf);
+extern void encrypt_block(const char *input, char *output, Size size,
+						  const char *tweak);
+extern void decrypt_block(const char *input, char *output, Size size,
+						  const char *tweak);
 
 typedef bool (*SetupEncryption_function) ();
 typedef void (*EncryptBlock_function) (const char *input, char *output,
 		Size size, const char *tweak);
 typedef void (*DecryptBlock_function) (const char *input, char *output,
 		Size size, const char *tweak);
-
-/*
- * Hook functions to register an encryption provider.
- */
-typedef struct {
-	dlist_node node;
-	/*
-	 * Will be called at system initialization time immediately after loading
-	 * the encryption module. Return value indicates if encryption is
-	 * successfully initialized. Returning false will result in a FATAL error.
-	 */
-	SetupEncryption_function SetupEncryption;
-	/*
-	 * Encrypt/decrypt one block of data. Input and output buffers may point
-	 * to the same buffer. Buffer alignment is not guaranteed. Buffer size
-	 * will be at least 16 bytes, but is not guaranteed to be a multiple of 16.
-	 */
-	EncryptBlock_function EncryptBlock;
-	DecryptBlock_function DecryptBlock;
-} EncryptionRoutines;
-
-void register_encryption_module(char *name, EncryptionRoutines *provider);
 
 #endif   /* ENCRYPTION_H */

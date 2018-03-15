@@ -20,6 +20,7 @@
 #include "access/xlog_internal.h"
 #include "access/transam.h"
 #include "common/fe_memutils.h"
+#include "storage/encryption.h"
 #include "getopt_long.h"
 #include "rmgrdesc.h"
 
@@ -334,6 +335,18 @@ XLogDumpXLogRead(const char *directory, TimeLineID timeline_id,
 }
 
 /*
+ * Just copy & pasted from xlogutils.c instead of adjusting that module for
+ * linking to fron-end.
+ */
+static void
+XLogEncryptionTweak(char *tweak, TimeLineID timeline, XLogSegNo segment, uint32 offset)
+{
+	memcpy(tweak, &segment, sizeof(XLogSegNo));
+	memcpy(tweak  + sizeof(XLogSegNo), &offset, sizeof(offset));
+	memcpy(tweak + sizeof(XLogSegNo) + sizeof(uint32), &timeline, sizeof(timeline));
+}
+
+/*
  * XLogReader read_page callback
  */
 static int
@@ -356,8 +369,24 @@ XLogDumpReadPage(XLogReaderState *state, XLogRecPtr targetPagePtr, int reqLen,
 		}
 	}
 
+	if (data_encrypted)
+		count = XLOG_REC_ALIGN(count);
+
 	XLogDumpXLogRead(private->inpath, private->timeline, targetPagePtr,
 					 readBuff, count);
+
+	if (data_encrypted)
+	{
+		char tweak[TWEAK_SIZE];
+		XLogSegNo	readSegNo;
+		uint32	readSegOff;
+
+		XLByteToSeg(targetPagePtr, readSegNo);
+		readSegOff = targetPagePtr % XLogSegSize;
+
+		XLogEncryptionTweak(tweak, private->timeline, readSegNo, readSegOff);
+		decrypt_block(readBuff, readBuff, count, tweak);
+	}
 
 	return count;
 }
@@ -741,6 +770,7 @@ main(int argc, char **argv)
 		{"end", required_argument, NULL, 'e'},
 		{"follow", no_argument, NULL, 'f'},
 		{"help", no_argument, NULL, '?'},
+		{"encrypted", no_argument, NULL, 'K'},
 		{"limit", required_argument, NULL, 'n'},
 		{"path", required_argument, NULL, 'p'},
 		{"rmgr", required_argument, NULL, 'r'},
@@ -783,7 +813,7 @@ main(int argc, char **argv)
 		goto bad_argument;
 	}
 
-	while ((option = getopt_long(argc, argv, "be:?fn:p:r:s:t:Vx:z",
+	while ((option = getopt_long(argc, argv, "be:?fKn:p:r:s:t:Vx:z",
 								 long_options, &optindex)) != -1)
 	{
 		switch (option)
@@ -806,6 +836,9 @@ main(int argc, char **argv)
 			case '?':
 				usage();
 				exit(EXIT_SUCCESS);
+				break;
+			case 'K':
+				data_encrypted = true;
 				break;
 			case 'n':
 				if (sscanf(optarg, "%d", &config.stop_after_records) != 1)
@@ -1009,6 +1042,9 @@ main(int argc, char **argv)
 	}
 
 	/* done with argument parsing, do the actual work */
+
+	if (data_encrypted)
+		setup_encryption();
 
 	/* we have everything we need, start reading */
 	xlogreader_state = XLogReaderAllocate(XLogDumpReadPage, &private);

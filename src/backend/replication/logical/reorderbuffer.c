@@ -2183,7 +2183,7 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 	 * de-serialized separate, see ReorderBufferRestoreChanges(). Therefore we
 	 * also need to encrypt it separate. Make sure the size is appropriate.
 	 */
-	if (encryption_enabled)
+	if (data_encrypted)
 		sz = TYPEALIGN(ENCRYPTION_BLOCK, sz);
 
 	sz_hdr = sz;
@@ -2224,7 +2224,7 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 				}
 
 				/* make sure we have enough space */
-				if (encryption_enabled)
+				if (data_encrypted)
 				{
 					/*
 					 * Encryption works with blocks. As the changes are stored
@@ -2266,7 +2266,7 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 				sz += prefix_size + change->data.msg.message_size +
 					sizeof(Size) + sizeof(Size);
 
-				if (encryption_enabled)
+				if (data_encrypted)
 					sz = TYPEALIGN(ENCRYPTION_BLOCK, sz);
 				ReorderBufferSerializeReserve(rb, sz);
 
@@ -2304,7 +2304,7 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 					;
 
 				/* make sure we have enough space */
-				if (encryption_enabled)
+				if (data_encrypted)
 					sz = TYPEALIGN(ENCRYPTION_BLOCK, sz);
 				ReorderBufferSerializeReserve(rb, sz);
 
@@ -2342,7 +2342,7 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 	/*
 	 * Encrypt the change if encryption is required.
 	 */
-	if (encryption_enabled)
+	if (data_encrypted)
 	{
 		char	tweak[TWEAK_SIZE];
 
@@ -2366,7 +2366,7 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 	/*
 	 * Make sure the correct buffer is written to disk.
 	 */
-	if (encryption_enabled)
+	if (data_encrypted)
 		outbuf = rb->encryption_buffer;
 	else
 		outbuf = rb->outbuf;
@@ -2422,7 +2422,7 @@ ReorderBufferRestoreChanges(ReorderBuffer *rb, ReorderBufferTXN *txn,
 	 * See ReorderBufferSerializeChange for explanation.
 	 */
 	sz_hdr = sizeof(ReorderBufferDiskChange);
-	if (encryption_enabled)
+	if (data_encrypted)
 		sz_hdr = TYPEALIGN(ENCRYPTION_BLOCK, sz_hdr);
 
 	while (restored < max_changes_in_memory && *segno <= last_segno)
@@ -2500,7 +2500,7 @@ ReorderBufferRestoreChanges(ReorderBuffer *rb, ReorderBufferTXN *txn,
 		 * Decrypt the header if the change is decrypted, so that we know the
 		 * change size.
 		 */
-		if (encryption_enabled)
+		if (data_encrypted)
 		{
 			REORDER_BUFFER_CHANGE_TWEAK(encryption_tweak, *segno);
 			decrypt_block(rb->outbuf, rb->outbuf, sz_hdr, encryption_tweak);
@@ -2530,7 +2530,7 @@ ReorderBufferRestoreChanges(ReorderBuffer *rb, ReorderBufferTXN *txn,
 		 * ok, read a full change from disk, now decrypt it if it's encrypted
 		 * and if there's some data beyond the header.
 		 */
-		if (encryption_enabled && ondisk->size > sz_hdr)
+		if (data_encrypted && ondisk->size > sz_hdr)
 			decrypt_block(rb->outbuf + sz_hdr, rb->outbuf + sz_hdr,
 						  ondisk->size - sz_hdr, encryption_tweak);
 

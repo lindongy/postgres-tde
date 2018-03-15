@@ -3698,8 +3698,6 @@ PostgresMain(int argc, char *argv[],
 		/* Change into DataDir (if under postmaster, was done already) */
 		ChangeToDataDir();
 
-		setup_encryption();
-
 		/*
 		 * Create lockfile for data directory.
 		 */

@@ -964,8 +964,6 @@ PostmasterMain(int argc, char *argv[])
 	}
 #endif
 
-	setup_encryption();
-
 	/*
 	 * Register the apply launcher.  Since it registers a background worker,
 	 * it needs to be called before InitializeMaxBackends(), and it's probably
@@ -1162,6 +1160,11 @@ PostmasterMain(int argc, char *argv[])
 
 	/*
 	 * Set up shared memory and semaphores.
+	 *
+	 * This includes call of setup_encryption() as soon as we realize that
+	 * "data_encrypted" field of the control file is set. The encryption must
+	 * be initialized at the point so that "encryption_verification" field of
+	 * the control file can be checked.
 	 */
 	reset_shared(PostPortNumber);
 

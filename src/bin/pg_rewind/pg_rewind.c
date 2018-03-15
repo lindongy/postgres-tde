@@ -27,6 +27,7 @@
 #include "common/restricted_token.h"
 #include "getopt_long.h"
 #include "storage/bufpage.h"
+#include "storage/encryption.h"
 
 static void usage(const char *progname);
 
@@ -218,6 +219,13 @@ main(int argc, char **argv)
 	pg_free(buffer);
 
 	sanityChecks();
+
+	/*
+	 * Setup encryption if it's obvious that we'll have to deal with encrypted
+	 * XLOG.
+	 */
+	if (ControlFile_target.data_encrypted)
+		setup_encryption();
 
 	/*
 	 * If both clusters are already on the same timeline, there's nothing to
@@ -412,6 +420,24 @@ sanityChecks(void)
 		ControlFile_source.state != DB_SHUTDOWNED &&
 		ControlFile_source.state != DB_SHUTDOWNED_IN_RECOVERY)
 		pg_fatal("source data directory must be shut down cleanly\n");
+
+	/*
+	 * Since slave receives XLOG stream encrypted by master, handling
+	 * differently encrypted clusters is not the typical use case for
+	 * pg_rewind. Yet we should check the encryption.
+	 */
+	if (ControlFile_source.data_encrypted ||
+		 ControlFile_target.data_encrypted)
+	{
+		if (ControlFile_source.data_encrypted !=
+			ControlFile_target.data_encrypted)
+			pg_fatal("source and target server must be both unencrypted or both encrypted\n");
+
+		if (memcmp(ControlFile_source.encryption_verification,
+				   ControlFile_target.encryption_verification,
+				   ENCRYPTION_SAMPLE_SIZE))
+			pg_fatal("both source and target server must use the same encryption key");
+	}
 }
 
 /*
