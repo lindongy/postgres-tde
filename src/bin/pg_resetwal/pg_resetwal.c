@@ -354,8 +354,11 @@ main(int argc, char *argv[])
 	 * If the data is encrypted, we'll also have to encrypt the XLOG record
 	 * below.
 	 */
-	if (ControlFile.data_encrypted && !data_encrypted)
+	if (ControlFile.data_encrypted)
+	{
 		setup_encryption();
+		data_encrypted = true;
+	}
 
 	/*
 	 * Also look at existing segment files to set up newXlogSegNo
@@ -1186,7 +1189,7 @@ WriteEmptyXLOG(void)
 	{
 		char tweak[TWEAK_SIZE];
 
-		XLogEncryptionTweak(tweak, 1, 0);
+		XLogEncryptionTweak(tweak, newXlogSegNo, 0);
 		encrypt_block(buffer, buffer, XLOG_BLCKSZ, tweak);
 	}
 
