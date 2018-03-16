@@ -1040,15 +1040,3 @@ read_local_xlog_page(XLogReaderState *state, XLogRecPtr targetPagePtr,
 	/* number of valid bytes in the buffer */
 	return count;
 }
-
-/*
- * Xlog is encrypted page at a time. Each xlog page gets a unique tweak via
- * timeline, segment and offset.
- */
-void
-XLogEncryptionTweak(char *tweak, TimeLineID timeline, XLogSegNo segment, uint32 offset)
-{
-	memcpy(tweak, &segment, sizeof(XLogSegNo));
-	memcpy(tweak  + sizeof(XLogSegNo), &offset, sizeof(offset));
-	memcpy(tweak + sizeof(XLogSegNo) + sizeof(uint32), &timeline, sizeof(timeline));
-}

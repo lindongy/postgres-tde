@@ -14,6 +14,7 @@
 #ifndef ENCRYPTION_H
 #define ENCRYPTION_H
 
+#include "access/xlogdefs.h"
 #include "lib/ilist.h"
 
 #define ENCRYPTION_BLOCK 16
@@ -69,5 +70,8 @@ typedef void (*EncryptBlock_function) (const char *input, char *output,
 		Size size, const char *tweak);
 typedef void (*DecryptBlock_function) (const char *input, char *output,
 		Size size, const char *tweak);
+
+extern void XLogEncryptionTweak(char *tweak, TimeLineID timeline,
+				 XLogSegNo segment, uint32 offset);
 
 #endif   /* ENCRYPTION_H */

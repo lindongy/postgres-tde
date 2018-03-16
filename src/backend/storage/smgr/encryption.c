@@ -272,3 +272,18 @@ raise_error(int elevel, char *message)
 	exit(EXIT_FAILURE);
 #endif
 }
+
+/*
+ * Xlog is encrypted page at a time. Each xlog page gets a unique tweak via
+ * timeline, segment and offset.
+ *
+ * The function is located here rather than some of the xlog*.c modules so
+ * that front-end applications can easily use it too.
+ */
+void
+XLogEncryptionTweak(char *tweak, TimeLineID timeline, XLogSegNo segment, uint32 offset)
+{
+	memcpy(tweak, &segment, sizeof(XLogSegNo));
+	memcpy(tweak  + sizeof(XLogSegNo), &offset, sizeof(offset));
+	memcpy(tweak + sizeof(XLogSegNo) + sizeof(uint32), &timeline, sizeof(timeline));
+}

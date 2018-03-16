@@ -335,18 +335,6 @@ XLogDumpXLogRead(const char *directory, TimeLineID timeline_id,
 }
 
 /*
- * Just copy & pasted from xlogutils.c instead of adjusting that module for
- * linking to fron-end.
- */
-static void
-XLogEncryptionTweak(char *tweak, TimeLineID timeline, XLogSegNo segment, uint32 offset)
-{
-	memcpy(tweak, &segment, sizeof(XLogSegNo));
-	memcpy(tweak  + sizeof(XLogSegNo), &offset, sizeof(offset));
-	memcpy(tweak + sizeof(XLogSegNo) + sizeof(uint32), &timeline, sizeof(timeline));
-}
-
-/*
  * XLogReader read_page callback
  */
 static int

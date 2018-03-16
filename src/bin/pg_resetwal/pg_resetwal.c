@@ -81,8 +81,6 @@ static void FindEndOfXLOG(void);
 static void KillExistingXLOG(void);
 static void KillExistingArchiveStatus(void);
 static void WriteEmptyXLOG(void);
-static void XLogEncryptionTweak(char *tweak, TimeLineID timeline,
-								XLogSegNo segment, uint32 offset);
 static void usage(void);
 
 
@@ -1239,18 +1237,6 @@ WriteEmptyXLOG(void)
 	}
 
 	close(fd);
-}
-
-/*
- * Just copy & pasted from xlogutils.c instead of adjusting that module for
- * linking to front-end.
- */
-static void
-XLogEncryptionTweak(char *tweak, TimeLineID timeline, XLogSegNo segment, uint32 offset)
-{
-	memcpy(tweak, &segment, sizeof(XLogSegNo));
-	memcpy(tweak  + sizeof(XLogSegNo), &offset, sizeof(offset));
-	memcpy(tweak + sizeof(XLogSegNo) + sizeof(uint32), &timeline, sizeof(timeline));
 }
 
 static void
