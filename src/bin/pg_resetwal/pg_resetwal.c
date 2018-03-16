@@ -1186,7 +1186,7 @@ WriteEmptyXLOG(void)
 	{
 		char tweak[TWEAK_SIZE];
 
-		XLogEncryptionTweak(tweak, page->xlp_tli, 1, 0);
+		XLogEncryptionTweak(tweak, 1, 0);
 		encrypt_block(buffer, buffer, XLOG_BLCKSZ, tweak);
 	}
 

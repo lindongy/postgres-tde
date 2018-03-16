@@ -768,7 +768,7 @@ XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
 			while (decrypt_p + XLOG_BLCKSZ <= p)
 			{
 				char tweak[TWEAK_SIZE];
-				XLogEncryptionTweak(tweak, tli, sendSegNo, decryptOff);
+				XLogEncryptionTweak(tweak, sendSegNo, decryptOff);
 				decrypt_block(decrypt_p, decrypt_p, XLOG_BLCKSZ, tweak);
 
 				decrypt_p += XLOG_BLCKSZ;

@@ -2471,7 +2471,7 @@ XLogWrite(XLogwrtRqst WriteRqst, bool flexible)
 				for (i = 0; i < npages; i++) {
 					char buf[XLOG_BLCKSZ];
 					char tweak[TWEAK_SIZE];
-					XLogEncryptionTweak(tweak, ThisTimeLineID, openLogSegNo, openLogOff);
+					XLogEncryptionTweak(tweak, openLogSegNo, openLogOff);
 					encrypt_block(from, buf, XLOG_BLCKSZ, tweak);
 
 					pgstat_report_wait_start(WAIT_EVENT_WAL_WRITE);
@@ -5138,7 +5138,7 @@ BootStrapXLOG(void)
 	{
 		char tweak[TWEAK_SIZE];
 
-		XLogEncryptionTweak(tweak, ThisTimeLineID, 1, 0);
+		XLogEncryptionTweak(tweak, 1, 0);
 		encrypt_block((char*)page, (char*)page, XLOG_BLCKSZ, tweak);
 	}
 
@@ -11687,7 +11687,7 @@ retry:
 	{
 		char tweak[TWEAK_SIZE];
 
-		XLogEncryptionTweak(tweak, curFileTLI, readSegNo, readOff);
+		XLogEncryptionTweak(tweak, readSegNo, readOff);
 		decrypt_block(readBuf, readBuf, XLOG_BLCKSZ, tweak);
 	}
 

@@ -310,8 +310,7 @@ SimpleXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr,
 	{
 		char tweak[TWEAK_SIZE];
 
-		XLogEncryptionTweak(tweak, targetHistory[private->tliIndex].tli,
-							xlogreadsegno, targetPageOff);
+		XLogEncryptionTweak(tweak, xlogreadsegno, targetPageOff);
 		decrypt_block(readBuf, readBuf, XLOG_BLCKSZ, tweak);
 	}
 

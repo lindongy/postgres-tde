@@ -71,7 +71,7 @@ typedef void (*EncryptBlock_function) (const char *input, char *output,
 typedef void (*DecryptBlock_function) (const char *input, char *output,
 		Size size, const char *tweak);
 
-extern void XLogEncryptionTweak(char *tweak, TimeLineID timeline,
-				 XLogSegNo segment, uint32 offset);
+extern void XLogEncryptionTweak(char *tweak, XLogSegNo segment,
+								uint32 offset);
 
 #endif   /* ENCRYPTION_H */

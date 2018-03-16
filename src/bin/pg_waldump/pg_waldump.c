@@ -372,7 +372,7 @@ XLogDumpReadPage(XLogReaderState *state, XLogRecPtr targetPagePtr, int reqLen,
 		XLByteToSeg(targetPagePtr, readSegNo);
 		readSegOff = targetPagePtr % XLogSegSize;
 
-		XLogEncryptionTweak(tweak, private->timeline, readSegNo, readSegOff);
+		XLogEncryptionTweak(tweak, readSegNo, readSegOff);
 		decrypt_block(readBuff, readBuff, count, tweak);
 	}
 

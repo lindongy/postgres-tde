@@ -275,15 +275,20 @@ raise_error(int elevel, char *message)
 
 /*
  * Xlog is encrypted page at a time. Each xlog page gets a unique tweak via
- * timeline, segment and offset.
+ * segment and offset. Unfortunately we can't include timeline because
+ * exitArchiveRecovery() can copy part of the last segment of the old timeline
+ * into the first segment of the new timeline.
+ *
+ * TODO Consider teaching exitArchiveRecovery() to decrypt the copied pages
+ * and encrypt them using a tweak that mentions the new timeline.
  *
  * The function is located here rather than some of the xlog*.c modules so
  * that front-end applications can easily use it too.
  */
 void
-XLogEncryptionTweak(char *tweak, TimeLineID timeline, XLogSegNo segment, uint32 offset)
+XLogEncryptionTweak(char *tweak, XLogSegNo segment, uint32 offset)
 {
+	memset(tweak, 0, TWEAK_SIZE);
 	memcpy(tweak, &segment, sizeof(XLogSegNo));
 	memcpy(tweak  + sizeof(XLogSegNo), &offset, sizeof(offset));
-	memcpy(tweak + sizeof(XLogSegNo) + sizeof(uint32), &timeline, sizeof(timeline));
 }
