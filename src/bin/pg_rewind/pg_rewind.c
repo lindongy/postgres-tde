@@ -225,7 +225,10 @@ main(int argc, char **argv)
 	 * XLOG.
 	 */
 	if (ControlFile_target.data_encrypted)
+	{
 		setup_encryption();
+		data_encrypted = true;
+	}
 
 	/*
 	 * If both clusters are already on the same timeline, there's nothing to
