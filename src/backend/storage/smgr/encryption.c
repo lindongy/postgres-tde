@@ -20,7 +20,14 @@
  *
  *-------------------------------------------------------------------------
  */
+
 #include "postgres.h"
+
+#ifdef USE_OPENSSL
+#include <openssl/conf.h>
+#include <openssl/evp.h>
+#include <openssl/err.h>
+#endif
 
 #include "common/fe_memutils.h"
 #include "common/sha2.h"
@@ -28,32 +35,32 @@
 #include "catalog/pg_control.h"
 #include "storage/bufpage.h"
 #include "storage/encryption.h"
-#include "storage/xts.h"
 #include "miscadmin.h"
 #include "fmgr.h"
 #include "port.h"
 
+#ifdef USE_OPENSSL
 /*
- * Encryption and decryption keys for full database encryption support.
+ * Full database encryption key.
+ *
+ * EVP_aes_256_xts() needs the key twice as long as AES would do in general.
  */
-typedef struct {
-	xts_encrypt_ctx enc_ctx[1];
-	xts_decrypt_ctx dec_ctx[1];
-} db_encryption_ctx;
+#define	ENCRYPTION_KEY_LENGTH	64
+#endif
 
-/* Full database encryption key. */
-static db_encryption_ctx db_key;
+static unsigned char	encryption_key[ENCRYPTION_KEY_LENGTH];
+const char* encryptionkey_prefix = "encryptionkey=";
 
 bool data_encrypted = false;
 char	*key_setup_command = NULL;
 
 static bool initialized = false;
 
-const char* encryptionkey_prefix = "encryptionkey=";
-const int encryption_key_length = 32;
-
 static bool run_keysetup_command(uint8 *key);
 static void raise_error(int elevel, char *message);
+#ifdef USE_OPENSSL
+static void evp_error(void);
+#endif
 
 /*
  * Encrypts a fixed value into *buf to verify that encryption key is correct.
@@ -80,15 +87,18 @@ sample_encryption(char *buf)
  * extension.
  *
  * Must only be called when encryption_enabled is true.
+ *
+ * "size" must be a multiple of ENCRYPTION_BLOCK.
  */
 void
 encrypt_block(const char *input, char *output, Size size, const char *tweak)
 {
 #ifndef FRONTEND
-	Assert(size >= ENCRYPTION_BLOCK);
+	Assert(size >= ENCRYPTION_BLOCK && size % ENCRYPTION_BLOCK == 0);
 	Assert(initialized);
 #endif
 
+#ifdef	USE_OPENSSL
 	if (IsAllZero(input, size))
 	{
 		if (input != output)
@@ -96,12 +106,48 @@ encrypt_block(const char *input, char *output, Size size, const char *tweak)
 	}
 	else
 	{
-		if (input != output)
-			memcpy(output, input, size);
+		int	out_size;
+		EVP_CIPHER_CTX *ctx;
 
-		xts_encrypt_block((uint8*) output, (const uint8*) tweak, size,
-						  db_key.enc_ctx);
+		if((ctx = EVP_CIPHER_CTX_new()) == NULL)
+			evp_error();
+
+		if(EVP_EncryptInit_ex(ctx, EVP_aes_256_xts(), NULL, encryption_key,
+							  (unsigned char *) tweak) != 1)
+			evp_error();
+
+		/*
+		 * No padding is needed, the input block size should already be a
+		 * multiple of ENCRYPTION_BLOCK.
+		 */
+		EVP_CIPHER_CTX_set_padding(ctx, 0);
+
+		Assert(EVP_CIPHER_CTX_block_size(ctx) == ENCRYPTION_BLOCK);
+		Assert(EVP_CIPHER_CTX_iv_length(ctx) == TWEAK_SIZE);
+		Assert(EVP_CIPHER_CTX_key_length(ctx) == ENCRYPTION_KEY_LENGTH);
+
+		/*
+		 * Do the actual encryption. As the padding is disabled,
+		 * EVP_EncryptFinal_ex() won't be needed.
+		 */
+		if(EVP_EncryptUpdate(ctx, (unsigned char *) output, &out_size,
+							 (unsigned char *) input, size) != 1)
+			evp_error();
+
+		/*
+		 * The input size is a multiple of ENCRYPTION_BLOCK, so the output of
+		 * AES-XTS should meet this condition.
+		 */
+		Assert(out_size == size);
+
+		if (EVP_CIPHER_CTX_cleanup(ctx) != 1)
+			evp_error();
 	}
+#else
+	raise_error(FATAL,
+			"data encryption cannot be used because SSL is not supported by this build\n"
+			"Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
 }
 
 /*
@@ -110,13 +156,16 @@ encrypt_block(const char *input, char *output, Size size, const char *tweak)
  * when encrypting.
  *
  * Must only be called when encryption_enabled is true.
+ *
+ * "size" must be a multiple of ENCRYPTION_BLOCK.
  */
 void
 decrypt_block(const char *input, char *output, Size size, const char *tweak)
 {
-	Assert(size >= ENCRYPTION_BLOCK);
+	Assert(size >= ENCRYPTION_BLOCK && size % ENCRYPTION_BLOCK == 0);
 	Assert(initialized);
 
+#ifdef	USE_OPENSSL
 	if (IsAllZero(input, size))
 	{
 		if (input != output)
@@ -124,12 +173,36 @@ decrypt_block(const char *input, char *output, Size size, const char *tweak)
 	}
 	else
 	{
-		if (input != output)
-			memcpy(output, input, size);
+		int	out_size;
+		EVP_CIPHER_CTX *ctx;
 
-		xts_decrypt_block((uint8*) output, (const uint8*) tweak, size,
-						  db_key.dec_ctx);
+		if((ctx = EVP_CIPHER_CTX_new()) == NULL)
+			evp_error();
+
+		if(EVP_DecryptInit_ex(ctx, EVP_aes_256_xts(), NULL, encryption_key,
+							  (unsigned char *) tweak) != 1)
+			evp_error();
+
+		/* The same considerations apply below as those in encrypt_block(). */
+		EVP_CIPHER_CTX_set_padding(ctx, 0);
+		Assert(EVP_CIPHER_CTX_block_size(ctx) == ENCRYPTION_BLOCK);
+		Assert(EVP_CIPHER_CTX_iv_length(ctx) == TWEAK_SIZE);
+		Assert(EVP_CIPHER_CTX_key_length(ctx) == ENCRYPTION_KEY_LENGTH);
+
+		if(EVP_DecryptUpdate(ctx, (unsigned char *) output, &out_size,
+							 (unsigned char *) input, size) != 1)
+			evp_error();
+
+		Assert(out_size == size);
+
+		if (EVP_CIPHER_CTX_cleanup(ctx) != 1)
+			evp_error();
 	}
+#else
+	raise_error(FATAL,
+			"data encryption cannot be used because SSL is not supported by this build\n"
+			"Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
 }
 
 /*
@@ -139,20 +212,33 @@ decrypt_block(const char *input, char *output, Size size, const char *tweak)
 void
 setup_encryption()
 {
-	uint8 key[encryption_key_length];
+#ifdef USE_OPENSSL
+	/*
+	 * Setup OpenSSL.
+	 *
+	 * None of these functions should return a value or raise error.
+	 */
+	ERR_load_crypto_strings();
+	OpenSSL_add_all_algorithms();
+	OPENSSL_config(NULL);
+
+#else
+	raise_error(FATAL,
+			"data encryption cannot be used because SSL is not supported by this build\n"
+			"Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
 
 	/*
 	 * XXX Is this necessary?
 	 */
-	memset(key, 0, encryption_key_length);
-	memset(&db_key, 0, sizeof(db_encryption_ctx));
+	memset(encryption_key, 0, ENCRYPTION_KEY_LENGTH);
 
 	/*
 	 * It makes no sense to initialize the encryption multiple times.
 	 */
 	Assert(!initialized);
 
-	if (!run_keysetup_command(key))
+	if (!run_keysetup_command(encryption_key))
 	{
 		char *passphrase = getenv("PGENCRYPTIONKEY");
 
@@ -176,17 +262,13 @@ setup_encryption()
 
 		/* TODO: replace with PBKDF2 or scrypt */
 		{
-			pg_sha256_ctx sha_ctx;
+			pg_sha512_ctx sha_ctx;
 
-			pg_sha256_init(&sha_ctx);
-			pg_sha256_update(&sha_ctx, (uint8*) passphrase, strlen(passphrase));
-			pg_sha256_final(&sha_ctx, key);
+			pg_sha512_init(&sha_ctx);
+			pg_sha512_update(&sha_ctx, (uint8*) passphrase, strlen(passphrase));
+			pg_sha512_final(&sha_ctx, encryption_key);
 		}
 	}
-
-	if (xts_encrypt_key(key, encryption_key_length, db_key.enc_ctx) != EXIT_SUCCESS ||
-		xts_decrypt_key(key, encryption_key_length, db_key.dec_ctx) != EXIT_SUCCESS)
-		raise_error(FATAL, "Encryption key setup failed.");
 
 	initialized = true;
 }
@@ -195,7 +277,7 @@ static bool
 run_keysetup_command(uint8 *key)
 {
 	FILE *fp;
-	char buf[encryption_key_length*2+1];
+	char buf[ENCRYPTION_KEY_LENGTH * 2 + 1];
 	int bytes_read;
 	int i;
 
@@ -221,8 +303,8 @@ run_keysetup_command(uint8 *key)
 	if (strncmp(buf, encryptionkey_prefix, strlen(encryptionkey_prefix)) != 0)
 		raise_error(ERROR, "Unknown data received from key_setup_command");
 
-	bytes_read = fread(buf, 1, encryption_key_length*2 + 1, fp);
-	if (bytes_read < encryption_key_length*2)
+	bytes_read = fread(buf, 1, ENCRYPTION_KEY_LENGTH * 2 + 1, fp);
+	if (bytes_read < ENCRYPTION_KEY_LENGTH*2)
 	{
 		if (feof(fp))
 			raise_error(ERROR,
@@ -233,19 +315,19 @@ run_keysetup_command(uint8 *key)
 								 ferror(fp)));
 	}
 
-	for (i = 0; i < encryption_key_length; i++)
+	for (i = 0; i < ENCRYPTION_KEY_LENGTH; i++)
 	{
 		if (sscanf(buf+2*i, "%2hhx", key + i) == 0)
 			raise_error(ERROR,
 						psprintf("Invalid character in encryption key at position %d",
 								 2 * i));
 	}
-	if (bytes_read > encryption_key_length*2)
+	if (bytes_read > ENCRYPTION_KEY_LENGTH * 2)
 	{
-		if (buf[encryption_key_length*2] != '\n')
+		if (buf[ENCRYPTION_KEY_LENGTH * 2] != '\n')
 			raise_error(ERROR,
 						psprintf("Encryption key too long '%s' %d.",
-								 buf, buf[encryption_key_length*2]));
+								 buf, buf[ENCRYPTION_KEY_LENGTH * 2]));
 	}
 
 	while (fread(buf, 1, sizeof(buf), fp) != 0)
@@ -272,6 +354,30 @@ raise_error(int elevel, char *message)
 	exit(EXIT_FAILURE);
 #endif
 }
+
+/*
+ * Error callback for openssl.
+ */
+#ifdef USE_OPENSSL
+static void
+evp_error(void)
+{
+	ERR_print_errors_fp(stderr);
+#ifndef FRONTEND
+	/*
+	 * FATAL is the appropriate level because backend can hardly fix anything
+	 * if encryption / decryption has failed.
+	 *
+	 * XXX Do we yet need EVP_CIPHER_CTX_cleanup() here?
+	 */
+	elog(FATAL, "OpenSSL encountered error during encryption or decryption.");
+#else
+	fprintf(stderr,
+			"OpenSSL encountered error during encryption or decryption.");
+	exit(EXIT_FAILURE);
+#endif	/* FRONTEND */
+}
+#endif	/* USE_OPENSSL */
 
 /*
  * Xlog is encrypted page at a time. Each xlog page gets a unique tweak via

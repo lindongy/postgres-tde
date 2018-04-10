@@ -24,7 +24,6 @@
 #include "catalog/pg_control.h"
 #include "common/pg_lzcompress.h"
 #include "replication/origin.h"
-#include "storage/encryption.h"
 
 static bool allocate_recordbuf(XLogReaderState *state, uint32 reclength);
 
@@ -295,9 +294,9 @@ XLogReadRecord(XLogReaderState *state, XLogRecPtr RecPtr, char **errormsg)
 	 *
 	 * NB: Even though we use an XLogRecord pointer here, the whole record
 	 * header might not fit on this page. xl_tot_len is the first field of the
-	 * struct, so it must be on this page (the records are XLOG_REC_ALIGNed)
-	 * but we cannot access any other fields until we've verified that we got
-	 * the whole header.
+	 * struct, so it must be on this page (the records are MAXALIGNed), but we
+	 * cannot access any other fields until we've verified that we got the
+	 * whole header.
 	 */
 	record = (XLogRecord *) (state->readBuf + RecPtr % XLOG_BLCKSZ);
 	total_len = record->xl_tot_len;
@@ -439,8 +438,8 @@ XLogReadRecord(XLogReaderState *state, XLogRecPtr RecPtr, char **errormsg)
 
 		pageHeaderSize = XLogPageHeaderSize((XLogPageHeader) state->readBuf);
 		state->ReadRecPtr = RecPtr;
-		state->EndRecPtr = targetPagePtr + pageHeaderSize;
-		state->EndRecPtr += XLOG_REC_ALIGN(pageHeader->xlp_rem_len);
+		state->EndRecPtr = targetPagePtr + pageHeaderSize
+			+ MAXALIGN(pageHeader->xlp_rem_len);
 	}
 	else
 	{
@@ -454,7 +453,7 @@ XLogReadRecord(XLogReaderState *state, XLogRecPtr RecPtr, char **errormsg)
 		if (!ValidXLogRecord(state, record, RecPtr))
 			goto err;
 
-		state->EndRecPtr = RecPtr + XLOG_REC_ALIGN(total_len);
+		state->EndRecPtr = RecPtr + MAXALIGN(total_len);
 
 		state->ReadRecPtr = RecPtr;
 		memcpy(state->readRecordBuf, record, total_len);
@@ -925,10 +924,9 @@ XLogFindNextRecord(XLogReaderState *state, XLogRecPtr RecPtr)
 			 * next page header will contain the remaining length of the
 			 * continuation data
 			 *
-			 * Note that record headers are XLOG_REC_ALIGN'ed
+			 * Note that record headers are MAXALIGN'ed
 			 */
-			if (XLOG_REC_ALIGN(header->xlp_rem_len) >
-				(XLOG_BLCKSZ - pageHeaderSize))
+			if (MAXALIGN(header->xlp_rem_len) > (XLOG_BLCKSZ - pageHeaderSize))
 				tmpRecPtr = targetPagePtr + XLOG_BLCKSZ;
 			else
 			{
@@ -937,7 +935,7 @@ XLogFindNextRecord(XLogReaderState *state, XLogRecPtr RecPtr)
 				 * tmpRecPtr to point to the first valid record
 				 */
 				tmpRecPtr = targetPagePtr + pageHeaderSize
-					+ XLOG_REC_ALIGN(header->xlp_rem_len);
+					+ MAXALIGN(header->xlp_rem_len);
 				break;
 			}
 		}

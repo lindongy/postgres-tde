@@ -1230,7 +1230,7 @@ ReserveXLogInsertLocation(int size, XLogRecPtr *StartPos, XLogRecPtr *EndPos,
 	uint64		endbytepos;
 	uint64		prevbytepos;
 
-	size = XLOG_REC_ALIGN(size);
+	size = MAXALIGN(size);
 
 	/* All (non xlog-switch) records should contain data. */
 	Assert(size > SizeOfXLogRecord);
@@ -1284,7 +1284,7 @@ ReserveXLogSwitch(XLogRecPtr *StartPos, XLogRecPtr *EndPos, XLogRecPtr *PrevPtr)
 	uint64		startbytepos;
 	uint64		endbytepos;
 	uint64		prevbytepos;
-	uint32		size = XLOG_REC_ALIGN(SizeOfXLogRecord);
+	uint32		size = MAXALIGN(SizeOfXLogRecord);
 	XLogRecPtr	ptr;
 	uint32		segleft;
 
@@ -1560,7 +1560,7 @@ CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rdata,
 	else
 	{
 		/* Align the end position, so that the next record starts aligned */
-		CurrPos = XLOG_REC_ALIGN(CurrPos);
+		CurrPos = MAXALIGN64(CurrPos);
 	}
 
 	if (CurrPos != EndPos)

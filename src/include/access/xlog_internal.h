@@ -52,7 +52,7 @@ typedef struct XLogPageHeaderData
 	uint32		xlp_rem_len;	/* total len of remaining data for record */
 } XLogPageHeaderData;
 
-#define SizeOfXLogShortPHD	XLOG_REC_ALIGN(sizeof(XLogPageHeaderData))
+#define SizeOfXLogShortPHD	MAXALIGN(sizeof(XLogPageHeaderData))
 
 typedef XLogPageHeaderData *XLogPageHeader;
 
@@ -69,7 +69,7 @@ typedef struct XLogLongPageHeaderData
 	uint32		xlp_xlog_blcksz;	/* just as a cross-check */
 } XLogLongPageHeaderData;
 
-#define SizeOfXLogLongPHD	XLOG_REC_ALIGN(sizeof(XLogLongPageHeaderData))
+#define SizeOfXLogLongPHD	MAXALIGN(sizeof(XLogLongPageHeaderData))
 
 typedef XLogLongPageHeaderData *XLogLongPageHeader;
 
