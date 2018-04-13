@@ -48,17 +48,18 @@
 #define	ENCRYPTION_KEY_LENGTH	64
 #endif
 
+#ifdef USE_OPENSSL
 static unsigned char	encryption_key[ENCRYPTION_KEY_LENGTH];
 const char* encryptionkey_prefix = "encryptionkey=";
+#endif
 
 bool data_encrypted = false;
 char	*key_setup_command = NULL;
 
+#ifdef USE_OPENSSL
 static bool initialized = false;
 
 static bool run_keysetup_command(uint8 *key);
-static void raise_error(int elevel, char *message);
-#ifdef USE_OPENSSL
 static void evp_error(void);
 #endif
 
@@ -70,12 +71,18 @@ static void evp_error(void);
 void
 sample_encryption(char *buf)
 {
+#ifdef USE_OPENSSL
 	char tweak[TWEAK_SIZE];
 	int i;
 	for (i = 0; i < TWEAK_SIZE; i++)
 		tweak[i] = i;
 
 	encrypt_block("postgresqlcrypt", buf, ENCRYPTION_SAMPLE_SIZE, tweak);
+#else
+	encryption_error(true,
+		 "data encryption cannot be used because SSL is not supported by this build\n"
+		 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
 }
 
 /*
@@ -93,12 +100,10 @@ sample_encryption(char *buf)
 void
 encrypt_block(const char *input, char *output, Size size, const char *tweak)
 {
-#ifndef FRONTEND
+#ifdef	USE_OPENSSL
 	Assert(size >= ENCRYPTION_BLOCK && size % ENCRYPTION_BLOCK == 0);
 	Assert(initialized);
-#endif
 
-#ifdef	USE_OPENSSL
 	if (IsAllZero(input, size))
 	{
 		if (input != output)
@@ -144,7 +149,7 @@ encrypt_block(const char *input, char *output, Size size, const char *tweak)
 			evp_error();
 	}
 #else
-	raise_error(FATAL,
+	encryption_error(true,
 			"data encryption cannot be used because SSL is not supported by this build\n"
 			"Compile with --with-openssl to use SSL connections.");
 #endif	/* USE_OPENSSL */
@@ -162,10 +167,10 @@ encrypt_block(const char *input, char *output, Size size, const char *tweak)
 void
 decrypt_block(const char *input, char *output, Size size, const char *tweak)
 {
+#ifdef	USE_OPENSSL
 	Assert(size >= ENCRYPTION_BLOCK && size % ENCRYPTION_BLOCK == 0);
 	Assert(initialized);
 
-#ifdef	USE_OPENSSL
 	if (IsAllZero(input, size))
 	{
 		if (input != output)
@@ -199,10 +204,26 @@ decrypt_block(const char *input, char *output, Size size, const char *tweak)
 			evp_error();
 	}
 #else
-	raise_error(FATAL,
+	encryption_error(true,
 			"data encryption cannot be used because SSL is not supported by this build\n"
 			"Compile with --with-openssl to use SSL connections.");
 #endif	/* USE_OPENSSL */
+}
+
+/*
+ * Report an error in an universal way so that caller does not have to care
+ * whether it executes in backend or front-end.
+ */
+void
+encryption_error(bool fatal, char *message)
+{
+#ifndef FRONTEND
+	elog(fatal ? FATAL : INFO, "%s", message);
+#else
+	fprintf(stderr, "%s\n", message);
+	if (fatal)
+		exit(EXIT_FAILURE);
+#endif
 }
 
 /*
@@ -221,12 +242,6 @@ setup_encryption()
 	ERR_load_crypto_strings();
 	OpenSSL_add_all_algorithms();
 	OPENSSL_config(NULL);
-
-#else
-	raise_error(FATAL,
-			"data encryption cannot be used because SSL is not supported by this build\n"
-			"Compile with --with-openssl to use SSL connections.");
-#endif	/* USE_OPENSSL */
 
 	/*
 	 * XXX Is this necessary?
@@ -257,7 +272,7 @@ setup_encryption()
 					" but the server was started without an encryption key. "
 					"Set the key using PGENCRYPTIONKEY environment variable.\n");
 			exit(EXIT_FAILURE);
-#endif
+#endif	/* FRONTEND */
 		}
 
 		/* TODO: replace with PBKDF2 or scrypt */
@@ -271,8 +286,14 @@ setup_encryption()
 	}
 
 	initialized = true;
+#else
+	encryption_error(true,
+			"data encryption cannot be used because SSL is not supported by this build\n"
+			"Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
 }
 
+#ifdef USE_OPENSSL
 static bool
 run_keysetup_command(uint8 *key)
 {
@@ -287,30 +308,30 @@ run_keysetup_command(uint8 *key)
 	if (!strlen(key_setup_command))
 		return false;
 
-	raise_error(INFO,
+	encryption_error(false,
 				psprintf("Executing \"%s\" to set up encryption key",
 						 key_setup_command));
 
 	fp = popen(key_setup_command, "r");
 	if (fp == NULL)
-		raise_error(ERROR,
+		encryption_error(true,
 					psprintf("Failed to execute key_setup_command \"%s\"",
 							 key_setup_command));
 
 	if (fread(buf, 1, strlen(encryptionkey_prefix), fp) != strlen(encryptionkey_prefix))
-		raise_error(ERROR, "Not enough data received from key_setup_command");
+		encryption_error(true, "Not enough data received from key_setup_command");
 
 	if (strncmp(buf, encryptionkey_prefix, strlen(encryptionkey_prefix)) != 0)
-		raise_error(ERROR, "Unknown data received from key_setup_command");
+		encryption_error(true, "Unknown data received from key_setup_command");
 
 	bytes_read = fread(buf, 1, ENCRYPTION_KEY_LENGTH * 2 + 1, fp);
 	if (bytes_read < ENCRYPTION_KEY_LENGTH*2)
 	{
 		if (feof(fp))
-			raise_error(ERROR,
+			encryption_error(true,
 						"Encryption key provided by key_setup_command too short");
 		else
-			raise_error(ERROR,
+			encryption_error(true,
 						psprintf("key_setup_command returned error code %d",
 								 ferror(fp)));
 	}
@@ -318,14 +339,14 @@ run_keysetup_command(uint8 *key)
 	for (i = 0; i < ENCRYPTION_KEY_LENGTH; i++)
 	{
 		if (sscanf(buf+2*i, "%2hhx", key + i) == 0)
-			raise_error(ERROR,
+			encryption_error(true,
 						psprintf("Invalid character in encryption key at position %d",
 								 2 * i));
 	}
 	if (bytes_read > ENCRYPTION_KEY_LENGTH * 2)
 	{
 		if (buf[ENCRYPTION_KEY_LENGTH * 2] != '\n')
-			raise_error(ERROR,
+			encryption_error(true,
 						psprintf("Encryption key too long '%s' %d.",
 								 buf, buf[ENCRYPTION_KEY_LENGTH * 2]));
 	}
@@ -339,21 +360,7 @@ run_keysetup_command(uint8 *key)
 
 	return true;
 }
-
-/*
- * Report an error in an universal way so that caller does not have to care
- * whether it executes in backend or front-end.
- */
-static void
-raise_error(int elevel, char *message)
-{
-#ifndef FRONTEND
-	elog(elevel, "%s", message);
-#else
-	fprintf(stderr, "%s\n", message);
-	exit(EXIT_FAILURE);
-#endif
-}
+#endif	/* USE_OPENSSL */
 
 /*
  * Error callback for openssl.
@@ -394,7 +401,13 @@ evp_error(void)
 void
 XLogEncryptionTweak(char *tweak, XLogSegNo segment, uint32 offset)
 {
+#ifdef USE_OPENSSL
 	memset(tweak, 0, TWEAK_SIZE);
 	memcpy(tweak, &segment, sizeof(XLogSegNo));
 	memcpy(tweak  + sizeof(XLogSegNo), &offset, sizeof(offset));
+#else
+	encryption_error(true,
+		 "data encryption cannot be used because SSL is not supported by this build\n"
+		 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
 }

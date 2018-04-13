@@ -144,10 +144,12 @@ extern void RememberFsyncRequest(RelFileNode rnode, ForkNumber forknum,
 extern void ForgetRelationFsyncRequests(RelFileNode rnode, ForkNumber forknum);
 extern void ForgetDatabaseFsyncRequests(Oid dbid);
 
+#ifdef USE_OPENSSL
 extern BlockNumber ReencryptBlock(char *buffer, int blocks,
 		RelFileNode *srcNode, RelFileNode *dstNode,
 		ForkNumber srcForkNum, ForkNumber dstForkNum,
 		BlockNumber blockNum);
+#endif
 
 /* smgrtype.c */
 extern Datum smgrout(PG_FUNCTION_ARGS);

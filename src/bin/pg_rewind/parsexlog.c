@@ -308,10 +308,16 @@ SimpleXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr,
 
 	if (data_encrypted)
 	{
+#ifdef USE_OPENSSL
 		char tweak[TWEAK_SIZE];
 
 		XLogEncryptionTweak(tweak, xlogreadsegno, targetPageOff);
 		decrypt_block(readBuf, readBuf, XLOG_BLCKSZ, tweak);
+#else
+		encryption_error(true,
+			 "data encryption cannot be used because SSL is not supported by this build\n"
+			 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
 	}
 
 	Assert(targetSegNo == xlogreadsegno);

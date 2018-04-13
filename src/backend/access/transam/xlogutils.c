@@ -657,10 +657,13 @@ XLogTruncateRelation(RelFileNode rnode, ForkNumber forkNum,
 static void
 XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
 {
-	char	   *p, *decrypt_p;
 	XLogRecPtr	recptr;
 	Size		nbytes;
+#ifdef USE_OPENSSL
+	char	    *decrypt_p;
 	uint32		decryptOff;
+#endif
+	char	*p;
 
 	/* state maintained across calls */
 	static int	sendFile = -1;
@@ -672,10 +675,12 @@ XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
 	Assert(startptr % XLOG_BLCKSZ == 0);
 	Assert(count % XLOG_BLCKSZ == 0);
 
-	decrypt_p = p = buf;
 	recptr = startptr;
 	nbytes = count;
+#ifdef USE_OPENSSL
+	decrypt_p = p = buf;
 	decryptOff = startptr % XLogSegSize;
+#endif
 
 	while (nbytes > 0)
 	{
@@ -765,6 +770,7 @@ XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
 		/* Decrypt completed blocks */
 		if (data_encrypted)
 		{
+#ifdef USE_OPENSSL
 			while (decrypt_p + XLOG_BLCKSZ <= p)
 			{
 				char tweak[TWEAK_SIZE];
@@ -774,6 +780,11 @@ XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
 				decrypt_p += XLOG_BLCKSZ;
 				decryptOff += XLOG_BLCKSZ;
 			}
+#else
+			elog(FATAL,
+				"data encryption cannot be used because SSL is not supported by this build\n"
+				 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
 		}
 	}
 }

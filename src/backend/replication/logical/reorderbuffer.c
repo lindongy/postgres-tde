@@ -222,7 +222,9 @@ static void ReorderBufferToastAppendChunk(ReorderBuffer *rb, ReorderBufferTXN *t
  * ----------------------------------------------
  */
 
+#ifdef USE_OPENSSL
 static void ensure_encryption_buffer_size(ReorderBuffer *rb, Size size);
+#endif
 
 /*
  * Compute encryption tweak for buffer change.
@@ -2178,14 +2180,6 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 
 	sz = sizeof(ReorderBufferDiskChange);
 
-	/*
-	 * As the on-disk change has variable length, the header will have to be
-	 * de-serialized separate, see ReorderBufferRestoreChanges(). Therefore we
-	 * also need to encrypt it separate. Make sure the size is appropriate.
-	 */
-	if (data_encrypted)
-		sz = TYPEALIGN(ENCRYPTION_BLOCK, sz);
-
 	sz_hdr = sz;
 	ReorderBufferSerializeReserve(rb, sz_hdr);
 
@@ -2224,15 +2218,6 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 				}
 
 				/* make sure we have enough space */
-				if (data_encrypted)
-				{
-					/*
-					 * Encryption works with blocks. As the changes are stored
-					 * and retrieved separately, we also have to decrypt them
-					 * alone.
-					 */
-					sz = TYPEALIGN(ENCRYPTION_BLOCK, sz);
-				}
 				ReorderBufferSerializeReserve(rb, sz);
 
 				data = ((char *) rb->outbuf) + sizeof(ReorderBufferDiskChange);
@@ -2266,8 +2251,6 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 				sz += prefix_size + change->data.msg.message_size +
 					sizeof(Size) + sizeof(Size);
 
-				if (data_encrypted)
-					sz = TYPEALIGN(ENCRYPTION_BLOCK, sz);
 				ReorderBufferSerializeReserve(rb, sz);
 
 				data = ((char *) rb->outbuf) + sizeof(ReorderBufferDiskChange);
@@ -2304,8 +2287,6 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 					;
 
 				/* make sure we have enough space */
-				if (data_encrypted)
-					sz = TYPEALIGN(ENCRYPTION_BLOCK, sz);
 				ReorderBufferSerializeReserve(rb, sz);
 
 				data = ((char *) rb->outbuf) + sizeof(ReorderBufferDiskChange);
@@ -2344,6 +2325,7 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 	 */
 	if (data_encrypted)
 	{
+#ifdef USE_OPENSSL
 		char	tweak[TWEAK_SIZE];
 
 		REORDER_BUFFER_CHANGE_TWEAK(tweak, segno);
@@ -2361,6 +2343,11 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 			encrypt_block((char*) rb->outbuf + sz_hdr,
 						  rb->encryption_buffer + sz_hdr,
 						  ondisk->size - sz_hdr, tweak);
+#else
+		elog(FATAL,
+			 "data encryption cannot be used because SSL is not supported by this build\n"
+			 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
 	}
 
 	/*
@@ -2399,7 +2386,9 @@ ReorderBufferRestoreChanges(ReorderBuffer *rb, ReorderBufferTXN *txn,
 	XLogSegNo	last_segno;
 	dlist_mutable_iter cleanup_iter;
 	Size	sz_hdr;
+#ifdef USE_OPENSSL
 	char	encryption_tweak[TWEAK_SIZE];
+#endif
 
 	Assert(txn->first_lsn != InvalidXLogRecPtr);
 	Assert(txn->final_lsn != InvalidXLogRecPtr);
@@ -2423,7 +2412,13 @@ ReorderBufferRestoreChanges(ReorderBuffer *rb, ReorderBufferTXN *txn,
 	 */
 	sz_hdr = sizeof(ReorderBufferDiskChange);
 	if (data_encrypted)
+#ifdef USE_OPENSSL
 		sz_hdr = TYPEALIGN(ENCRYPTION_BLOCK, sz_hdr);
+#else
+		elog(FATAL,
+			 "data encryption cannot be used because SSL is not supported by this build\n"
+			 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
 
 	while (restored < max_changes_in_memory && *segno <= last_segno)
 	{
@@ -2502,8 +2497,14 @@ ReorderBufferRestoreChanges(ReorderBuffer *rb, ReorderBufferTXN *txn,
 		 */
 		if (data_encrypted)
 		{
+#ifdef USE_OPENSSL
 			REORDER_BUFFER_CHANGE_TWEAK(encryption_tweak, *segno);
 			decrypt_block(rb->outbuf, rb->outbuf, sz_hdr, encryption_tweak);
+#else
+			elog(FATAL,
+				 "data encryption cannot be used because SSL is not supported by this build\n"
+				 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
 		}
 
 		ondisk = (ReorderBufferDiskChange *) rb->outbuf;
@@ -2530,9 +2531,18 @@ ReorderBufferRestoreChanges(ReorderBuffer *rb, ReorderBufferTXN *txn,
 		 * ok, read a full change from disk, now decrypt it if it's encrypted
 		 * and if there's some data beyond the header.
 		 */
-		if (data_encrypted && ondisk->size > sz_hdr)
-			decrypt_block(rb->outbuf + sz_hdr, rb->outbuf + sz_hdr,
-						  ondisk->size - sz_hdr, encryption_tweak);
+		if (data_encrypted)
+		{
+#ifdef USE_OPENSSL
+			if (ondisk->size > sz_hdr)
+				decrypt_block(rb->outbuf + sz_hdr, rb->outbuf + sz_hdr,
+							  ondisk->size - sz_hdr, encryption_tweak);
+#else
+			elog(FATAL,
+				 "data encryption cannot be used because SSL is not supported by this build\n"
+				 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
+		}
 
 		/*
 		 * Restore the change into proper in-memory format
@@ -3417,6 +3427,7 @@ restart:
 }
 
 
+#ifdef USE_OPENSSL
 /*
  * Make sure there's enough space in the encryption buffer.
  */
@@ -3442,3 +3453,4 @@ ensure_encryption_buffer_size(ReorderBuffer *rb, Size size)
 										 rb->encryption_buffer_size);
 	}
 }
+#endif	/* USE_OPENSSL  */

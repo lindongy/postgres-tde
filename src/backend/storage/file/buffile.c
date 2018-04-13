@@ -91,7 +91,9 @@ struct BufFile
 	int			pos;			/* next read/write position in buffer */
 	int			nbytes;			/* total # of valid bytes in buffer */
 	char		buffer[BLCKSZ];
+#ifdef USE_OPENSSL
 	char		tweakBase[TWEAK_SIZE];
+#endif
 	off_t		maxOffset;
 };
 
@@ -100,7 +102,9 @@ static void extendBufFile(BufFile *file);
 static void BufFileLoadBuffer(BufFile *file);
 static void BufFileDumpBuffer(BufFile *file);
 static int	BufFileFlush(BufFile *file);
+#ifdef USE_OPENSSL
 static void BufFileTweak(char *tweak, BufFile *file, int curFile, off_t offset);
+#endif
 
 /*
  * Create a BufFile given the first underlying physical file.
@@ -185,10 +189,16 @@ BufFileCreateTemp(bool interXact)
 
 	if (data_encrypted)
 	{
+#ifdef USE_OPENSSL
 		TimestampTz ts = GetCurrentTimestamp();
 		memset(file->tweakBase, 0, sizeof(file->tweakBase));
 		memcpy(file->tweakBase + sizeof(uint32), &MyProcPid, sizeof(MyProcPid));
 		memcpy(file->tweakBase + sizeof(uint32) + sizeof(MyProcPid), &ts, sizeof(ts));
+#else
+		elog(FATAL,
+			 "data encryption cannot be used because SSL is not supported by this build\n"
+			 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
 	}
 
 	return file;
@@ -283,9 +293,15 @@ BufFileLoadBuffer(BufFile *file)
 
 	if (data_encrypted)
 	{
+#ifdef USE_OPENSSL
 		char tweak[TWEAK_SIZE];
 		BufFileTweak(tweak, file, file->curFile, file->curOffset);
 		decrypt_block(file->buffer, file->buffer, file->nbytes, tweak);
+#else
+		elog(FATAL,
+			 "data encryption cannot be used because SSL is not supported by this build\n"
+			 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
 	}
 
 	pgBufferUsage.temp_blks_read++;
@@ -303,7 +319,9 @@ BufFileDumpBuffer(BufFile *file)
 {
 	int			wpos = 0;
 	File		thisfile;
+#ifdef USE_OPENSSL
 	char 		writeBuffer[BLCKSZ];
+#endif
 	char		*writePtr;
 
 	Assert(file->curOffset % BLCKSZ == 0);
@@ -351,6 +369,7 @@ BufFileDumpBuffer(BufFile *file)
 
 	if (data_encrypted)
 	{
+#ifdef USE_OPENSSL
 		char tweak[TWEAK_SIZE];
 		/*
 		 *  FIXME: figure out how to handle nbytes < smallest encryption block
@@ -359,6 +378,11 @@ BufFileDumpBuffer(BufFile *file)
 		BufFileTweak(tweak, file, file->curFile, file->curOffset);
 		encrypt_block(file->buffer, writeBuffer, file->nbytes, tweak);
 		writePtr = writeBuffer;
+#else
+		elog(FATAL,
+			 "data encryption cannot be used because SSL is not supported by this build\n"
+			 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
 	} else
 		writePtr = file->buffer;
 
@@ -657,6 +681,7 @@ BufFileSeekBlock(BufFile *file, long blknum)
 					   SEEK_SET);
 }
 
+#ifdef USE_OPENSSL
 static void
 BufFileTweak(char *tweak, BufFile *file, int curFile, off_t offset)
 {
@@ -664,6 +689,7 @@ BufFileTweak(char *tweak, BufFile *file, int curFile, off_t offset)
 	memcpy(tweak, file->tweakBase, TWEAK_SIZE);
 	*((off_t*) tweak) = *((off_t*) tweak) ^ block;
 }
+#endif
 
 #ifdef NOT_USED
 /*

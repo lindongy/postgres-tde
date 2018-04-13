@@ -114,8 +114,10 @@ typedef struct _MdfdVec
 } MdfdVec;
 
 static MemoryContext MdCxt;		/* context for all MdfdVec objects */
+#ifdef USE_OPENSSL
 static char *md_encryption_buffer;
 static char *md_encryption_tweak;
+#endif
 
 /*
  * In some contexts (currently, standalone backends and the checkpointer)
@@ -199,9 +201,12 @@ static MdfdVec *_mdfd_getseg(SMgrRelation reln, ForkNumber forkno,
 			 BlockNumber blkno, bool skipFsync, int behavior);
 static BlockNumber _mdnblocks(SMgrRelation reln, ForkNumber forknum,
 		   MdfdVec *seg);
+
+#ifdef USE_OPENSSL
 static void mdtweak(char *tweak, RelFileNode *relnode, ForkNumber forknum, BlockNumber blocknum);
 static void mdencrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer);
 static void mddecrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer);
+#endif
 
 /*
  *	mdinit() -- Initialize private state for magnetic disk storage manager.
@@ -247,8 +252,10 @@ mdinit(void)
 		pendingUnlinks = NIL;
 	}
 
+#ifdef USE_OPENSSL
 	md_encryption_buffer = MemoryContextAllocZero(MdCxt, BLCKSZ);
 	md_encryption_tweak = MemoryContextAllocZero(MdCxt, TWEAK_SIZE);
+#endif
 }
 
 /*
@@ -545,9 +552,18 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 						blocknum, FilePathName(v->mdfd_vfd))));
 
 	if (data_encrypted)
+	{
+#ifdef USE_OPENSSL
 		mdencrypt(reln, forknum, blocknum, buffer);
+		buffer = md_encryption_buffer;
+#else
+		elog(FATAL,
+			 "data encryption cannot be used because SSL is not supported by this build\n"
+			 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
+	}
 
-	if ((nbytes = FileWrite(v->mdfd_vfd, data_encrypted ? md_encryption_buffer : buffer, BLCKSZ, WAIT_EVENT_DATA_FILE_EXTEND)) != BLCKSZ)
+	if ((nbytes = FileWrite(v->mdfd_vfd, buffer, BLCKSZ, WAIT_EVENT_DATA_FILE_EXTEND)) != BLCKSZ)
 	{
 		if (nbytes < 0)
 			ereport(ERROR,
@@ -744,6 +760,7 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 	off_t		seekpos;
 	int			nbytes;
 	MdfdVec    *v;
+	char		*buffer_read = buffer;
 
 	TRACE_POSTGRESQL_SMGR_MD_READ_START(forknum, blocknum,
 										reln->smgr_rnode.node.spcNode,
@@ -764,7 +781,17 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 				 errmsg("could not seek to block %u in file \"%s\": %m",
 						blocknum, FilePathName(v->mdfd_vfd))));
 
-	nbytes = FileRead(v->mdfd_vfd, data_encrypted ? md_encryption_buffer : buffer, BLCKSZ, WAIT_EVENT_DATA_FILE_READ);
+	if (data_encrypted)
+	{
+#ifdef USE_OPENSSL
+		buffer_read = md_encryption_buffer;
+#else
+		elog(FATAL,
+			 "data encryption cannot be used because SSL is not supported by this build\n"
+			 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
+	}
+	nbytes = FileRead(v->mdfd_vfd, buffer_read, BLCKSZ, WAIT_EVENT_DATA_FILE_READ);
 
 	TRACE_POSTGRESQL_SMGR_MD_READ_DONE(forknum, blocknum,
 									   reln->smgr_rnode.node.spcNode,
@@ -800,7 +827,15 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 							nbytes, BLCKSZ)));
 	}
 	else if (data_encrypted)
+	{
+#ifdef USE_OPENSSL
 		mddecrypt(reln, forknum, blocknum, buffer);
+#else
+		elog(FATAL,
+			 "data encryption cannot be used because SSL is not supported by this build\n"
+			 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
+	}
 }
 
 /*
@@ -843,8 +878,17 @@ mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 						blocknum, FilePathName(v->mdfd_vfd))));
 
 	if (data_encrypted)
+	{
+#ifdef USE_OPENSSL
 		mdencrypt(reln, forknum, blocknum, buffer);
-	nbytes = FileWrite(v->mdfd_vfd, data_encrypted ? md_encryption_buffer : buffer, BLCKSZ, WAIT_EVENT_DATA_FILE_WRITE);
+		buffer = md_encryption_buffer;
+#else
+		elog(FATAL,
+			 "data encryption cannot be used because SSL is not supported by this build\n"
+			 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
+	}
+	nbytes = FileWrite(v->mdfd_vfd, buffer, BLCKSZ, WAIT_EVENT_DATA_FILE_WRITE);
 
 	TRACE_POSTGRESQL_SMGR_MD_WRITE_DONE(forknum, blocknum,
 										reln->smgr_rnode.node.spcNode,
@@ -1966,6 +2010,7 @@ _mdnblocks(SMgrRelation reln, ForkNumber forknum, MdfdVec *seg)
 	return (BlockNumber) (len / BLCKSZ);
 }
 
+#ifdef USE_OPENSSL
 /*
  * md files are encrypted block at a time. Tweak will alias higher numbered
  * forks for huge tables.
@@ -2016,3 +2061,4 @@ ReencryptBlock(char *buffer, int blocks,
 	}
 	return blockNum;
 }
+#endif

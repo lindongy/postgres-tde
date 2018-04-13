@@ -165,9 +165,11 @@ copy_file(char *fromfile, char *tofile, RelFileNode *fromNode,
 	int			dstfd;
 	int			nbytes;
 	int			bytesread;
-	BlockNumber blockNum = segment*RELSEG_SIZE;
 	off_t		offset;
 	off_t		flush_offset;
+#ifdef USE_OPENSSL
+	BlockNumber blockNum = segment*RELSEG_SIZE;
+#endif
 
 	/* Size of copy buffer (read and write requests) */
 #define COPY_BUF_SIZE (8 * BLCKSZ)
@@ -249,11 +251,21 @@ copy_file(char *fromfile, char *tofile, RelFileNode *fromNode,
 		 * If the database is encrypted we need to decrypt the data here
 		 * and reencrypt it to adjust the tweak values of blocks.
 		 */
-		if (data_encrypted && fromNode != NULL)
+		if (data_encrypted)
 		{
-			Assert(toNode != NULL);
-			blockNum = ReencryptBlock(buffer, nbytes/BLCKSZ,
-					fromNode, toNode, fromForkNum, toForkNum, blockNum);
+#ifdef USE_OPENSSL
+			if (fromNode != NULL)
+			{
+				Assert(toNode != NULL);
+				blockNum = ReencryptBlock(buffer, nbytes/BLCKSZ,
+										  fromNode, toNode, fromForkNum,
+										  toForkNum, blockNum);
+			}
+#else
+			elog(FATAL,
+				 "data encryption cannot be used because SSL is not supported by this build\n"
+				 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
 		}
 
 		pgstat_report_wait_start(WAIT_EVENT_COPY_FILE_WRITE);

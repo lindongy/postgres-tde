@@ -2463,6 +2463,7 @@ XLogWrite(XLogwrtRqst WriteRqst, bool flexible)
 			from = XLogCtl->pages + startidx * (Size) XLOG_BLCKSZ;
 			nbytes = npages * (Size) XLOG_BLCKSZ;
 			if (data_encrypted) {
+#ifdef	USE_OPENSSL
 				int i;
 				/*
 				 * XXX: use larger encryption buffer to enable larger writes
@@ -2481,6 +2482,11 @@ XLogWrite(XLogwrtRqst WriteRqst, bool flexible)
 					from += XLOG_BLCKSZ;
 					openLogOff += XLOG_BLCKSZ;
 				}
+#else
+			elog(FATAL,
+				"data encryption cannot be used because SSL is not supported by this build\n"
+				 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
 			} else {
 				XLogWritePages(from, npages);
 				openLogOff += nbytes;
@@ -5136,10 +5142,16 @@ BootStrapXLOG(void)
 
 	if (data_encrypted)
 	{
+#ifdef USE_OPENSSL
 		char tweak[TWEAK_SIZE];
 
 		XLogEncryptionTweak(tweak, 1, 0);
 		encrypt_block((char*)page, (char*)page, XLOG_BLCKSZ, tweak);
+#else
+		elog(FATAL,
+			 "data encryption cannot be used because SSL is not supported by this build\n"
+			 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
 	}
 
 	/* Write the first page with the initial record */
@@ -11685,10 +11697,16 @@ retry:
 
 	if (data_encrypted)
 	{
+#ifdef USE_OPENSSL
 		char tweak[TWEAK_SIZE];
 
 		XLogEncryptionTweak(tweak, readSegNo, readOff);
 		decrypt_block(readBuf, readBuf, XLOG_BLCKSZ, tweak);
+#else
+		elog(FATAL,
+			 "data encryption cannot be used because SSL is not supported by this build\n"
+			 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
 	}
 
 	*readTLI = curFileTLI;

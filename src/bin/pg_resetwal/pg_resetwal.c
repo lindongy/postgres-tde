@@ -1187,10 +1187,16 @@ WriteEmptyXLOG(void)
 
 	if (data_encrypted)
 	{
+#ifdef USE_OPENSSL
 		char tweak[TWEAK_SIZE];
 
 		XLogEncryptionTweak(tweak, newXlogSegNo, 0);
 		encrypt_block(buffer, buffer, XLOG_BLCKSZ, tweak);
+#else
+		encryption_error(FATAL,
+			 "data encryption cannot be used because SSL is not supported by this build\n"
+			 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
 	}
 
 	/* Write the first page */

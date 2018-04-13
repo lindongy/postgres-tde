@@ -362,6 +362,7 @@ XLogDumpReadPage(XLogReaderState *state, XLogRecPtr targetPagePtr, int reqLen,
 
 	if (data_encrypted)
 	{
+#ifdef USE_OPENSSL
 		char tweak[TWEAK_SIZE];
 		XLogSegNo	readSegNo;
 		uint32	readSegOff;
@@ -371,6 +372,11 @@ XLogDumpReadPage(XLogReaderState *state, XLogRecPtr targetPagePtr, int reqLen,
 
 		XLogEncryptionTweak(tweak, readSegNo, readSegOff);
 		decrypt_block(readBuff, readBuff, count, tweak);
+#else
+		encryption_error(FATAL,
+			 "data encryption cannot be used because SSL is not supported by this build\n"
+			 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
 	}
 
 	return count;
