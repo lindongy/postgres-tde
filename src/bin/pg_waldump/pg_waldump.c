@@ -357,6 +357,9 @@ XLogDumpReadPage(XLogReaderState *state, XLogRecPtr targetPagePtr, int reqLen,
 		}
 	}
 
+	if (data_encrypted)
+		count = XLOG_REC_ALIGN(count);
+
 	XLogDumpXLogRead(private->inpath, private->timeline, targetPagePtr,
 					 readBuff, count);
 

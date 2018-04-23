@@ -2180,6 +2180,14 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 
 	sz = sizeof(ReorderBufferDiskChange);
 
+	/*
+	 * As the on-disk change has variable length, the header will have to be
+	 * de-serialized separate, see ReorderBufferRestoreChanges(). Therefore we
+	 * also need to encrypt it separate. Make sure the size is appropriate.
+	 */
+	if (data_encrypted)
+		sz = TYPEALIGN(ENCRYPTION_BLOCK, sz);
+
 	sz_hdr = sz;
 	ReorderBufferSerializeReserve(rb, sz_hdr);
 
@@ -2218,6 +2226,15 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 				}
 
 				/* make sure we have enough space */
+				if (data_encrypted)
+				{
+					/*
+					 * Encryption works with blocks. As the changes are stored
+					 * and retrieved separately, we also have to decrypt them
+					 * alone.
+					 */
+					sz = TYPEALIGN(ENCRYPTION_BLOCK, sz);
+				}
 				ReorderBufferSerializeReserve(rb, sz);
 
 				data = ((char *) rb->outbuf) + sizeof(ReorderBufferDiskChange);
@@ -2248,13 +2265,15 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 				char	   *data;
 				Size		prefix_size = strlen(change->data.msg.prefix) + 1;
 
+
 				sz += prefix_size + change->data.msg.message_size +
 					sizeof(Size) + sizeof(Size);
 
+				if (data_encrypted)
+					sz = TYPEALIGN(ENCRYPTION_BLOCK, sz);
 				ReorderBufferSerializeReserve(rb, sz);
 
 				data = ((char *) rb->outbuf) + sizeof(ReorderBufferDiskChange);
-
 				/* might have been reallocated above */
 				ondisk = (ReorderBufferDiskChange *) rb->outbuf;
 
@@ -2287,12 +2306,13 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 					;
 
 				/* make sure we have enough space */
+				if (data_encrypted)
+					sz = TYPEALIGN(ENCRYPTION_BLOCK, sz);
 				ReorderBufferSerializeReserve(rb, sz);
 
 				data = ((char *) rb->outbuf) + sizeof(ReorderBufferDiskChange);
 				/* might have been reallocated above */
 				ondisk = (ReorderBufferDiskChange *) rb->outbuf;
-
 				memcpy(data, snap, sizeof(SnapshotData));
 				data += sizeof(SnapshotData);
 
@@ -3426,7 +3446,6 @@ restart:
 	return true;
 }
 
-
 #ifdef USE_OPENSSL
 /*
  * Make sure there's enough space in the encryption buffer.
@@ -3453,4 +3472,6 @@ ensure_encryption_buffer_size(ReorderBuffer *rb, Size size)
 										 rb->encryption_buffer_size);
 	}
 }
-#endif	/* USE_OPENSSL  */
+#endif
+
+

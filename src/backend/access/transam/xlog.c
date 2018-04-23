@@ -1230,7 +1230,7 @@ ReserveXLogInsertLocation(int size, XLogRecPtr *StartPos, XLogRecPtr *EndPos,
 	uint64		endbytepos;
 	uint64		prevbytepos;
 
-	size = MAXALIGN(size);
+	size = XLOG_REC_ALIGN(size);
 
 	/* All (non xlog-switch) records should contain data. */
 	Assert(size > SizeOfXLogRecord);
@@ -1284,7 +1284,7 @@ ReserveXLogSwitch(XLogRecPtr *StartPos, XLogRecPtr *EndPos, XLogRecPtr *PrevPtr)
 	uint64		startbytepos;
 	uint64		endbytepos;
 	uint64		prevbytepos;
-	uint32		size = MAXALIGN(SizeOfXLogRecord);
+	uint32		size = XLOG_REC_ALIGN(SizeOfXLogRecord);
 	XLogRecPtr	ptr;
 	uint32		segleft;
 
@@ -1560,7 +1560,7 @@ CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rdata,
 	else
 	{
 		/* Align the end position, so that the next record starts aligned */
-		CurrPos = MAXALIGN64(CurrPos);
+		CurrPos = XLOG_REC_ALIGN(CurrPos);
 	}
 
 	if (CurrPos != EndPos)
@@ -4679,7 +4679,7 @@ ReadControlFile(void)
 #endif
 
 	/*
-	 * Initialize encryption, but not if the current backend have already done
+	 * Initialize encryption, but not if the current backend has already done
 	 * that.
 	 */
 	if (ControlFile->data_encrypted && !data_encrypted)
