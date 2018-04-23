@@ -36,7 +36,7 @@
  * For similar reasons, the alignment to ENCRYPTION_BLOCK also has to be
  * applied when storing changes to disk in reorderbuffer.c.
  */
-#define ENCRYPTION_BLOCK 1
+#define ENCRYPTION_BLOCK 16
 #define TWEAK_SIZE 16
 #endif
 
