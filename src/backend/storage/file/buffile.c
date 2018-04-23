@@ -39,10 +39,10 @@
 #include "executor/instrument.h"
 #include "pgstat.h"
 #include "miscadmin.h"
-#include "storage/encryption.h"
 #include "storage/fd.h"
 #include "storage/buffile.h"
 #include "storage/buf_internals.h"
+#include "storage/encryption.h"
 #include "utils/datetime.h"
 #include "utils/resowner.h"
 
@@ -65,6 +65,18 @@ struct BufFile
 	/* all files except the last have length exactly MAX_PHYSICAL_FILESIZE */
 	File	   *files;			/* palloc'd array with numFiles entries */
 	off_t	   *offsets;		/* palloc'd array with numFiles entries */
+#ifdef USE_OPENSSL
+	/*
+	 * If the file is encrypted, only the whole buffer can be loaded / dumped
+	 * --- see BufFileLoadBuffer() for more info --- whether it's space is
+	 * used up or not. Therefore we need to keep track of the actual on-disk
+	 * size buffer of each component file, as it would be if there was no
+	 * encryption.
+	 *
+	 * TODO check that this field is only accessed if data_encrypted.
+	 */
+	off_t	*useful;
+#endif
 
 	/*
 	 * offsets[i] is the current seek position of files[i].  We use this to
@@ -94,7 +106,6 @@ struct BufFile
 #ifdef USE_OPENSSL
 	char		tweakBase[TWEAK_SIZE];
 #endif
-	off_t		maxOffset;
 };
 
 static BufFile *makeBufFile(File firstfile);
@@ -120,6 +131,22 @@ makeBufFile(File firstfile)
 	file->files[0] = firstfile;
 	file->offsets = (off_t *) palloc(sizeof(off_t));
 	file->offsets[0] = 0L;
+#ifdef USE_OPENSSL
+	file->useful = (off_t *) palloc(sizeof(off_t));
+	file->useful[0] = 0L;
+
+	if (data_encrypted)
+	{
+		/*
+		 * Seek past the end of the file and consequent write leads to hole in
+		 * the file which is filled by zeroes. If the data is encrypted, we
+		 * cannot rely on the zeroes created by the OS because these become
+		 * garbage after decryption. Instead, make sure that the unused part
+		 * of the buffer is always zeroed in *before* the encryption.
+		 */
+		MemSet(file->buffer, 0, BLCKSZ);
+	}
+#endif
 	file->isTemp = false;
 	file->isInterXact = false;
 	file->dirty = false;
@@ -128,7 +155,6 @@ makeBufFile(File firstfile)
 	file->curOffset = 0L;
 	file->pos = 0;
 	file->nbytes = 0;
-	file->maxOffset = 0L;
 
 	return file;
 }
@@ -156,10 +182,16 @@ extendBufFile(BufFile *file)
 									(file->numFiles + 1) * sizeof(File));
 	file->offsets = (off_t *) repalloc(file->offsets,
 									   (file->numFiles + 1) * sizeof(off_t));
+#ifdef USE_OPENSSL
+	file->useful = (off_t *) repalloc(file->useful,
+									  (file->numFiles + 1) * sizeof(off_t));
+#endif
 	file->files[file->numFiles] = pfile;
 	file->offsets[file->numFiles] = 0L;
+#ifdef USE_OPENSSL
+	file->useful[file->numFiles] = 0L;
+#endif
 	file->numFiles++;
-	file->maxOffset = 0L;
 }
 
 /*
@@ -191,6 +223,7 @@ BufFileCreateTemp(bool interXact)
 	{
 #ifdef USE_OPENSSL
 		TimestampTz ts = GetCurrentTimestamp();
+
 		memset(file->tweakBase, 0, sizeof(file->tweakBase));
 		memcpy(file->tweakBase + sizeof(uint32), &MyProcPid, sizeof(MyProcPid));
 		memcpy(file->tweakBase + sizeof(uint32) + sizeof(MyProcPid), &ts, sizeof(ts));
@@ -215,6 +248,13 @@ BufFileCreateTemp(bool interXact)
 BufFile *
 BufFileCreate(File file)
 {
+#ifdef USE_OPENSSL
+	if (data_encrypted)
+	{
+		elog(ERROR,
+			 "Non-temporary BufFile not implemented for encrypted data.");
+	}
+#endif
 	return makeBufFile(file);
 }
 #endif
@@ -237,6 +277,9 @@ BufFileClose(BufFile *file)
 	/* release the buffer space */
 	pfree(file->files);
 	pfree(file->offsets);
+#ifdef USE_OPENSSL
+	pfree(file->useful);
+#endif
 	pfree(file);
 }
 
@@ -252,7 +295,21 @@ BufFileLoadBuffer(BufFile *file)
 {
 	File		thisfile;
 
-	Assert(file->curOffset % BLCKSZ == 0);
+	/*
+	 * Only whole multiple of ENCRYPTION_BLOCK can be encrypted / decrypted,
+	 * but we choose to use BLCKSZ (i.e. BufFile buffer) as the unit. The
+	 * point is that curOffset is a component of the encryption tweak, and all
+	 * data within particular call of encrypt_block() / decrypt_block() must
+	 * have the same tweak. So whichever unit we choose we must stick on it
+	 * and never encrypt / decrypt multiple units at a time.
+	 *
+	 * BLCKSZ also seems better choice than ENCRYPTION_BLOCK for performance
+	 * purposes. We assume that alignment to BLCKSZ implies alignment to
+	 * ENCRYPTION_BLOCK.
+	 */
+	Assert((file->curOffset % BLCKSZ == 0 &&
+			file->curOffset % ENCRYPTION_BLOCK == 0) ||
+		   !data_encrypted);
 
 	/*
 	 * Advance to next component file if necessary and possible.
@@ -267,6 +324,18 @@ BufFileLoadBuffer(BufFile *file)
 		file->curFile++;
 		file->curOffset = 0L;
 	}
+
+	/*
+	 * See makeBufFile().
+	 *
+	 * Actually here we only handle the case of FileRead() returning zero
+	 * below. In contrast, if the buffer contains any data and it's not full,
+	 * it should already have the trailing zeroes on the disk. And as the
+	 * encrypted buffer is loaded in its entirety, the zeroes should
+	 * eventually appear in memory.
+	 */
+	if (data_encrypted)
+		MemSet(file->buffer, 0, BLCKSZ);
 
 	/*
 	 * May need to reposition physical file.
@@ -286,24 +355,56 @@ BufFileLoadBuffer(BufFile *file)
 							file->buffer,
 							sizeof(file->buffer),
 							WAIT_EVENT_BUFFILE_READ);
+
 	if (file->nbytes < 0)
 		file->nbytes = 0;
+
+	/*
+	 * BLCKSZ is the I/O unit for encrypted data. (For non-encrypted data this
+	 * condition applies to all but the last buffer in the file.)q
+	 */
+	Assert(file->nbytes % BLCKSZ == 0 || !data_encrypted);
+
 	file->offsets[file->curFile] += file->nbytes;
 	/* we choose not to advance curOffset here */
 
-	if (data_encrypted)
+	if (data_encrypted && file->nbytes > 0)
 	{
 #ifdef USE_OPENSSL
+		char decrypt_buf[BLCKSZ];
 		char tweak[TWEAK_SIZE];
+		int	nbytes = file->nbytes;
+		off_t	new_offset = file->offsets[file->curFile];
+		off_t	useful = file->useful[file->curFile];
+
+		/*
+		 * The encrypted component file can only consist of whole number of
+		 * our encryption units. (Only the whole buffers are dumped / loaded.)
+		 */
+		Assert(nbytes % BLCKSZ == 0);
+
+		memcpy(decrypt_buf, file->buffer, nbytes);
 		BufFileTweak(tweak, file, file->curFile, file->curOffset);
-		decrypt_block(file->buffer, file->buffer, file->nbytes, tweak);
+
+		/*
+		 * The whole block is encrypted / decrypted at once as explained
+		 * above.
+		 */
+		decrypt_block(decrypt_buf, file->buffer, BLCKSZ, tweak);
+
+		/*
+		 * The buffer we've just read may be the last one of this component
+		 * file and thus it may contain padding bytes that reader should
+		 * ignore.
+		 */
+		if (useful < new_offset)
+			file->nbytes -= new_offset - useful;
 #else
 		elog(FATAL,
 			 "data encryption cannot be used because SSL is not supported by this build\n"
 			 "Compile with --with-openssl to use SSL connections.");
-#endif	/* USE_OPENSSL */
+#endif /* USE_OPENSSL */
 	}
-
 	pgBufferUsage.temp_blks_read++;
 }
 
@@ -318,74 +419,57 @@ static void
 BufFileDumpBuffer(BufFile *file)
 {
 	int			wpos = 0;
+	int			bytestowrite;
 	File		thisfile;
+	char		*write_ptr;
 #ifdef USE_OPENSSL
-	char 		writeBuffer[BLCKSZ];
+	char        write_buf[BLCKSZ];
 #endif
-	char		*writePtr;
-
-	Assert(file->curOffset % BLCKSZ == 0);
-	Assert(file->dirty);
-	Assert(file->pos <= BLCKSZ);
 
 	/*
-	 * Advance to next component file if necessary and possible.
+	 * See comments in BufFileLoadBuffer();
 	 */
-	if (file->curOffset >= MAX_PHYSICAL_FILESIZE && file->isTemp)
-	{
-		Assert(file->curOffset == MAX_PHYSICAL_FILESIZE);
-		while (file->curFile + 1 >= file->numFiles)
-			extendBufFile(file);
-		file->curFile++;
-		file->curOffset = 0L;
-	}
+	Assert((file->curOffset % BLCKSZ == 0 &&
+			file->curOffset % ENCRYPTION_BLOCK == 0) ||
+		   !data_encrypted);
 
 	/*
-	 * When overwriting a portion of an encrypted block we need the rest
-	 * of the block to be available, because we need to overwrite the whole
-	 * block. We can skip this on the final block.
+	 * Caller's responsibility.
 	 */
-	if (data_encrypted && file->nbytes < BLCKSZ &&
-		file->curFile + 1 == file->numFiles &&
-		file->curOffset + file->nbytes < file->maxOffset)
-	{
-		char tmpBuf[BLCKSZ];
-		int tmpBytes = file->nbytes;
-		memcpy(tmpBuf, file->buffer, tmpBytes);
-		BufFileLoadBuffer(file);
-		memcpy(file->buffer, tmpBuf, tmpBytes);
-	}
-
-	/*
-	 * May need to reposition physical file.
-	 */
-	thisfile = file->files[file->curFile];
-	if (file->curOffset != file->offsets[file->curFile])
-	{
-		if (FileSeek(thisfile, file->curOffset, SEEK_SET) != file->curOffset)
-			return;			/* seek failed, give up */
-		file->offsets[file->curFile] = file->curOffset;
-	}
+	Assert(file->pos <= file->nbytes);
 
 	if (data_encrypted)
 	{
 #ifdef USE_OPENSSL
 		char tweak[TWEAK_SIZE];
-		/*
-		 *  FIXME: figure out how to handle nbytes < smallest encryption block
-		 * size
-		 **/
+
 		BufFileTweak(tweak, file, file->curFile, file->curOffset);
-		encrypt_block(file->buffer, writeBuffer, file->nbytes, tweak);
-		writePtr = writeBuffer;
+
+		/*
+		 * The amount of data encrypted must be a multiple of
+		 * ENCRYPTION_BLOCK. We meet this condition simply by encrypting the
+		 * whole buffer.
+		 *
+		 * XXX Alternatively we could get the encrypted chunk length by
+		 * rounding file->nbytes up to the nearest multiple of
+		 * ENCRYPTION_BLOCK, and for decryption use the
+		 * file->useful[file->curFile] value to find out how many blocks
+		 * should be decrypted. That would reduce I/O if the buffer is mostly
+		 * empty, but (BLCKSZ / ENCRYPTION_BLOCK) calls of encrypt_block()
+		 * would be needed for full buffers. See BufFileLoadBuffer() for
+		 * explanation why we must stick on the unit of data amount encrypted
+		 * / decrypted.
+		 */
+		encrypt_block(file->buffer, write_buf, BLCKSZ, tweak);
+		write_ptr = write_buf;
 #else
 		elog(FATAL,
 			 "data encryption cannot be used because SSL is not supported by this build\n"
 			 "Compile with --with-openssl to use SSL connections.");
-#endif	/* USE_OPENSSL */
-	} else
-		writePtr = file->buffer;
-
+#endif /* USE_OPENSSL */
+	}
+	else
+		write_ptr = file->buffer;
 
 	/*
 	 * Unlike BufFileLoadBuffer, we must dump the whole buffer even if it
@@ -393,34 +477,232 @@ BufFileDumpBuffer(BufFile *file)
 	 */
 	while (wpos < file->nbytes)
 	{
-		int written;
 		/*
-		 * Enforce per-file size limit only for temp files, else just try to
-		 * write as much as asked...
-
-		bytestowrite = file->nbytes - wpos;
-		if (file->isTemp)
+		 * Advance to next component file if necessary and possible.
+		 */
+		if (file->curOffset >= MAX_PHYSICAL_FILESIZE && file->isTemp)
 		{
-			off_t		availbytes = ;
+			while (file->curFile + 1 >= file->numFiles)
+				extendBufFile(file);
+			file->curFile++;
+			file->curOffset = 0L;
+		}
 
-			if ((off_t) bytestowrite > availbytes)
-				bytestowrite = (int) availbytes;
-		}*/
+		if (!data_encrypted)
+		{
+			/*
+			 * Enforce per-file size limit only for temp files, else just try
+			 * to write as much as asked...
+			 */
+			bytestowrite = file->nbytes - wpos;
+			if (file->isTemp)
+			{
+				off_t		availbytes = MAX_PHYSICAL_FILESIZE - file->curOffset;
 
-		written = FileWrite(thisfile, writePtr + wpos, file->nbytes - wpos, WAIT_EVENT_BUFFILE_WRITE);
-		if (written<= 0)
+				if ((off_t) bytestowrite > availbytes)
+					bytestowrite = (int) availbytes;
+			}
+		}
+		else
+		{
+			/*
+			 * This condition plus the alignment of curOffset to BLCKSZ
+			 * (checked above) ensure that the encrypted buffer never crosses
+			 * component file boundary.
+			 */
+			StaticAssertStmt((MAX_PHYSICAL_FILESIZE % BLCKSZ) == 0,
+							 "BLCKSZ is not whole multiple of MAX_PHYSICAL_FILESIZE");
+
+			/*
+			 * Encrypted data is dumped all at once.
+			 *
+			 * Here we don't have to check availbytes because --- according to
+			 * the assertions above --- currOffset should be lower than
+			 * MAX_PHYSICAL_FILESIZE by non-zero multiple of BLCKSZ.
+			 */
+			bytestowrite = BLCKSZ;
+		}
+
+		/*
+		 * May need to reposition physical file.
+		 */
+		thisfile = file->files[file->curFile];
+
+		/*
+		 * If BufFileSeek() set the write position beyond the end of useful
+		 * data (within the current component file because BufFileSeek()
+		 * cannot increase curFile), we may need to encrypt a buffer of zeroes
+		 * and use the cipher text to fill the hole. If the OS filled it,
+		 * decryption would turn the zeroes into garbage.
+		 */
+		if (data_encrypted)
+		{
+			off_t	useful, firstEmptyOff;
+
+			useful = file->useful[file->curFile];
+
+			/*
+			 * MemSet(file->buffer, 0, BLCKSZ) elsewhere in the code ensures
+			 * that non-empty buffer has the trailing zeroes (if it's not
+			 * full) before it's dumped.
+			 */
+			firstEmptyOff = useful - useful % BLCKSZ + BLCKSZ;
+
+			if (firstEmptyOff < file->curOffset)
+			{
+				char		buffer[BLCKSZ];
+
+				MemSet(buffer, 0, BLCKSZ);
+
+				/*
+				 * The component file's write position might not be at the
+				 * end, so set it.
+				 */
+				if (firstEmptyOff != file->offsets[file->curFile])
+				{
+					if (FileSeek(thisfile, firstEmptyOff, SEEK_SET) !=
+						firstEmptyOff)
+						return;			/* seek failed, give up */
+
+					file->offsets[file->curFile] = firstEmptyOff;
+				}
+
+				for (; firstEmptyOff < file->curOffset;
+					 firstEmptyOff += BLCKSZ)
+				{
+					int	result;
+					char tweak[TWEAK_SIZE];
+					char buffer_encr[BLCKSZ];
+
+					/*
+					 * Although the buffer only contains zeroes, we need to
+					 * encrypt it again and again because the tweak is
+					 * different each time.
+					 */
+					BufFileTweak(tweak, file, file->curFile, firstEmptyOff);
+					encrypt_block(buffer, buffer_encr, BLCKSZ, tweak);
+
+					/*
+					 * Write the encrypted buffer.
+					 */
+					result = FileWrite(thisfile,
+									   buffer_encr,
+									   BLCKSZ,
+									   WAIT_EVENT_BUFFILE_WRITE);
+					if (result != BLCKSZ)
+						return;
+
+					pgBufferUsage.temp_blks_written++;
+				}
+
+				/*
+				 * firstEmptyOff is the first position we haven't touched.
+				 */
+				file->offsets[file->curFile] = firstEmptyOff;
+			}
+
+		}
+
+		if (file->curOffset != file->offsets[file->curFile])
+		{
+			if (FileSeek(thisfile, file->curOffset, SEEK_SET) != file->curOffset)
+				return;			/* seek failed, give up */
+
+			file->offsets[file->curFile] = file->curOffset;
+		}
+		bytestowrite = FileWrite(thisfile,
+								 write_ptr + wpos,
+								 bytestowrite,
+								 WAIT_EVENT_BUFFILE_WRITE);
+		if (bytestowrite <= 0 ||
+			(data_encrypted && bytestowrite != BLCKSZ))
 			return;				/* failed to write */
-		file->offsets[file->curFile] += written;
-		wpos += written;
+
+		file->offsets[file->curFile] += bytestowrite;
+		file->curOffset += bytestowrite;
+		pgBufferUsage.temp_blks_written++;
+
+		if (data_encrypted)
+		{
+			/*
+			 * Update the number of useful bytes if we ended up beyond the
+			 * current value. The new value is the previous offset plus the
+			 * number of bytes that we would have written if there was no
+			 * encryption.
+			 */
+			if (file->curOffset > file->useful[file->curFile])
+				file->useful[file->curFile] = file->curOffset - bytestowrite +
+					file->nbytes;
+
+			/*
+			 * Since encrypted buffer is written at once, we're done.
+			 */
+			break;
+		}
+
+		wpos += bytestowrite;
 	}
-	pgBufferUsage.temp_blks_written++;
 	file->dirty = false;
 
-	if (wpos == BLCKSZ && file->pos == BLCKSZ)
+	if (!data_encrypted)
 	{
-		file->curOffset += BLCKSZ;
+		/*
+		 * At this point, curOffset has been advanced to the end of the
+		 * buffer, ie, its original value + nbytes.  We need to make it point
+		 * to the logical file position, ie, original value + pos, in case
+		 * that is less (as could happen due to a small backwards seek in a
+		 * dirty buffer!)
+		 */
+		file->curOffset -= (file->nbytes - file->pos);
+		if (file->curOffset < 0)	/* handle possible segment crossing */
+		{
+			file->curFile--;
+			Assert(file->curFile >= 0);
+			file->curOffset += MAX_PHYSICAL_FILESIZE;
+		}
+
+		/*
+		 * Now we can set the buffer empty without changing the logical
+		 * position
+		 */
 		file->pos = 0;
 		file->nbytes = 0;
+	}
+	else
+	{
+		/*
+		 * curOffset should be at buffer boundary and buffer is the smallest
+		 * I/O unit for encrypted data.
+		 */
+		Assert(file->curOffset % BLCKSZ == 0);
+
+		if (file->pos >= BLCKSZ)
+		{
+			Assert(file->pos == BLCKSZ);
+
+			/*
+			 * curOffset points to the beginning of the next buffer, so just
+			 * reset pos and nbytes.
+			 */
+			file->pos = 0;
+			file->nbytes = 0;
+		}
+		else
+		{
+			/*
+			 * Move curOffset to the beginning of the just-written buffer and
+			 * preserve pos.
+			 */
+			file->curOffset -= BLCKSZ;
+
+			/*
+			 * At least pos bytes should be written even if the first change
+			 * since now appears at pos == nbytes, but in fact the whole
+			 * buffer will be written regardless pos. This is the price we pay
+			 * for the choosing BLCKSZ as the I/O unit for encrypted data.
+			 */
+			file->nbytes = BLCKSZ;
+		}
 	}
 }
 
@@ -446,13 +728,26 @@ BufFileRead(BufFile *file, void *ptr, size_t size)
 	{
 		if (file->pos >= file->nbytes)
 		{
+			/*
+			 * Neither read nor write nor seek should leave pos greater than
+			 * nbytes, regardless the data is encrypted or not.
+			 */
+			Assert(file->pos == file->nbytes);
+
+			/*
+			 * The Assert() above implies that pos is a whole multiple of
+			 * BLCKSZ, so curOffset has meet the same encryption-specific
+			 * requirement too.
+			 */
+			Assert(file->curOffset % BLCKSZ == 0 || !data_encrypted);
+
 			/* Try to load more data into buffer. */
-			int newpos = file->pos % BLCKSZ;
-			file->curOffset += file->pos - newpos;
-			file->pos = newpos;
+			file->curOffset += file->pos;
+			file->pos = 0;
 			file->nbytes = 0;
 			BufFileLoadBuffer(file);
-			if (file->nbytes <= file->pos)
+
+			if (file->nbytes <= 0)
 				break;			/* no more data available */
 		}
 
@@ -483,13 +778,6 @@ BufFileWrite(BufFile *file, void *ptr, size_t size)
 	size_t		nwritten = 0;
 	size_t		nthistime;
 
-	/* Need to load prefix when overwriting starting from the middle */
-	if (file->pos > file->nbytes)
-	{
-		Assert(file->dirty == false);
-		BufFileLoadBuffer(file);
-	}
-
 	while (size > 0)
 	{
 		if (file->pos >= BLCKSZ)
@@ -503,15 +791,28 @@ BufFileWrite(BufFile *file, void *ptr, size_t size)
 			}
 			else
 			{
-				/* Hmm, went directly from reading to writing? */
-				int newpos = file->pos % BLCKSZ;
-				file->curOffset += file->pos - newpos;
-				file->pos = newpos;
+				/*
+				 * Hmm, went directly from reading to writing?
+				 *
+				 * As pos should be exactly BLCKSZ, there is nothing special
+				 * to do about data_encrypted.
+				 */
+				Assert(file->pos == BLCKSZ);
+
+				file->curOffset += file->pos;
+				file->pos = 0;
 				file->nbytes = 0;
-				// XXX: is this possible?
-				if (newpos > 0)
-					BufFileLoadBuffer(file);
 			}
+
+			/*
+			 * If curOffset changed above, it should still meet the assumption
+			 * that buffer is the I/O unit for encrypted data.
+			 */
+			Assert(file->curOffset % BLCKSZ == 0 || !data_encrypted);
+
+			/* See makeBufFile() */
+			if (data_encrypted)
+				MemSet(file->buffer, 0, BLCKSZ);
 		}
 
 		nthistime = BLCKSZ - file->pos;
@@ -529,10 +830,6 @@ BufFileWrite(BufFile *file, void *ptr, size_t size)
 		size -= nthistime;
 		nwritten += nthistime;
 	}
-
-	if (file->curFile + 1 == file->numFiles &&
-		file->curOffset + file->nbytes > file->maxOffset)
-		file->maxOffset = file->curOffset + file->nbytes;
 
 	return nwritten;
 }
@@ -570,7 +867,6 @@ BufFileSeek(BufFile *file, int fileno, off_t offset, int whence)
 {
 	int			newFile;
 	off_t		newOffset;
-	int			newPos;
 
 	switch (whence)
 	{
@@ -578,8 +874,7 @@ BufFileSeek(BufFile *file, int fileno, off_t offset, int whence)
 			if (fileno < 0)
 				return EOF;
 			newFile = fileno;
-			newPos = offset % BLCKSZ;
-			newOffset = offset - newPos;
+			newOffset = offset;
 			break;
 		case SEEK_CUR:
 
@@ -590,8 +885,6 @@ BufFileSeek(BufFile *file, int fileno, off_t offset, int whence)
 			 */
 			newFile = file->curFile;
 			newOffset = (file->curOffset + file->pos) + offset;
-			newPos = newOffset % BLCKSZ;
-			newOffset -= newPos;
 			break;
 #ifdef NOT_USED
 		case SEEK_END:
@@ -609,7 +902,8 @@ BufFileSeek(BufFile *file, int fileno, off_t offset, int whence)
 		newOffset += MAX_PHYSICAL_FILESIZE;
 	}
 	if (newFile == file->curFile &&
-		newOffset == file->curOffset)
+		newOffset >= file->curOffset &&
+		newOffset <= file->curOffset + file->nbytes)
 	{
 		/*
 		 * Seek is to a point within existing buffer; we can just adjust
@@ -617,7 +911,7 @@ BufFileSeek(BufFile *file, int fileno, off_t offset, int whence)
 		 * whether reading or writing, but buffer remains dirty if we were
 		 * writing.
 		 */
-		file->pos = newPos;
+		file->pos = (int) (newOffset - file->curOffset);
 		return 0;
 	}
 	/* Otherwise, must reposition buffer, so flush any dirty data */
@@ -632,12 +926,12 @@ BufFileSeek(BufFile *file, int fileno, off_t offset, int whence)
 	if (file->isTemp)
 	{
 		/* convert seek to "start of next seg" to "end of last seg" */
-		if (newFile == file->numFiles && newOffset == 0 && newPos == 0)
+		if (newFile == file->numFiles && newOffset == 0)
 		{
 			newFile--;
 			newOffset = MAX_PHYSICAL_FILESIZE;
 		}
-		while (newOffset + newPos > MAX_PHYSICAL_FILESIZE)
+		while (newOffset > MAX_PHYSICAL_FILESIZE)
 		{
 			if (++newFile >= file->numFiles)
 				return EOF;
@@ -648,9 +942,43 @@ BufFileSeek(BufFile *file, int fileno, off_t offset, int whence)
 		return EOF;
 	/* Seek is OK! */
 	file->curFile = newFile;
-	file->curOffset = newOffset;
-	file->pos = newPos;
-	file->nbytes = 0;
+	if (!data_encrypted)
+	{
+		file->curOffset = newOffset;
+		file->pos = 0;
+		file->nbytes = 0;
+	}
+	else
+	{
+		/*
+		 * Offset of an encrypted buffer must be a multiple of BLCKSZ.
+		 */
+		file->pos = newOffset % BLCKSZ;
+		file->curOffset = newOffset - file->pos;
+
+		/*
+		 * BufFileLoadBuffer() will set nbytes iff it can read something.
+		 */
+		file->nbytes = 0;
+
+		/*
+		 * Load and decrypt the existing part of the buffer.
+		 */
+		BufFileLoadBuffer(file);
+		if (file->nbytes == 0)
+		{
+			/*
+			 * The data requested is not in the file yet but this is not an
+			 * error.
+			 */
+			return 0;
+		}
+
+		/*
+		 * The whole buffer should have been loaded.
+		 */
+		Assert(file->nbytes >= file->pos);
+	}
 	return 0;
 }
 
