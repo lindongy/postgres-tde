@@ -72,8 +72,6 @@ struct BufFile
 	 * used up or not. Therefore we need to keep track of the actual on-disk
 	 * size buffer of each component file, as it would be if there was no
 	 * encryption.
-	 *
-	 * TODO check that this field is only accessed if data_encrypted.
 	 */
 	off_t	*useful;
 #endif
