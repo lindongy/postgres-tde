@@ -738,13 +738,32 @@ BufFileRead(BufFile *file, void *ptr, size_t size)
 			Assert(file->curOffset % BLCKSZ == 0 || !data_encrypted);
 
 			/* Try to load more data into buffer. */
-			file->curOffset += file->pos;
-			file->pos = 0;
-			file->nbytes = 0;
-			BufFileLoadBuffer(file);
+			if (!data_encrypted || file->pos % BLCKSZ == 0)
+			{
+				file->curOffset += file->pos;
+				file->pos = 0;
+				file->nbytes = 0;
+				BufFileLoadBuffer(file);
+				if (file->nbytes <= 0)
+					break;			/* no more data available */
+			}
+			else
+			{
+				int	nbytes_orig = file->nbytes;
 
-			if (file->nbytes <= 0)
-				break;			/* no more data available */
+				/*
+				 * Given that ENCRYPTION_BLOCK is the I/O unit for encrypted
+				 * data (see comments in BufFileLoadBuffer()), we cannot add
+				 * pos to curOffset because that would make it point outside
+				 * block boundary. The only thing we can do is to reload the
+				 * whole buffer and see if more data is eventually there than
+				 * the previous load has fetched.
+				 */
+				BufFileLoadBuffer(file);
+				if (file->nbytes <= nbytes_orig)
+					break;		/* no more data available */
+			}
+
 		}
 
 		nthistime = file->nbytes - file->pos;
