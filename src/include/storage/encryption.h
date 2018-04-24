@@ -46,7 +46,15 @@
 #endif
 
 extern PGDLLIMPORT bool data_encrypted;
+
+#ifdef USE_OPENSSL
 extern PGDLLIMPORT char	*key_setup_command;
+
+extern char	*encryption_buffer;
+extern Size	encryption_buf_size;
+
+extern void enlarge_encryption_buffer(Size new_size);
+#endif
 
 /*
  * Should XLOG records be aligned to ENCRYPTION_BLOCK bytes?

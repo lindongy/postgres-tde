@@ -2472,6 +2472,7 @@ XLogWrite(XLogwrtRqst WriteRqst, bool flexible)
 				for (i = 0; i < npages; i++) {
 					char buf[XLOG_BLCKSZ];
 					char tweak[TWEAK_SIZE];
+
 					XLogEncryptionTweak(tweak, openLogSegNo, openLogOff);
 					encrypt_block(from, buf, XLOG_BLCKSZ, tweak);
 
@@ -5146,7 +5147,7 @@ BootStrapXLOG(void)
 		char tweak[TWEAK_SIZE];
 
 		XLogEncryptionTweak(tweak, 1, 0);
-		encrypt_block((char*)page, (char*)page, XLOG_BLCKSZ, tweak);
+		encrypt_block((char*) page, (char*) page, XLOG_BLCKSZ, tweak);
 #else
 		elog(FATAL,
 			 "data encryption cannot be used because SSL is not supported by this build\n"

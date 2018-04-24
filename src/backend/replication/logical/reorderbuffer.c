@@ -222,10 +222,6 @@ static void ReorderBufferToastAppendChunk(ReorderBuffer *rb, ReorderBufferTXN *t
  * ----------------------------------------------
  */
 
-#ifdef USE_OPENSSL
-static void ensure_encryption_buffer_size(ReorderBuffer *rb, Size size);
-#endif
-
 /*
  * Compute encryption tweak for buffer change.
  */
@@ -281,9 +277,6 @@ ReorderBufferAllocate(void)
 
 	buffer->outbuf = NULL;
 	buffer->outbufsize = 0;
-
-	buffer->encryption_buffer = NULL;
-	buffer->encryption_buffer_size = 0;
 
 	buffer->current_restart_decoding_lsn = InvalidXLogRecPtr;
 
@@ -2350,18 +2343,18 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 
 		REORDER_BUFFER_CHANGE_TWEAK(tweak, segno);
 
-		ensure_encryption_buffer_size(rb, ondisk->size);
+		enlarge_encryption_buffer(ondisk->size);
 
 		/*
 		 * Encrypt the header and the payload separate as explained at the top
 		 * of the function.
 		 */
-		encrypt_block((char*) rb->outbuf, rb->encryption_buffer, sz_hdr,
+		encrypt_block((char*) rb->outbuf, encryption_buffer, sz_hdr,
 					  tweak);
 
 		if (ondisk->size > sz_hdr)
 			encrypt_block((char*) rb->outbuf + sz_hdr,
-						  rb->encryption_buffer + sz_hdr,
+						  encryption_buffer + sz_hdr,
 						  ondisk->size - sz_hdr, tweak);
 #else
 		elog(FATAL,
@@ -2374,7 +2367,7 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 	 * Make sure the correct buffer is written to disk.
 	 */
 	if (data_encrypted)
-		outbuf = rb->encryption_buffer;
+		outbuf = encryption_buffer;
 	else
 		outbuf = rb->outbuf;
 
@@ -3446,32 +3439,5 @@ restart:
 	return true;
 }
 
-#ifdef USE_OPENSSL
-/*
- * Make sure there's enough space in the encryption buffer.
- */
-static void
-ensure_encryption_buffer_size(ReorderBuffer *rb, Size size)
-{
-	/*
-	 * Allocate the buffer if not allocated yet or reallocate if the current
-	 * size is not sufficient.
-	 */
-	if (rb->encryption_buffer == NULL)
-	{
-		Assert(rb->encryption_buffer_size == 0);
-
-		rb->encryption_buffer_size = size;
-		rb->encryption_buffer = MemoryContextAlloc(rb->context,
-												   rb->encryption_buffer_size);
-	}
-	else if (size > rb->encryption_buffer_size)
-	{
-		rb->encryption_buffer_size = size;
-		rb->encryption_buffer = repalloc(rb->encryption_buffer,
-										 rb->encryption_buffer_size);
-	}
-}
-#endif
 
 

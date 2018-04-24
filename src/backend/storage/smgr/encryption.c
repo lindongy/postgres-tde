@@ -57,6 +57,11 @@ bool data_encrypted = false;
 char	*key_setup_command = NULL;
 
 #ifdef USE_OPENSSL
+char	*encryption_buffer = NULL;
+Size	encryption_buf_size = 0;
+
+void enlarge_encryption_buffer(Size new_size);
+
 static bool initialized = false;
 
 static bool run_keysetup_command(uint8 *key);
@@ -86,16 +91,17 @@ sample_encryption(char *buf)
 }
 
 /*
- * Encrypts one block of data with a specified tweak value. Input and output
- * buffer may point to the same location. Size of input must be at least
- * ENCRYPTION_BLOCK bytes. Tweak value must be TWEAK_SIZE bytes.
+ * Encrypts one block of data with a specified tweak value. May only be called
+ * when encryption_enabled is true.
  *
- * All zero blocks are not encrypted or decrypted to correctly handle relation
+ * Input and output buffer may point to the same location.
+ *
+ * "size" must be a (non-zero) multiple of ENCRYPTION_BLOCK.
+ *
+ * "tweak" value must be TWEAK_SIZE bytes long.
+ *
+ * All-zero blocks are not encrypted or decrypted to correctly handle relation
  * extension.
- *
- * Must only be called when encryption_enabled is true.
- *
- * "size" must be a multiple of ENCRYPTION_BLOCK.
  */
 void
 encrypt_block(const char *input, char *output, Size size, const char *tweak)
@@ -104,11 +110,21 @@ encrypt_block(const char *input, char *output, Size size, const char *tweak)
 	Assert(size >= ENCRYPTION_BLOCK && size % ENCRYPTION_BLOCK == 0);
 	Assert(initialized);
 
-	if (IsAllZero(input, size))
+	/*
+	 * The EVP API does not seem to expect the output buffer to be equal to
+	 * the input. Ensure that we pass separate pointers.
+	 */
+	if (input == output)
 	{
-		if (input != output)
-			memset(output, 0, size);
+		if (size > encryption_buf_size)
+			enlarge_encryption_buffer(size);
+
+		memcpy(encryption_buffer, input, size);
+		input = encryption_buffer;
 	}
+
+	if (IsAllZero(input, size))
+		memset(output, 0, size);
 	else
 	{
 		int	out_size;
@@ -156,13 +172,17 @@ encrypt_block(const char *input, char *output, Size size, const char *tweak)
 }
 
 /*
- * Decrypts one block of data with a specified tweak value. Input and output
- * buffer may point to the same location. Tweak value must match the one used
- * when encrypting.
+ * Decrypts one block of data with a specified tweak value. May only be called
+ * when encryption_enabled is true.
  *
- * Must only be called when encryption_enabled is true.
+ * Input and output buffer may point to the same location.
  *
- * "size" must be a multiple of ENCRYPTION_BLOCK.
+ * "size" must be a (non-zero) multiple of ENCRYPTION_BLOCK.
+ *
+ * "tweak" value must be TWEAK_SIZE bytes long.
+ *
+ * All-zero blocks are not encrypted or decrypted to correctly handle relation
+ * extension.
  */
 void
 decrypt_block(const char *input, char *output, Size size, const char *tweak)
@@ -171,11 +191,21 @@ decrypt_block(const char *input, char *output, Size size, const char *tweak)
 	Assert(size >= ENCRYPTION_BLOCK && size % ENCRYPTION_BLOCK == 0);
 	Assert(initialized);
 
-	if (IsAllZero(input, size))
+	/*
+	 * The EVP API does not seem to expect the output buffer to be equal to
+	 * the input. Ensure that we pass separate pointers.
+	 */
+	if (input == output)
 	{
-		if (input != output)
-			memset(output, 0, size);
+		if (size > encryption_buf_size)
+			enlarge_encryption_buffer(size);
+
+		memcpy(encryption_buffer, input, size);
+		input = encryption_buffer;
 	}
+
+	if (IsAllZero(input, size))
+		memset(output, 0, size);
 	else
 	{
 		int	out_size;
@@ -294,6 +324,28 @@ setup_encryption()
 }
 
 #ifdef USE_OPENSSL
+void
+enlarge_encryption_buffer(Size new_size)
+{
+	Assert(new_size > 0);
+
+	/*
+	 * Shrinkage is not the use case for this routine.
+	 */
+	if (new_size <= encryption_buf_size)
+		return;
+
+	/*
+	 * Allocate a new chunk if nothing is there yet, else reallocate the
+	 * existing one.
+	 */
+	if (encryption_buf_size == 0)
+		encryption_buffer = (char *) palloc(new_size);
+	else
+		encryption_buffer = (char *) repalloc(encryption_buffer, new_size);
+	encryption_buf_size = new_size;
+}
+
 static bool
 run_keysetup_command(uint8 *key)
 {

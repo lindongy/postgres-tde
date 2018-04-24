@@ -115,6 +115,10 @@ typedef struct _MdfdVec
 
 static MemoryContext MdCxt;		/* context for all MdfdVec objects */
 #ifdef USE_OPENSSL
+/*
+ * encryption_buffer from encryption.h is not used here because of the special
+ * memory context.
+ */
 static char *md_encryption_buffer;
 static char *md_encryption_tweak;
 #endif

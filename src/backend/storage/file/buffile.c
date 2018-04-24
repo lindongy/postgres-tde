@@ -369,7 +369,6 @@ BufFileLoadBuffer(BufFile *file)
 	if (data_encrypted && file->nbytes > 0)
 	{
 #ifdef USE_OPENSSL
-		char decrypt_buf[BLCKSZ];
 		char tweak[TWEAK_SIZE];
 		int	nbytes = file->nbytes;
 		off_t	new_offset = file->offsets[file->curFile];
@@ -381,14 +380,13 @@ BufFileLoadBuffer(BufFile *file)
 		 */
 		Assert(nbytes % BLCKSZ == 0);
 
-		memcpy(decrypt_buf, file->buffer, nbytes);
 		BufFileTweak(tweak, file, file->curFile, file->curOffset);
 
 		/*
 		 * The whole block is encrypted / decrypted at once as explained
 		 * above.
 		 */
-		decrypt_block(decrypt_buf, file->buffer, BLCKSZ, tweak);
+		decrypt_block(file->buffer, file->buffer, BLCKSZ, tweak);
 
 		/*
 		 * The buffer we've just read may be the last one of this component
@@ -420,9 +418,6 @@ BufFileDumpBuffer(BufFile *file)
 	int			bytestowrite;
 	File		thisfile;
 	char		*write_ptr;
-#ifdef USE_OPENSSL
-	char        write_buf[BLCKSZ];
-#endif
 
 	/*
 	 * See comments in BufFileLoadBuffer();
@@ -458,8 +453,10 @@ BufFileDumpBuffer(BufFile *file)
 		 * explanation why we must stick on the unit of data amount encrypted
 		 * / decrypted.
 		 */
-		encrypt_block(file->buffer, write_buf, BLCKSZ, tweak);
-		write_ptr = write_buf;
+		if (encryption_buf_size < BLCKSZ)
+			enlarge_encryption_buffer(BLCKSZ);
+		encrypt_block(file->buffer, encryption_buffer, BLCKSZ, tweak);
+		write_ptr = encryption_buffer;
 #else
 		elog(FATAL,
 			 "data encryption cannot be used because SSL is not supported by this build\n"
@@ -570,7 +567,6 @@ BufFileDumpBuffer(BufFile *file)
 				{
 					int	result;
 					char tweak[TWEAK_SIZE];
-					char buffer_encr[BLCKSZ];
 
 					/*
 					 * Although the buffer only contains zeroes, we need to
@@ -578,13 +574,15 @@ BufFileDumpBuffer(BufFile *file)
 					 * different each time.
 					 */
 					BufFileTweak(tweak, file, file->curFile, firstEmptyOff);
-					encrypt_block(buffer, buffer_encr, BLCKSZ, tweak);
+					if (encryption_buf_size < BLCKSZ)
+						enlarge_encryption_buffer(BLCKSZ);
+					encrypt_block(buffer, encryption_buffer, BLCKSZ, tweak);
 
 					/*
 					 * Write the encrypted buffer.
 					 */
 					result = FileWrite(thisfile,
-									   buffer_encr,
+									   encryption_buffer,
 									   BLCKSZ,
 									   WAIT_EVENT_BUFFILE_WRITE);
 					if (result != BLCKSZ)
