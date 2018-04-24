@@ -21,10 +21,6 @@
 /*
  * EVP_aes_256_xts() determines the following constants.
  *
- * Note: if the encryption algorithm changes and ENCRYPTION_BLOCK gets greater
- * than MAXALIGN, make sure that the alignment of XLOG records is at least
- * ENCRYPTION_BLOCK.
- *
  * If one XLOG record ended and the following one started in the same block,
  * we'd have to either encrypt and decrypt both records together, or encrypt
  * (after having zeroed the part of the block occupied by the other record)
@@ -37,6 +33,15 @@
  * applied when storing changes to disk in reorderbuffer.c.
  */
 #define ENCRYPTION_BLOCK 16
+
+/*
+ * The openssl EVP API refers to a block in terms of padding of the output
+ * chunk. That's the purpose of this constant. However the openssl
+ * implementation of AES XTS still uses the 16-byte block internally, as
+ * defined by ENCRYPTION_BLOCK.
+ */
+#define ENCRYPTION_BLOCK_OPENSSL 1
+
 #define TWEAK_SIZE 16
 #endif
 

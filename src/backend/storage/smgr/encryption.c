@@ -123,11 +123,11 @@ encrypt_block(const char *input, char *output, Size size, const char *tweak)
 
 		/*
 		 * No padding is needed, the input block size should already be a
-		 * multiple of ENCRYPTION_BLOCK.
+		 * multiple of ENCRYPTION_BLOCK_OPENSSL.
 		 */
 		EVP_CIPHER_CTX_set_padding(ctx, 0);
 
-		Assert(EVP_CIPHER_CTX_block_size(ctx) == ENCRYPTION_BLOCK);
+		Assert(EVP_CIPHER_CTX_block_size(ctx) == ENCRYPTION_BLOCK_OPENSSL);
 		Assert(EVP_CIPHER_CTX_iv_length(ctx) == TWEAK_SIZE);
 		Assert(EVP_CIPHER_CTX_key_length(ctx) == ENCRYPTION_KEY_LENGTH);
 
@@ -140,8 +140,8 @@ encrypt_block(const char *input, char *output, Size size, const char *tweak)
 			evp_error();
 
 		/*
-		 * The input size is a multiple of ENCRYPTION_BLOCK, so the output of
-		 * AES-XTS should meet this condition.
+		 * The input size is a multiple of ENCRYPTION_BLOCK_OPENSSL, so the
+		 * output of AES-XTS should meet this condition.
 		 */
 		Assert(out_size == size);
 
@@ -190,7 +190,7 @@ decrypt_block(const char *input, char *output, Size size, const char *tweak)
 
 		/* The same considerations apply below as those in encrypt_block(). */
 		EVP_CIPHER_CTX_set_padding(ctx, 0);
-		Assert(EVP_CIPHER_CTX_block_size(ctx) == ENCRYPTION_BLOCK);
+		Assert(EVP_CIPHER_CTX_block_size(ctx) == ENCRYPTION_BLOCK_OPENSSL);
 		Assert(EVP_CIPHER_CTX_iv_length(ctx) == TWEAK_SIZE);
 		Assert(EVP_CIPHER_CTX_key_length(ctx) == ENCRYPTION_KEY_LENGTH);
 
