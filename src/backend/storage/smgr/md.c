@@ -2053,8 +2053,9 @@ ReencryptBlock(char *buffer, int blocks,
 		BlockNumber blockNum)
 {
 	char *cur;
-	char srcTweak[16];
-	char dstTweak[16];
+	char srcTweak[TWEAK_SIZE];
+	char dstTweak[TWEAK_SIZE];
+
 	for (cur = buffer; cur < buffer + blocks * BLCKSZ; cur += BLCKSZ)
 	{
 		mdtweak(srcTweak, srcNode, srcForkNum, blockNum);
