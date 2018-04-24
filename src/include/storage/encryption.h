@@ -101,12 +101,6 @@ extern void decrypt_block(const char *input, char *output, Size size,
 extern void encryption_error(bool fatal, char *message);
 #endif
 
-typedef bool (*SetupEncryption_function) ();
-typedef void (*EncryptBlock_function) (const char *input, char *output,
-		Size size, const char *tweak);
-typedef void (*DecryptBlock_function) (const char *input, char *output,
-		Size size, const char *tweak);
-
 extern void XLogEncryptionTweak(char *tweak, XLogSegNo segment,
 								uint32 offset);
 
