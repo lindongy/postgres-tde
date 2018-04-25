@@ -376,8 +376,6 @@ BufFileLoadBuffer(BufFile *file)
 #ifdef USE_OPENSSL
 		char tweak[TWEAK_SIZE];
 		int	nbytes = file->nbytes;
-		off_t	new_offset = file->offsets[file->curFile];
-		off_t	useful = file->useful[file->curFile];
 
 		/*
 		 * The encrypted component file can only consist of whole number of
@@ -392,14 +390,6 @@ BufFileLoadBuffer(BufFile *file)
 		 * above.
 		 */
 		decrypt_block(file->buffer, file->buffer, BLCKSZ, tweak);
-
-		/*
-		 * The buffer we've just read may be the last one of this component
-		 * file and thus it may contain padding bytes that reader should
-		 * ignore.
-		 */
-		if (useful < new_offset)
-			file->nbytes -= new_offset - useful;
 
 #ifdef	USE_ASSERT_CHECKING
 		/*
@@ -571,24 +561,6 @@ BufFileDumpBuffer(BufFile *file)
 		file->curOffset += bytestowrite;
 		pgBufferUsage.temp_blks_written++;
 
-		if (data_encrypted)
-		{
-			/*
-			 * Update the number of useful bytes if we ended up beyond the
-			 * current value. The new value is the previous offset plus the
-			 * number of bytes that we would have written if there was no
-			 * encryption.
-			 */
-			if (file->curOffset > file->useful[file->curFile])
-				file->useful[file->curFile] = file->curOffset - bytestowrite +
-					file->nbytes;
-
-			/*
-			 * Since encrypted buffer is written at once, we're done.
-			 */
-			break;
-		}
-
 		wpos += bytestowrite;
 	}
 	file->dirty = false;
@@ -675,13 +647,15 @@ BufFileRead(BufFile *file, void *ptr, size_t size)
 
 	while (size > 0)
 	{
+		int	avail;
+
 		if (file->pos >= file->nbytes)
 		{
 			/*
 			 * Neither read nor write nor seek should leave pos greater than
 			 * nbytes, regardless the data is encrypted or not.
 			 */
-			Assert(file->pos == file->nbytes);
+			Assert(file->pos == file->nbytes || file->nbytes == 0);
 
 			/*
 			 * The Assert() above implies that pos is a whole multiple of
@@ -716,10 +690,49 @@ BufFileRead(BufFile *file, void *ptr, size_t size)
 				if (file->nbytes <= nbytes_orig)
 					break;		/* no more data available */
 			}
-
 		}
 
-		nthistime = file->nbytes - file->pos;
+		avail = file->nbytes;
+		nthistime = avail - file->pos;
+
+		/*
+		 * The buffer can contain trailing zeroes because BLCKSZ is the I/O
+		 * unit for encrypted data. These are not available for reading.
+		 */
+		if (data_encrypted)
+		{
+#ifdef USE_OPENSSL
+			off_t	useful = file->useful[file->curFile];
+
+			/*
+			 * The criterion is whether the useful data end within the
+			 * currently loaded buffer.
+			 */
+			if (useful < file->curOffset + BLCKSZ)
+			{
+				/*
+				 * Compute the number of bytes available in the current
+				 * buffer.
+				 */
+				avail = useful - file->curOffset;
+				Assert(avail >= 0);
+
+				nthistime = avail - file->pos;
+				Assert(nthistime >= 0);
+
+				/*
+				 * Have we reached the end of the valid data?
+				 */
+				if (nthistime == 0)
+					break;
+			}
+#else
+		elog(FATAL,
+			 "data encryption cannot be used because SSL is not supported by this build\n"
+			 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
+		}
+
 		if (nthistime > size)
 			nthistime = size;
 		Assert(nthistime > 0);
@@ -794,6 +807,26 @@ BufFileWrite(BufFile *file, void *ptr, size_t size)
 		file->pos += nthistime;
 		if (file->nbytes < file->pos)
 			file->nbytes = file->pos;
+
+		if (data_encrypted)
+		{
+#ifdef USE_OPENSSL
+			off_t	new_offset  = file->curOffset + file->pos;
+
+			/*
+			 * Adjust the number of useful bytes in the file if needed. This
+			 * has to happen immediately, independent from
+			 * BufFileDumpBuffer().
+			 */
+			if (new_offset > file->useful[file->curFile])
+				file->useful[file->curFile] = new_offset;
+#else
+			elog(FATAL,
+				 "data encryption cannot be used because SSL is not supported by this build\n"
+				 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
+		}
+
 		ptr = (void *) ((char *) ptr + nthistime);
 		size -= nthistime;
 		nwritten += nthistime;
