@@ -136,11 +136,14 @@ makeBufFile(File firstfile)
 	if (data_encrypted)
 	{
 		/*
-		 * Seek past the end of the file and consequent write leads to hole in
-		 * the file which is filled by zeroes. If the data is encrypted, we
-		 * cannot rely on the zeroes created by the OS because these become
-		 * garbage after decryption. Instead, make sure that the unused part
-		 * of the buffer is always zeroed in *before* the encryption.
+		 * The unused (trailing) part of the buffer should not contain
+		 * undefined data: if we encrypt such a buffer and flush it to disk,
+		 * the encrypted form of that "undefined part" can get zeroed due to
+		 * seek and write beyond EOF. If such a buffer gets loaded and
+		 * decrypted, the change of the undefined part to zeroes can affect
+		 * the valid part if it does not end at block boundary. By setting the
+		 * whole buffer to zeroes we ensure that the unused part always
+		 * contains zeroes.
 		 */
 		MemSet(file->buffer, 0, BLCKSZ);
 	}
@@ -327,10 +330,12 @@ BufFileLoadBuffer(BufFile *file)
 	 * See makeBufFile().
 	 *
 	 * Actually here we only handle the case of FileRead() returning zero
-	 * below. In contrast, if the buffer contains any data and it's not full,
-	 * it should already have the trailing zeroes on the disk. And as the
-	 * encrypted buffer is loaded in its entirety, the zeroes should
-	 * eventually appear in memory.
+	 * bytes below. In contrast, if the buffer contains any data but it's not
+	 * full, it should already have the trailing zeroes (encrypted) on
+	 * disk. And as the encrypted buffer is always loaded in its entirety
+	 * (i.e. EOF should only appear at buffer boundary if the data is
+	 * encrypted), all unused bytes of the buffer should eventually be zeroes
+	 * after the decryption.
 	 */
 	if (data_encrypted)
 		MemSet(file->buffer, 0, BLCKSZ);
@@ -395,6 +400,20 @@ BufFileLoadBuffer(BufFile *file)
 		 */
 		if (useful < new_offset)
 			file->nbytes -= new_offset - useful;
+
+#ifdef	USE_ASSERT_CHECKING
+		/*
+		 * The unused part of the buffer which we've read from disk and
+		 * decrypted should only contain zeroes, as explained in front of the
+		 * MemSet() call.
+		 */
+		{
+			int	i;
+
+			for (i = file->nbytes; i < BLCKSZ; i++)
+				Assert(file->buffer[i] == 0);
+		}
+#endif	/* USE_ASSERT_CHECKING */
 #else
 		elog(FATAL,
 			 "data encryption cannot be used because SSL is not supported by this build\n"
@@ -524,81 +543,15 @@ BufFileDumpBuffer(BufFile *file)
 		thisfile = file->files[file->curFile];
 
 		/*
-		 * If BufFileSeek() set the write position beyond the end of useful
-		 * data (within the current component file because BufFileSeek()
-		 * cannot increase curFile), we may need to encrypt a buffer of zeroes
-		 * and use the cipher text to fill the hole. If the OS filled it,
-		 * decryption would turn the zeroes into garbage.
+		 * Note: if the current offset is beyond EOF, the following write will
+		 * result in a hole that will be filled with zeroes. For non-empty
+		 * buffers we handle this by MemSet(file->buffer, 0, BLCKSZ)
+		 * elsewhere, however we do not have to care about buffers fully
+		 * contained in the hole: neither encrypt_block() nor decrypt_block()
+		 * tries to process a chunk that only contains zeroes. Thus the zeroes
+		 * constituting the hole should appear in the buffer as soon as it's
+		 * loaded from disk.
 		 */
-		if (data_encrypted)
-		{
-			off_t	useful, firstEmptyOff;
-
-			useful = file->useful[file->curFile];
-
-			/*
-			 * MemSet(file->buffer, 0, BLCKSZ) elsewhere in the code ensures
-			 * that non-empty buffer has the trailing zeroes (if it's not
-			 * full) before it's dumped.
-			 */
-			firstEmptyOff = useful - useful % BLCKSZ + BLCKSZ;
-
-			if (firstEmptyOff < file->curOffset)
-			{
-				char		buffer[BLCKSZ];
-
-				MemSet(buffer, 0, BLCKSZ);
-
-				/*
-				 * The component file's write position might not be at the
-				 * end, so set it.
-				 */
-				if (firstEmptyOff != file->offsets[file->curFile])
-				{
-					if (FileSeek(thisfile, firstEmptyOff, SEEK_SET) !=
-						firstEmptyOff)
-						return;			/* seek failed, give up */
-
-					file->offsets[file->curFile] = firstEmptyOff;
-				}
-
-				for (; firstEmptyOff < file->curOffset;
-					 firstEmptyOff += BLCKSZ)
-				{
-					int	result;
-					char tweak[TWEAK_SIZE];
-
-					/*
-					 * Although the buffer only contains zeroes, we need to
-					 * encrypt it again and again because the tweak is
-					 * different each time.
-					 */
-					BufFileTweak(tweak, file, file->curFile, firstEmptyOff);
-					if (encryption_buf_size < BLCKSZ)
-						enlarge_encryption_buffer(BLCKSZ);
-					encrypt_block(buffer, encryption_buffer, BLCKSZ, tweak);
-
-					/*
-					 * Write the encrypted buffer.
-					 */
-					result = FileWrite(thisfile,
-									   encryption_buffer,
-									   BLCKSZ,
-									   WAIT_EVENT_BUFFILE_WRITE);
-					if (result != BLCKSZ)
-						return;
-
-					pgBufferUsage.temp_blks_written++;
-				}
-
-				/*
-				 * firstEmptyOff is the first position we haven't touched.
-				 */
-				file->offsets[file->curFile] = firstEmptyOff;
-			}
-
-		}
-
 		if (file->curOffset != file->offsets[file->curFile])
 		{
 			if (FileSeek(thisfile, file->curOffset, SEEK_SET) != file->curOffset)

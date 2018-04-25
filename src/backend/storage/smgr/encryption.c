@@ -100,8 +100,9 @@ sample_encryption(char *buf)
  *
  * "tweak" value must be TWEAK_SIZE bytes long.
  *
- * All-zero blocks are not encrypted or decrypted to correctly handle relation
- * extension.
+ * All-zero blocks are not encrypted to correctly handle relation extension,
+ * and also to simplify handling of holes created by seek past EOF and
+ * consequent write (see buffile.c).
  */
 void
 encrypt_block(const char *input, char *output, Size size, const char *tweak)
@@ -181,8 +182,9 @@ encrypt_block(const char *input, char *output, Size size, const char *tweak)
  *
  * "tweak" value must be TWEAK_SIZE bytes long.
  *
- * All-zero blocks are not encrypted or decrypted to correctly handle relation
- * extension.
+ * All-zero blocks are not decrypted to correctly handle relation extension,
+ * and also to simplify handling of holes created by seek past EOF and
+ * consequent write (see buffile.c).
  */
 void
 decrypt_block(const char *input, char *output, Size size, const char *tweak)
