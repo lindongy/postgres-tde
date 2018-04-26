@@ -72,8 +72,17 @@ struct BufFile
 	 * used up or not. Therefore we need to keep track of the actual on-disk
 	 * size buffer of each component file, as it would be if there was no
 	 * encryption.
+	 *
+	 * List would make coding simpler, however would not contribute to
+	 * performance. Random access is important here.
 	 */
 	off_t	*useful;
+
+	/*
+	 * The array may need to be expanded independent from extendBufFile(), so
+	 * store the number of elements here.
+	 */
+	int		nuseful;
 #endif
 
 	/*
@@ -113,6 +122,7 @@ static void BufFileDumpBuffer(BufFile *file);
 static int	BufFileFlush(BufFile *file);
 #ifdef USE_OPENSSL
 static void BufFileTweak(char *tweak, BufFile *file, int curFile, off_t offset);
+static void ensureBufFileUsefulArraySize(BufFile *file, int required);
 #endif
 
 /*
@@ -132,6 +142,7 @@ makeBufFile(File firstfile)
 #ifdef USE_OPENSSL
 	file->useful = (off_t *) palloc(sizeof(off_t));
 	file->useful[0] = 0L;
+	file->nuseful = 1;
 
 	if (data_encrypted)
 	{
@@ -184,14 +195,10 @@ extendBufFile(BufFile *file)
 	file->offsets = (off_t *) repalloc(file->offsets,
 									   (file->numFiles + 1) * sizeof(off_t));
 #ifdef USE_OPENSSL
-	file->useful = (off_t *) repalloc(file->useful,
-									  (file->numFiles + 1) * sizeof(off_t));
+	ensureBufFileUsefulArraySize(file, file->numFiles + 1);
 #endif
 	file->files[file->numFiles] = pfile;
 	file->offsets[file->numFiles] = 0L;
-#ifdef USE_OPENSSL
-	file->useful[file->numFiles] = 0L;
-#endif
 	file->numFiles++;
 }
 
@@ -607,6 +614,10 @@ BufFileDumpBuffer(BufFile *file)
 			 */
 			file->pos = 0;
 			file->nbytes = 0;
+
+			/* See makeBufFile() */
+			if (data_encrypted)
+				MemSet(file->buffer, 0, BLCKSZ);
 		}
 		else
 		{
@@ -717,6 +728,21 @@ BufFileRead(BufFile *file, void *ptr, size_t size)
 				avail = useful - file->curOffset;
 				Assert(avail >= 0);
 
+				/*
+				 * An empty buffer can exist, e.g. after a seek to the end of
+				 * the last component file.
+				 */
+				if (avail == 0)
+					break;
+
+				/*
+				 * Seek beyond the current EOF, which was not followed by
+				 * write, could have resulted in position outside the useful
+				 * data
+				 */
+				if (file->pos > avail)
+					break;
+
 				nthistime = avail - file->pos;
 				Assert(nthistime >= 0);
 
@@ -776,13 +802,17 @@ BufFileWrite(BufFile *file, void *ptr, size_t size)
 				 * Hmm, went directly from reading to writing?
 				 *
 				 * As pos should be exactly BLCKSZ, there is nothing special
-				 * to do about data_encrypted.
+				 * to do about data_encrypted. Except for zeroing the buffer.
 				 */
 				Assert(file->pos == BLCKSZ);
 
 				file->curOffset += file->pos;
 				file->pos = 0;
 				file->nbytes = 0;
+
+				/* See makeBufFile() */
+				if (data_encrypted)
+					MemSet(file->buffer, 0, BLCKSZ);
 			}
 
 			/*
@@ -790,10 +820,6 @@ BufFileWrite(BufFile *file, void *ptr, size_t size)
 			 * that buffer is the I/O unit for encrypted data.
 			 */
 			Assert(file->curOffset % BLCKSZ == 0 || !data_encrypted);
-
-			/* See makeBufFile() */
-			if (data_encrypted)
-				MemSet(file->buffer, 0, BLCKSZ);
 		}
 
 		nthistime = BLCKSZ - file->pos;
@@ -811,15 +837,45 @@ BufFileWrite(BufFile *file, void *ptr, size_t size)
 		if (data_encrypted)
 		{
 #ifdef USE_OPENSSL
-			off_t	new_offset  = file->curOffset + file->pos;
+			off_t	new_offset;
+			int		fileno;
+
+			/*
+			 * curFile does not necessarily correspond to the offset: it can
+			 * still have the initial value if BufFileSeek() skipped the first
+			 * previous file w/o dumping anything of it. Therefore we must
+			 * compute the correct fileno here.
+			 */
+			fileno = file->curOffset / MAX_PHYSICAL_FILESIZE;
+
+			/*
+			 * fileno can point to a segment that does not exist on disk yet.
+			 */
+			ensureBufFileUsefulArraySize(file, fileno + 1);
+
+			/*
+			 * Update the offset of the underlying component file if we've
+			 * added any useful data.
+			 */
+			new_offset  = file->curOffset + file->pos;
+
+			/*
+			 * Make sure the offset is relative to the correct component
+			 * file. BufFileDumpBuffer() should have adjusted that during
+			 * sequential write, but if we've just used BufFileSeek() to jump
+			 * to segment boundary w/o writing, the value is relative to the
+			 * start of the *previous* segment.
+			 */
+			if (file->curOffset % MAX_PHYSICAL_FILESIZE == 0)
+				new_offset %= MAX_PHYSICAL_FILESIZE;
 
 			/*
 			 * Adjust the number of useful bytes in the file if needed. This
 			 * has to happen immediately, independent from
 			 * BufFileDumpBuffer().
 			 */
-			if (new_offset > file->useful[file->curFile])
-				file->useful[file->curFile] = new_offset;
+			if (new_offset > file->useful[fileno])
+				file->useful[fileno] = new_offset;
 #else
 			elog(FATAL,
 				 "data encryption cannot be used because SSL is not supported by this build\n"
@@ -969,7 +1025,7 @@ BufFileSeek(BufFile *file, int fileno, off_t offset, int whence)
 		if (file->nbytes == 0)
 		{
 			/*
-			 * The data requested is not in the file yet but this is not an
+			 * The data requested is not in the file, but this is not an
 			 * error.
 			 */
 			return 0;
@@ -978,7 +1034,7 @@ BufFileSeek(BufFile *file, int fileno, off_t offset, int whence)
 		/*
 		 * The whole buffer should have been loaded.
 		 */
-		Assert(file->nbytes >= file->pos);
+		Assert(file->nbytes == BLCKSZ);
 	}
 	return 0;
 }
@@ -1017,6 +1073,29 @@ BufFileTweak(char *tweak, BufFile *file, int curFile, off_t offset)
 	off_t block = (curFile * (MAX_PHYSICAL_FILESIZE/BLCKSZ)) + offset/BLCKSZ;
 	memcpy(tweak, file->tweakBase, TWEAK_SIZE);
 	*((off_t*) tweak) = *((off_t*) tweak) ^ block;
+}
+
+/*
+ * Extend that BufFile.useful array has the required size.
+ */
+static void
+ensureBufFileUsefulArraySize(BufFile *file, int required)
+{
+	/*
+	 * Does the array already have enough space?
+	 */
+	if (required <= file->nuseful)
+		return;
+
+	/*
+	 * It shouldn't be possible to jump beyond the end of the last segment,
+	 * i.e. skip more than 1 segment.
+	 */
+	Assert(file->nuseful + 1 == required);
+
+	file->useful = (off_t *) repalloc(file->useful, required * sizeof(off_t));
+	file->useful[file->nuseful] = 0L;
+	file->nuseful++;
 }
 #endif
 
