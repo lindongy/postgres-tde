@@ -35,6 +35,7 @@
 #include "catalog/pg_control.h"
 #include "storage/bufpage.h"
 #include "storage/encryption.h"
+#include "utils/memutils.h"
 #include "miscadmin.h"
 #include "fmgr.h"
 #include "port.h"
@@ -342,7 +343,12 @@ enlarge_encryption_buffer(Size new_size)
 	 * existing one.
 	 */
 	if (encryption_buf_size == 0)
+#ifndef FRONTEND
+		encryption_buffer = (char *) MemoryContextAlloc(TopMemoryContext,
+														new_size);
+#else
 		encryption_buffer = (char *) palloc(new_size);
+#endif	/* FRONTEND */
 	else
 		encryption_buffer = (char *) repalloc(encryption_buffer, new_size);
 	encryption_buf_size = new_size;
