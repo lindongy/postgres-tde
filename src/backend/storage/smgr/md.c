@@ -2023,8 +2023,9 @@ static void
 mdtweak(char *tweak, RelFileNode *relnode, ForkNumber forknum, BlockNumber blocknum)
 {
 	uint32 fork_and_block = (forknum << 24) ^ blocknum;
-	memcpy(tweak, relnode, 12);
-	memcpy(tweak+12, &fork_and_block, 4);
+
+	memcpy(tweak, relnode, sizeof(RelFileNode));
+	memcpy(tweak + sizeof(RelFileNode), &fork_and_block, 4);
 }
 
 static void
