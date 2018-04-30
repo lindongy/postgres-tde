@@ -344,6 +344,14 @@ XLogDumpReadPage(XLogReaderState *state, XLogRecPtr targetPagePtr, int reqLen,
 	XLogDumpPrivate *private = state->private_data;
 	int			count = XLOG_BLCKSZ;
 
+	/*
+	 * Make sure that we only return data that can be decrypted in a sensible
+	 * way. If the valid data ended in the middle of encryption block, then
+	 * decryption of that last block would turn the contained data into
+	 * garbage.
+	 */
+	Assert(count == XLOG_REC_ALIGN(count));
+
 	if (private->endptr != InvalidXLogRecPtr)
 	{
 		if (targetPagePtr + XLOG_BLCKSZ <= private->endptr)
@@ -356,9 +364,6 @@ XLogDumpReadPage(XLogReaderState *state, XLogRecPtr targetPagePtr, int reqLen,
 			return -1;
 		}
 	}
-
-	if (data_encrypted)
-		count = XLOG_REC_ALIGN(count);
 
 	XLogDumpXLogRead(private->inpath, private->timeline, targetPagePtr,
 					 readBuff, count);
