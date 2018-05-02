@@ -679,7 +679,6 @@ XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
 	nbytes = count;
 #ifdef USE_OPENSSL
 	decrypt_p = p = buf;
-	decryptOff = startptr % XLogSegSize;
 #endif
 
 	while (nbytes > 0)
@@ -689,6 +688,9 @@ XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
 		int			readbytes;
 
 		startoff = recptr % XLogSegSize;
+#ifdef USE_OPENSSL
+		decryptOff = startoff;
+#endif
 
 		/* Do we need to switch to a different xlog segment? */
 		if (sendFile < 0 || !XLByteInSeg(recptr, sendSegNo) ||
@@ -774,6 +776,7 @@ XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
 			while (decrypt_p + XLOG_BLCKSZ <= p)
 			{
 				char tweak[TWEAK_SIZE];
+
 				XLogEncryptionTweak(tweak, sendSegNo, decryptOff);
 				decrypt_block(decrypt_p, decrypt_p, XLOG_BLCKSZ, tweak);
 
