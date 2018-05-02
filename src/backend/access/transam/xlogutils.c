@@ -940,15 +940,6 @@ read_local_xlog_page(XLogReaderState *state, XLogRecPtr targetPagePtr,
 				loc;
 	int			count;
 
-	/*
-	 * Make sure that we only return data that can be decrypted in a sensible
-	 * way. If the valid data ended in the middle of encryption block, then
-	 * decryption of that last block would turn the contained data into
-	 * garbage.
-	 */
-	if (data_encrypted)
-		reqLen = XLOG_REC_ALIGN(reqLen);
-
 	loc = targetPagePtr + reqLen;
 
 	/* Loop waiting for xlog to be available if necessary */

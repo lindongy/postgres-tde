@@ -11590,15 +11590,6 @@ XLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen,
 	uint32		targetPageOff;
 	XLogSegNo	targetSegNo PG_USED_FOR_ASSERTS_ONLY;
 
-	/*
-	 * Make sure that we only return data that can be decrypted in a sensible
-	 * way. If the valid data ended in the middle of encryption block, then
-	 * decryption of that last block would turn the contained data into
-	 * garbage.
-	 */
-	if (data_encrypted)
-		reqLen = XLOG_REC_ALIGN(reqLen);
-
 	XLByteToSeg(targetPagePtr, targetSegNo);
 	targetPageOff = targetPagePtr % XLogSegSize;
 

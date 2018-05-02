@@ -77,7 +77,6 @@
 #include "replication/walsender.h"
 #include "replication/walsender_private.h"
 #include "storage/condition_variable.h"
-#include "storage/encryption.h"
 #include "storage/fd.h"
 #include "storage/ipc.h"
 #include "storage/pmsignal.h"
@@ -752,15 +751,6 @@ logical_read_xlog_page(XLogReaderState *state, XLogRecPtr targetPagePtr, int req
 {
 	XLogRecPtr	flushptr;
 	int			count;
-
-	/*
-	 * Make sure that we only return data that can be decrypted in a sensible
-	 * way. If the valid data ended in the middle of encryption block, then
-	 * decryption of that last block would turn the contained data into
-	 * garbage.
-	 */
-	if (data_encrypted)
-		reqLen = XLOG_REC_ALIGN(reqLen);
 
 	XLogReadDetermineTimeline(state, targetPagePtr, reqLen);
 	sendTimeLineIsHistoric = (state->currTLI != ThisTimeLineID);

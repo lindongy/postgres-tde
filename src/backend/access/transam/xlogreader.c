@@ -510,6 +510,15 @@ ReadPageInternal(XLogReaderState *state, XLogRecPtr pageptr, int reqLen)
 
 	Assert((pageptr % XLOG_BLCKSZ) == 0);
 
+	/*
+	 * Make sure that we only return data that can be decrypted in a sensible
+	 * way. If the valid data ended in the middle of encryption block, then
+	 * decryption of that last block would turn the contained data into
+	 * garbage.
+	 */
+	if (data_encrypted)
+		reqLen = XLOG_REC_ALIGN(reqLen);
+
 	XLByteToSeg(pageptr, targetSegNo);
 	targetPageOff = (pageptr % XLogSegSize);
 
