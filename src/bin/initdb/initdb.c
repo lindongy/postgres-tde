@@ -148,7 +148,7 @@ static bool do_sync = true;
 static bool sync_only = false;
 static bool show_setting = false;
 static bool data_checksums = false;
-static char *data_encryption_key = NULL;
+static char	*encr_key_cmd_str = NULL;
 static char *xlog_dir = "";
 static dlist_head extra_options = DLIST_STATIC_INIT(extra_options);
 
@@ -278,7 +278,6 @@ static bool check_locale_encoding(const char *locale, int encoding);
 static void setlocales(void);
 static void usage(const char *progname);
 void		setup_pgdata(void);
-void		setup_encryption_initdb(void);
 void		setup_bin_paths(const char *argv0);
 void		setup_data_file_paths(void);
 void		setup_locale_encoding(void);
@@ -1182,6 +1181,14 @@ setup_config(void)
 								  "password_encryption = scram-sha-256");
 	}
 
+	if (encryption_key_command)
+	{
+		snprintf(repltok, sizeof(repltok), "encryption_key_command = '%s'",
+				 encryption_key_command);
+		conflines = replace_token(conflines,
+								  "#encryption_key_command = ''", repltok);
+	}
+
 	snprintf(path, sizeof(path), "%s/postgresql.conf", pg_data);
 
 	writefile(path, conflines);
@@ -1399,11 +1406,26 @@ bootstrap_template1(void)
 	/* Also ensure backend isn't confused by this environment var: */
 	unsetenv("PGCLIENTENCODING");
 
+	/* Prepare the -K option for the backend. */
+	if (encryption_key_command)
+	{
+		size_t	len;
+
+		len = 3 + strlen(encryption_key_command) + 1;
+		encr_key_cmd_str = (char *) pg_malloc(len);
+		snprintf(encr_key_cmd_str, len, "-K %s", encryption_key_command);
+	}
+	else
+	{
+		encr_key_cmd_str = (char *) pg_malloc(1);
+		encr_key_cmd_str[0] = '\0';
+	}
+
 	snprintf(cmd, sizeof(cmd),
 			 "\"%s\" --boot -x1 %s %s %s %s",
 			 backend_exec,
 			 data_checksums ? "-k" : "",
-			 data_encrypted ? "-K" : "",
+			 encr_key_cmd_str,
 			 boot_options, talkargs);
 
 	PG_CMD_OPEN;
@@ -2339,7 +2361,8 @@ usage(const char *progname)
 	printf(_("\nLess commonly used options:\n"));
 	printf(_("  -d, --debug               generate lots of debugging output\n"));
 	printf(_("  -k, --data-checksums      use data page checksums\n"));
-	printf(_("  -K, --data-encryption     encrypt the cluster\n"));
+	printf(_("  -K, --encryption-key-command\n"
+			 "                            command that returns encryption key\n"));
 	printf(_("  -L DIRECTORY              where to find the input files\n"));
 	printf(_("  -n, --no-clean            do not clean up after errors\n"));
 	printf(_("  -N, --no-sync             do not wait for changes to be written safely to disk\n"));
@@ -2444,27 +2467,6 @@ setup_pgdata(void)
 	 */
 	pgdata_set_env = psprintf("PGDATA=%s", pg_data);
 	putenv(pgdata_set_env);
-}
-
-void
-setup_encryption_initdb(void)
-{
-	char *key = getenv("PGENCRYPTIONKEY");
-	if (key != NULL && strlen(key) != 0)
-		data_encryption_key = pg_strdup(key);
-
-	if (data_encryption_key != NULL)
-	{
-		char *pgencryptionkey_set_env;
-		pgencryptionkey_set_env = psprintf("PGENCRYPTIONKEY=%s", data_encryption_key);
-		putenv(pgencryptionkey_set_env);
-	}
-	else
-	{
-		printf(_("PGENCRYPTIONKEY environment variable is not set.\n"));
-		fflush(stdout);
-		exit_nicely();
-	}
 }
 
 void
@@ -2977,8 +2979,8 @@ initialize_data_directory(void)
 	fflush(stdout);
 
 	snprintf(cmd, sizeof(cmd),
-			 "\"%s\" %s template1 >%s",
-			 backend_exec, backend_options,
+			 "\"%s\" %s %s template1 >%s",
+			 backend_exec, backend_options, encr_key_cmd_str,
 			 DEVNULL);
 
 	PG_CMD_OPEN;
@@ -3069,7 +3071,7 @@ main(int argc, char *argv[])
 		{"sync-only", no_argument, NULL, 'S'},
 		{"waldir", required_argument, NULL, 'X'},
 		{"data-checksums", no_argument, NULL, 'k'},
-		{"data-encryption", no_argument, NULL, 'K'},
+		{"encryption-key-command", required_argument, NULL, 'K'},
 		{"option", required_argument, NULL, 'c'},
 		{NULL, 0, NULL, 0}
 	};
@@ -3112,7 +3114,7 @@ main(int argc, char *argv[])
 
 	/* process command-line options */
 
-	while ((c = getopt_long(argc, argv, "c:dD:E:kK:L:nNU:WA:sST:X:", long_options, &option_index)) != -1)
+	while ((c = getopt_long(argc, argv, "c:dD:E:K:kL:nNU:WA:sST:X:", long_options, &option_index)) != -1)
 	{
 		switch (c)
 		{
@@ -3165,7 +3167,7 @@ main(int argc, char *argv[])
 				data_checksums = true;
 				break;
 			case 'K':
-				data_encrypted = true;
+				encryption_key_command = pg_strdup(optarg);
 				break;
 			case 'c':
 				 parse_extra_option_arg(optarg);
@@ -3311,9 +3313,9 @@ main(int argc, char *argv[])
 	if (pwprompt || pwfilename)
 		get_su_pwd();
 
-	if (data_encrypted)
+	if (encryption_key_command)
 	{
-		setup_encryption_initdb();
+		setup_encryption_key();
 		printf(_("Data encryption is enabled.\n"));
 	}
 	else

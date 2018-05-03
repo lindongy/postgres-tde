@@ -192,7 +192,7 @@ static void assign_application_name(const char *newval, void *extra);
 static bool check_cluster_name(char **newval, void **extra, GucSource source);
 static const char *show_unix_socket_permissions(void);
 static const char *show_log_file_mode(void);
-static const char *show_key_setup_command(void);
+static const char *show_encryption_key_command(void);
 
 /* Private functions in guc-file.l that need to be called from guc.c */
 static ConfigVariable *ProcessConfigFileInternal(GucContext context,
@@ -3664,14 +3664,14 @@ static struct config_string ConfigureNamesString[] =
 	},
 
 	{
-		{"key_setup_command", PGC_POSTMASTER, 0,
+		{"encryption_key_command", PGC_POSTMASTER, 0,
 			gettext_noop("Sets the shell command that will be called to fetch database encryption key."),
 			NULL,
-			GUC_IS_NAME
+			GUC_IS_NAME | GUC_NOT_IN_SAMPLE
 		},
-		&key_setup_command,
+		&encryption_key_command,
 		NULL,
-		NULL, NULL, show_key_setup_command
+		NULL, NULL, show_encryption_key_command
 	},
 
 	/* End-of-list marker */
@@ -10528,10 +10528,10 @@ show_log_file_mode(void)
 }
 
 static const char *
-show_key_setup_command(void)
+show_encryption_key_command(void)
 {
-	if (key_setup_command)
-		return key_setup_command;
+	if (encryption_key_command)
+		return encryption_key_command;
 	else
 		return "(disabled)";
 }

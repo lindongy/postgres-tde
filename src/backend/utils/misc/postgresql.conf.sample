@@ -88,6 +88,7 @@
 #password_encryption = md5		# md5 or scram-sha-256
 #db_user_namespace = off
 #row_security = on
+#encryption_key_command = ''
 
 # GSSAPI using Kerberos
 #krb_server_keyfile = ''

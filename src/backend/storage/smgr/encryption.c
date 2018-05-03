@@ -51,11 +51,11 @@
 
 #ifdef USE_OPENSSL
 static unsigned char	encryption_key[ENCRYPTION_KEY_LENGTH];
-const char* encryptionkey_prefix = "encryptionkey=";
+const char* encryption_key_prefix = "encryptionkey=";
 #endif
 
 bool data_encrypted = false;
-char	*key_setup_command = NULL;
+char	*encryption_key_command = NULL;
 
 #ifdef USE_OPENSSL
 char	*encryption_buffer = NULL;
@@ -65,7 +65,7 @@ void enlarge_encryption_buffer(Size new_size);
 
 static bool initialized = false;
 
-static bool run_keysetup_command(uint8 *key);
+static bool run_encryption_key_command(uint8 *key);
 static void evp_error(void);
 #endif
 
@@ -286,37 +286,7 @@ setup_encryption()
 	 */
 	Assert(!initialized);
 
-	if (!run_keysetup_command(encryption_key))
-	{
-		char *passphrase = getenv("PGENCRYPTIONKEY");
-
-		/* Empty or missing passphrase means that encryption is not configured */
-		if (passphrase == NULL || passphrase[0] == '\0')
-		{
-#ifndef FRONTEND
-			ereport(FATAL,
-					(errmsg("encryption key not provided"),
-					errdetail("The database cluster was initialized with encryption"
-							  " but the server was started without an encryption key."),
-							 errhint("Set the key using PGENCRYPTIONKEY environment variable.")));
-#else
-			fprintf(stderr,
-					"The database cluster was initialized with encryption"
-					" but the server was started without an encryption key. "
-					"Set the key using PGENCRYPTIONKEY environment variable.\n");
-			exit(EXIT_FAILURE);
-#endif	/* FRONTEND */
-		}
-
-		/* TODO: replace with PBKDF2 or scrypt */
-		{
-			pg_sha512_ctx sha_ctx;
-
-			pg_sha512_init(&sha_ctx);
-			pg_sha512_update(&sha_ctx, (uint8*) passphrase, strlen(passphrase));
-			pg_sha512_final(&sha_ctx, encryption_key);
-		}
-	}
+	setup_encryption_key();
 
 	initialized = true;
 #else
@@ -324,6 +294,43 @@ setup_encryption()
 			"data encryption cannot be used because SSL is not supported by this build\n"
 			"Compile with --with-openssl to use SSL connections.");
 #endif	/* USE_OPENSSL */
+}
+
+/*
+ * Subroutine of setup_encryption(). It's sufficient for initdb, which passes
+ * encryption_key_command to other processes but does not perform any
+ * encryption itself.
+ */
+void
+setup_encryption_key(void)
+{
+#ifdef USE_OPENSSL
+	if (!run_encryption_key_command(encryption_key))
+	{
+		/*
+		 * encryption_key_command should have been set by initdb. It's weird
+		 * if it was not, but there's no better recommendation we can give the
+		 * user.
+		 */
+#ifndef FRONTEND
+		ereport(FATAL,
+				(errmsg("encryption key not provided"),
+				 errdetail("The database cluster was initialized with encryption"
+						   " but the server was started without an encryption key."),
+				 errhint("Set the encryption_key_command configuration variable.")));
+#else
+		fprintf(stderr,
+				"The database cluster was initialized with encryption"
+				" but the server was started without an encryption key. "
+				"Set the encryption_key_command configuration variable.\n");
+		exit(EXIT_FAILURE);
+#endif	/* FRONTEND */
+#else
+		encryption_error(true,
+						 "data encryption cannot be used because SSL is not supported by this build\n"
+						 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
+	}
 }
 
 #ifdef USE_OPENSSL
@@ -355,44 +362,44 @@ enlarge_encryption_buffer(Size new_size)
 }
 
 static bool
-run_keysetup_command(uint8 *key)
+run_encryption_key_command(uint8 *key)
 {
 	FILE *fp;
 	char buf[ENCRYPTION_KEY_LENGTH * 2 + 1];
 	int bytes_read;
 	int i;
 
-	if (key_setup_command == NULL)
+	if (encryption_key_command == NULL)
 		return false;
 
-	if (!strlen(key_setup_command))
+	if (!strlen(encryption_key_command))
 		return false;
 
 	encryption_error(false,
 				psprintf("Executing \"%s\" to set up encryption key",
-						 key_setup_command));
+						 encryption_key_command));
 
-	fp = popen(key_setup_command, "r");
+	fp = popen(encryption_key_command, "r");
 	if (fp == NULL)
 		encryption_error(true,
-					psprintf("Failed to execute key_setup_command \"%s\"",
-							 key_setup_command));
+					psprintf("Failed to execute encryption_key_command \"%s\"",
+							 encryption_key_command));
 
-	if (fread(buf, 1, strlen(encryptionkey_prefix), fp) != strlen(encryptionkey_prefix))
-		encryption_error(true, "Not enough data received from key_setup_command");
+	if (fread(buf, 1, strlen(encryption_key_prefix), fp) != strlen(encryption_key_prefix))
+		encryption_error(true, "Not enough data received from encryption_key_command");
 
-	if (strncmp(buf, encryptionkey_prefix, strlen(encryptionkey_prefix)) != 0)
-		encryption_error(true, "Unknown data received from key_setup_command");
+	if (strncmp(buf, encryption_key_prefix, strlen(encryption_key_prefix)) != 0)
+		encryption_error(true, "Unknown data received from encryption_key_command");
 
 	bytes_read = fread(buf, 1, ENCRYPTION_KEY_LENGTH * 2 + 1, fp);
 	if (bytes_read < ENCRYPTION_KEY_LENGTH*2)
 	{
 		if (feof(fp))
 			encryption_error(true,
-						"Encryption key provided by key_setup_command too short");
+						"Encryption key provided by encryption_key_command too short");
 		else
 			encryption_error(true,
-						psprintf("key_setup_command returned error code %d",
+						psprintf("encryption_key_command returned error code %d",
 								 ferror(fp)));
 	}
 

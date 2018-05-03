@@ -39,7 +39,7 @@
 extern PGDLLIMPORT bool data_encrypted;
 
 #ifdef USE_OPENSSL
-extern PGDLLIMPORT char	*key_setup_command;
+extern PGDLLIMPORT char	*encryption_key_command;
 
 extern char	*encryption_buffer;
 extern Size	encryption_buf_size;
@@ -83,6 +83,7 @@ extern void enlarge_encryption_buffer(Size new_size);
 							 ENCRYPTION_BLOCK_ALIGN(LEN) : MAXALIGN64(LEN))
 
 extern void setup_encryption(void);
+extern void setup_encryption_key(void);
 extern void sample_encryption(char *buf);
 extern void encrypt_block(const char *input, char *output, Size size,
 						  const char *tweak);

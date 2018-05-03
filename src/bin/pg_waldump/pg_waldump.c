@@ -727,7 +727,8 @@ usage(void)
 	printf(_("  -b, --bkp-details      output detailed information about backup blocks\n"));
 	printf(_("  -e, --end=RECPTR       stop reading at WAL location RECPTR\n"));
 	printf(_("  -f, --follow           keep retrying after reaching end of WAL\n"));
-	printf(_("  -K, --encrypted        indicate that the WAL is encrypted\n"));
+	printf(_("  -K, --encryption-key-command=COMMAND\n"
+			 "                         command that returns encryption key\n"));
 	printf(_("  -n, --limit=N          number of records to display\n"));
 	printf(_("  -p, --path=PATH        directory in which to find log segment files or a\n"
 			 "                         directory with a ./pg_wal that contains such files\n"
@@ -762,7 +763,7 @@ main(int argc, char **argv)
 		{"end", required_argument, NULL, 'e'},
 		{"follow", no_argument, NULL, 'f'},
 		{"help", no_argument, NULL, '?'},
-		{"encrypted", no_argument, NULL, 'K'},
+		{"encryption-key-command", required_argument, NULL, 'K'},
 		{"limit", required_argument, NULL, 'n'},
 		{"path", required_argument, NULL, 'p'},
 		{"rmgr", required_argument, NULL, 'r'},
@@ -805,7 +806,7 @@ main(int argc, char **argv)
 		goto bad_argument;
 	}
 
-	while ((option = getopt_long(argc, argv, "be:?fKn:p:r:s:t:Vx:z",
+	while ((option = getopt_long(argc, argv, "be:?fK:n:p:r:s:t:Vx:z",
 								 long_options, &optindex)) != -1)
 	{
 		switch (option)
@@ -830,6 +831,7 @@ main(int argc, char **argv)
 				exit(EXIT_SUCCESS);
 				break;
 			case 'K':
+				encryption_key_command = pg_strdup(optarg);
 				data_encrypted = true;
 				break;
 			case 'n':

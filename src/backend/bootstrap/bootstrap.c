@@ -223,7 +223,7 @@ AuxiliaryProcessMain(int argc, char *argv[])
 	/* If no -x argument, we are a CheckerProcess */
 	MyAuxProcType = CheckerProcess;
 
-	while ((flag = getopt(argc, argv, "B:c:d:D:FkKr:x:-:")) != -1)
+	while ((flag = getopt(argc, argv, "B:c:d:D:FK:kr:x:-:")) != -1)
 	{
 		switch (flag)
 		{
@@ -250,14 +250,21 @@ AuxiliaryProcessMain(int argc, char *argv[])
 				SetConfigOption("fsync", "false", PGC_POSTMASTER, PGC_S_ARGV);
 				break;
 			case 'K':
+				encryption_key_command = strdup(optarg);
+
 				/*
-				 * Postmaster should not set this option. Instead, it just
+				 * When auxiliary process (typically bootstrap) starts, the
+				 * control file might not exist yet. In this case we also use
+				 * encryption_key_command to indicate that the encryption is
+				 * enabled.
+				 *
+				 * Postmaster should not set this variable. Instead, it just
 				 * sets data_encrypted according to the control file and child
 				 * processes inherit that.
 				 */
 				Assert(!IsUnderPostmaster);
-
 				data_encrypted = true;
+
 				break;
 			case 'k':
 				bootstrap_data_checksum_version = PG_DATA_CHECKSUM_VERSION;

@@ -115,7 +115,7 @@ main(int argc, char *argv[])
 	}
 
 
-	while ((c = getopt(argc, argv, "c:D:e:fl:m:no:O:x:")) != -1)
+	while ((c = getopt(argc, argv, "c:D:e:fK:l:m:no:O:x:")) != -1)
 	{
 		switch (c)
 		{
@@ -256,6 +256,10 @@ main(int argc, char *argv[])
 					fprintf(stderr, _("%s: multitransaction offset (-O) must not be -1\n"), progname);
 					exit(1);
 				}
+				break;
+
+			case 'K':
+				encryption_key_command = strdup(optarg);
 				break;
 
 			case 'l':
@@ -1259,6 +1263,7 @@ usage(void)
 	printf(_(" [-D] DATADIR      data directory\n"));
 	printf(_("  -e XIDEPOCH      set next transaction ID epoch\n"));
 	printf(_("  -f               force update to be done\n"));
+	printf(_("  -K COMMAND       command that returns encryption key\n"));
 	printf(_("  -l WALFILE       force minimum WAL starting location for new write-ahead log\n"));
 	printf(_("  -m MXID,MXID     set next and oldest multitransaction ID\n"));
 	printf(_("  -n               no update, just show what would be done (for testing)\n"));

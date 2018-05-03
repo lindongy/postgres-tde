@@ -670,7 +670,7 @@ PostmasterMain(int argc, char *argv[])
 	 * tcop/postgres.c (the option sets should not conflict) and with the
 	 * common help() function in main/main.c.
 	 */
-	while ((opt = getopt(argc, argv, "B:bc:C:D:d:EeFf:h:ijk:lN:nOo:Pp:r:S:sTt:W:-:")) != -1)
+	while ((opt = getopt(argc, argv, "B:bc:C:D:d:EeFf:h:ijK:k:lN:nOo:Pp:r:S:sTt:W:-:")) != -1)
 	{
 		switch (opt)
 		{
@@ -726,6 +726,10 @@ PostmasterMain(int argc, char *argv[])
 
 			case 'j':
 				/* only used by interactive backend */
+				break;
+
+			case 'K':
+				encryption_key_command = strdup(optarg);
 				break;
 
 			case 'k':
