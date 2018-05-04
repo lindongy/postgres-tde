@@ -346,7 +346,7 @@ static void pgstat_recv_tempfile(PgStat_MsgTempFile *msg, int len);
 static bool readFromStringInfo(StringInfo str, void *data, Size size);
 
 #ifdef USE_OPENSSL
-static void pgstat_encryption_tweak(char *tweak, Oid dbid);
+static void pgstat_encryption_tweak(char *tweak, Oid dbid, bool permament);
 #endif
 
 /* ------------------------------------------------------------
@@ -4714,7 +4714,7 @@ pgstat_write_statsfiles(bool permanent, bool allDbs)
 								   ENCRYPTION_BLOCK - buf->len % ENCRYPTION_BLOCK);
 		}
 
-		pgstat_encryption_tweak(tweak, InvalidOid);
+		pgstat_encryption_tweak(tweak, InvalidOid, permanent);
 		encrypt_block(buf->data, buf->data, buf->len, tweak);
 #else
 		elog(FATAL,
@@ -4882,7 +4882,7 @@ pgstat_write_db_statsfile(PgStat_StatDBEntry *dbentry, bool permanent)
 								   ENCRYPTION_BLOCK - buf->len % ENCRYPTION_BLOCK);
 		}
 
-		pgstat_encryption_tweak(tweak, dbid);
+		pgstat_encryption_tweak(tweak, dbid, permanent);
 		encrypt_block(buf->data, buf->data, buf->len, tweak);
 #else
 		elog(FATAL,
@@ -5050,7 +5050,7 @@ pgstat_read_statsfiles(Oid onlydb, bool permanent, bool deep)
 #ifdef	USE_OPENSSL
 		char	tweak[TWEAK_SIZE];
 
-		pgstat_encryption_tweak(tweak, InvalidOid);
+		pgstat_encryption_tweak(tweak, InvalidOid, permanent);
 		decrypt_block(buf->data, buf->data, buf->len, tweak);
 #else
 		elog(FATAL,
@@ -5312,7 +5312,7 @@ pgstat_read_db_statsfile(Oid databaseid, HTAB *tabhash, HTAB *funchash,
 #ifdef	USE_OPENSSL
 		char	tweak[TWEAK_SIZE];
 
-		pgstat_encryption_tweak(tweak, databaseid);
+		pgstat_encryption_tweak(tweak, databaseid, permanent);
 		decrypt_block(buf->data, buf->data, buf->len, tweak);
 #else
 		elog(FATAL,
@@ -5520,7 +5520,7 @@ pgstat_read_db_statsfile_timestamp(Oid databaseid, bool permanent,
 #ifdef	USE_OPENSSL
 		char	tweak[TWEAK_SIZE];
 
-		pgstat_encryption_tweak(tweak, InvalidOid);
+		pgstat_encryption_tweak(tweak, InvalidOid, permanent);
 		decrypt_block(buf->data, buf->data, buf->len, tweak);
 #else
 		elog(FATAL,
@@ -6532,9 +6532,10 @@ readFromStringInfo(StringInfo str, void *data, Size size)
 
 #ifdef USE_OPENSSL
 static void
-pgstat_encryption_tweak(char *tweak, Oid dbid)
+pgstat_encryption_tweak(char *tweak, Oid dbid, bool permanent)
 {
 	memset(tweak, 0, TWEAK_SIZE);
 	memcpy(tweak, &dbid, sizeof(Oid));
+	memcpy(tweak + sizeof(Oid), &permanent, sizeof(bool));
 }
 #endif
