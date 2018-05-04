@@ -245,6 +245,14 @@ copy_file(char *fromfile, char *tofile, RelFileNode *fromNode,
 		}
 		if (nbytes == 0)
 			break;
+
+		/*
+		 * If encryption is in place, only complete blocks should have been
+		 * read. Thus we do not have to care whether any encryption block is
+		 * affected by the previous buffer contents.
+		 */
+		Assert(nbytes % BLCKSZ == 0 || (fromNode == NULL && toNode == NULL));
+
 		errno = 0;
 
 		/*
