@@ -5520,7 +5520,7 @@ pgstat_read_db_statsfile_timestamp(Oid databaseid, bool permanent,
 #ifdef	USE_OPENSSL
 		char	tweak[TWEAK_SIZE];
 
-		pgstat_encryption_tweak(tweak, databaseid);
+		pgstat_encryption_tweak(tweak, InvalidOid);
 		decrypt_block(buf->data, buf->data, buf->len, tweak);
 #else
 		elog(FATAL,
