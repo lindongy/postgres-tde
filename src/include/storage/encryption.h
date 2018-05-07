@@ -17,7 +17,6 @@
 #include "access/xlogdefs.h"
 #include "lib/ilist.h"
 
-#ifdef USE_OPENSSL
 /*
  * The encrypted data is a series of blocks of size
  * ENCRYPTION_BLOCK. Currently we use the EVP_aes_256_xts implementation. Make
@@ -25,6 +24,7 @@
  */
 #define ENCRYPTION_BLOCK 16
 
+#ifdef USE_OPENSSL
 /*
  * The openssl EVP API refers to a block in terms of padding of the output
  * chunk. That's the purpose of this constant. However the openssl

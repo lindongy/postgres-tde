@@ -55,9 +55,9 @@ const char* encryption_key_prefix = "encryptionkey=";
 #endif
 
 bool data_encrypted = false;
-char	*encryption_key_command = NULL;
 
 #ifdef USE_OPENSSL
+char	*encryption_key_command = NULL;
 char	*encryption_buffer = NULL;
 Size	encryption_buf_size = 0;
 
@@ -318,19 +318,19 @@ setup_encryption_key(void)
 				 errdetail("The database cluster was initialized with encryption"
 						   " but the server was started without an encryption key."),
 				 errhint("Set the encryption_key_command configuration variable.")));
-#else
-		fprintf(stderr,
+#else	/* FRONTEND */
+		encryption_error(true,
 				"The database cluster was initialized with encryption"
 				" but the server was started without an encryption key. "
 				"Set the encryption_key_command configuration variable.\n");
-		exit(EXIT_FAILURE);
 #endif	/* FRONTEND */
-#else
-		encryption_error(true,
-						 "data encryption cannot be used because SSL is not supported by this build\n"
-						 "Compile with --with-openssl to use SSL connections.");
-#endif	/* USE_OPENSSL */
 	}
+#else	/* USE_OPENSSL */
+	encryption_error(true,
+					 "data encryption cannot be used because SSL is not supported by this build\n"
+					 "Compile with --with-openssl to use SSL connections.");
+
+#endif	/* USE_OPENSSL */
 }
 
 #ifdef USE_OPENSSL

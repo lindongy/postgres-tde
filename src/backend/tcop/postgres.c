@@ -3416,9 +3416,11 @@ process_postgres_switches(int argc, char *argv[], GucContext ctx,
 					UseSemiNewlineNewline = true;
 				break;
 
+#ifdef	USE_OPENSSL
 			case 'K':
 				encryption_key_command = strdup(optarg);
 				break;
+#endif	/* USE_OPENSSL */
 
 			case 'k':
 				SetConfigOption("unix_socket_directories", optarg, ctx, gucsource);

@@ -192,7 +192,9 @@ static void assign_application_name(const char *newval, void *extra);
 static bool check_cluster_name(char **newval, void **extra, GucSource source);
 static const char *show_unix_socket_permissions(void);
 static const char *show_log_file_mode(void);
+#ifdef	USE_OPENSSL
 static const char *show_encryption_key_command(void);
+#endif	/* USE_OPENSSL */
 
 /* Private functions in guc-file.l that need to be called from guc.c */
 static ConfigVariable *ProcessConfigFileInternal(GucContext context,
@@ -3663,6 +3665,7 @@ static struct config_string ConfigureNamesString[] =
 		check_wal_consistency_checking, assign_wal_consistency_checking, NULL
 	},
 
+#ifdef	USE_OPENSSL
 	{
 		{"encryption_key_command", PGC_POSTMASTER, 0,
 			gettext_noop("Sets the shell command that will be called to fetch database encryption key."),
@@ -3673,6 +3676,7 @@ static struct config_string ConfigureNamesString[] =
 		NULL,
 		NULL, NULL, show_encryption_key_command
 	},
+#endif	/* USE_OPENSSL */
 
 	/* End-of-list marker */
 	{
@@ -10527,6 +10531,7 @@ show_log_file_mode(void)
 	return buf;
 }
 
+#ifdef	USE_OPENSSL
 static const char *
 show_encryption_key_command(void)
 {
@@ -10535,5 +10540,6 @@ show_encryption_key_command(void)
 	else
 		return "(disabled)";
 }
+#endif	/* USE_OPENSSL */
 
 #include "guc-file.c"

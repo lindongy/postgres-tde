@@ -249,6 +249,7 @@ AuxiliaryProcessMain(int argc, char *argv[])
 			case 'F':
 				SetConfigOption("fsync", "false", PGC_POSTMASTER, PGC_S_ARGV);
 				break;
+#ifdef	USE_OPENSSL
 			case 'K':
 				encryption_key_command = strdup(optarg);
 
@@ -266,6 +267,7 @@ AuxiliaryProcessMain(int argc, char *argv[])
 				data_encrypted = true;
 
 				break;
+#endif	/* USE_OPENSSL */
 			case 'k':
 				bootstrap_data_checksum_version = PG_DATA_CHECKSUM_VERSION;
 				break;

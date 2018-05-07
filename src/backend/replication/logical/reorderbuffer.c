@@ -2367,7 +2367,15 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 	 * Make sure the correct buffer is written to disk.
 	 */
 	if (data_encrypted)
+	{
+#ifdef	USE_OPENSSL
 		outbuf = encryption_buffer;
+#else
+	encryption_error(true,
+		 "data encryption cannot be used because SSL is not supported by this build\n"
+		 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
+	}
 	else
 		outbuf = rb->outbuf;
 

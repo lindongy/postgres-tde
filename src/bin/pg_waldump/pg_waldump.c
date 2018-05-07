@@ -727,8 +727,10 @@ usage(void)
 	printf(_("  -b, --bkp-details      output detailed information about backup blocks\n"));
 	printf(_("  -e, --end=RECPTR       stop reading at WAL location RECPTR\n"));
 	printf(_("  -f, --follow           keep retrying after reaching end of WAL\n"));
+#ifdef	USE_OPENSSL
 	printf(_("  -K, --encryption-key-command=COMMAND\n"
 			 "                         command that returns encryption key\n"));
+#endif	/* USE_OPENSSL */
 	printf(_("  -n, --limit=N          number of records to display\n"));
 	printf(_("  -p, --path=PATH        directory in which to find log segment files or a\n"
 			 "                         directory with a ./pg_wal that contains such files\n"
@@ -830,10 +832,12 @@ main(int argc, char **argv)
 				usage();
 				exit(EXIT_SUCCESS);
 				break;
+#ifdef	USE_OPENSSL
 			case 'K':
 				encryption_key_command = pg_strdup(optarg);
 				data_encrypted = true;
 				break;
+#endif	/* USE_OPENSSL */
 			case 'n':
 				if (sscanf(optarg, "%d", &config.stop_after_records) != 1)
 				{

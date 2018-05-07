@@ -68,8 +68,10 @@ usage(const char *progname)
 	printf(_("  -D, --target-pgdata=DIRECTORY  existing data directory to modify\n"));
 	printf(_("      --source-pgdata=DIRECTORY  source data directory to synchronize with\n"));
 	printf(_("      --source-server=CONNSTR    source server to synchronize with\n"));
+#ifdef	USE_OPENSSL
 	printf(_("  -K, --encryption-key-command=COMMAND\n"
 			 "                                 command that returns encryption key\n"));
+#endif	/* USE_OPENSSL */
 	printf(_("  -n, --dry-run                  stop before modifying anything\n"));
 	printf(_("  -P, --progress                 write progress messages\n"));
 	printf(_("      --debug                    write a lot of debug messages\n"));
@@ -91,7 +93,9 @@ main(int argc, char **argv)
 		{"dry-run", no_argument, NULL, 'n'},
 		{"progress", no_argument, NULL, 'P'},
 		{"debug", no_argument, NULL, 3},
+#ifdef	USE_OPENSSL
 		{"encryption-key-command", required_argument, NULL, 'K'},
+#endif	/* USE_OPENSSL */
 		{NULL, 0, NULL, 0}
 	};
 	int			option_index;
@@ -156,10 +160,12 @@ main(int argc, char **argv)
 			case 2:				/* --source-server */
 				connstr_source = pg_strdup(optarg);
 				break;
+#ifdef	USE_OPENSSL
 			case 4:				/* --encryption-key-command */
 			case 'K':
 				encryption_key_command = strdup(optarg);
 				break;
+#endif	/* USE_OPENSSL */
 		}
 	}
 

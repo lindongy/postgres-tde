@@ -258,9 +258,11 @@ main(int argc, char *argv[])
 				}
 				break;
 
+#ifdef	USE_OPENSSL
 			case 'K':
 				encryption_key_command = strdup(optarg);
 				break;
+#endif	/* USE_OPENSSL */
 
 			case 'l':
 				if (strspn(optarg, "01234567890ABCDEFabcdef") != XLOG_FNAME_LEN)
@@ -1263,7 +1265,10 @@ usage(void)
 	printf(_(" [-D] DATADIR      data directory\n"));
 	printf(_("  -e XIDEPOCH      set next transaction ID epoch\n"));
 	printf(_("  -f               force update to be done\n"));
-	printf(_("  -K COMMAND       command that returns encryption key\n"));
+#ifdef	USE_OPENSSL
+	printf(_("  -K, --encryption-key-command\n"
+			 "                   command that returns encryption key\n"));
+#endif	/* USE_OPENSSL */
 	printf(_("  -l WALFILE       force minimum WAL starting location for new write-ahead log\n"));
 	printf(_("  -m MXID,MXID     set next and oldest multitransaction ID\n"));
 	printf(_("  -n               no update, just show what would be done (for testing)\n"));

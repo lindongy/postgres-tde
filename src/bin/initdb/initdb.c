@@ -1181,6 +1181,7 @@ setup_config(void)
 								  "password_encryption = scram-sha-256");
 	}
 
+#ifdef	USE_OPENSSL
 	if (encryption_key_command)
 	{
 		snprintf(repltok, sizeof(repltok), "encryption_key_command = '%s'",
@@ -1188,6 +1189,7 @@ setup_config(void)
 		conflines = replace_token(conflines,
 								  "#encryption_key_command = ''", repltok);
 	}
+#endif	/* USE_OPENSSL */
 
 	snprintf(path, sizeof(path), "%s/postgresql.conf", pg_data);
 
@@ -1406,6 +1408,7 @@ bootstrap_template1(void)
 	/* Also ensure backend isn't confused by this environment var: */
 	unsetenv("PGCLIENTENCODING");
 
+#ifdef	USE_OPENSSL
 	/* Prepare the -K option for the backend. */
 	if (encryption_key_command)
 	{
@@ -1420,6 +1423,7 @@ bootstrap_template1(void)
 		encr_key_cmd_str = (char *) pg_malloc(1);
 		encr_key_cmd_str[0] = '\0';
 	}
+#endif	/* USE_OPENSSL */
 
 	snprintf(cmd, sizeof(cmd),
 			 "\"%s\" --boot -x1 %s %s %s %s",
@@ -2361,8 +2365,10 @@ usage(const char *progname)
 	printf(_("\nLess commonly used options:\n"));
 	printf(_("  -d, --debug               generate lots of debugging output\n"));
 	printf(_("  -k, --data-checksums      use data page checksums\n"));
+#ifdef	USE_OPENSSL
 	printf(_("  -K, --encryption-key-command\n"
 			 "                            command that returns encryption key\n"));
+#endif	/* USE_OPENSSL */
 	printf(_("  -L DIRECTORY              where to find the input files\n"));
 	printf(_("  -n, --no-clean            do not clean up after errors\n"));
 	printf(_("  -N, --no-sync             do not wait for changes to be written safely to disk\n"));
@@ -3071,7 +3077,9 @@ main(int argc, char *argv[])
 		{"sync-only", no_argument, NULL, 'S'},
 		{"waldir", required_argument, NULL, 'X'},
 		{"data-checksums", no_argument, NULL, 'k'},
+#ifdef	USE_OPENSSL
 		{"encryption-key-command", required_argument, NULL, 'K'},
+#endif	/* USE_OPENSSL */
 		{"option", required_argument, NULL, 'c'},
 		{NULL, 0, NULL, 0}
 	};
@@ -3166,9 +3174,11 @@ main(int argc, char *argv[])
 			case 'k':
 				data_checksums = true;
 				break;
+#ifdef	USE_OPENSSL
 			case 'K':
 				encryption_key_command = pg_strdup(optarg);
 				break;
+#endif	/* USE_OPENSSL */
 			case 'c':
 				 parse_extra_option_arg(optarg);
 				 break;
@@ -3313,6 +3323,7 @@ main(int argc, char *argv[])
 	if (pwprompt || pwfilename)
 		get_su_pwd();
 
+#ifdef	USE_OPENSSL
 	if (encryption_key_command)
 	{
 		setup_encryption_key();
@@ -3320,6 +3331,7 @@ main(int argc, char *argv[])
 	}
 	else
 		printf(_("Data encryption is disabled.\n"));
+#endif	/* USE_OPENSSL */
 
 	initialize_data_directory();
 
