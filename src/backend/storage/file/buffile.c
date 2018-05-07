@@ -838,15 +838,24 @@ BufFileWrite(BufFile *file, void *ptr, size_t size)
 		{
 #ifdef USE_OPENSSL
 			off_t	new_offset;
-			int		fileno;
+			int		fileno = file->curFile;
 
 			/*
 			 * curFile does not necessarily correspond to the offset: it can
-			 * still have the initial value if BufFileSeek() skipped the first
-			 * previous file w/o dumping anything of it. Therefore we must
-			 * compute the correct fileno here.
+			 * still have the initial value if BufFileSeek() skipped the
+			 * previous file w/o dumping anything of it. While curFile will be
+			 * fixed during the next dump, we need valid fileno now.
 			 */
-			fileno = file->curOffset / MAX_PHYSICAL_FILESIZE;
+			if (file->curOffset >= MAX_PHYSICAL_FILESIZE && file->isTemp)
+			{
+				/*
+				 * BufFileSeek() should not allow user to skip more than
+				 * exactly one segment file.
+				 */
+				Assert(file->curOffset == MAX_PHYSICAL_FILESIZE);
+
+				fileno++;
+			}
 
 			/*
 			 * fileno can point to a segment that does not exist on disk yet.
@@ -854,8 +863,8 @@ BufFileWrite(BufFile *file, void *ptr, size_t size)
 			ensureBufFileUsefulArraySize(file, fileno + 1);
 
 			/*
-			 * Update the offset of the underlying component file if we've
-			 * added any useful data.
+			 * Update the "useful offset" of the underlying component file if
+			 * we've added any useful data.
 			 */
 			new_offset  = file->curOffset + file->pos;
 
