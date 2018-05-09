@@ -315,6 +315,7 @@ static HTAB *pgstat_collect_oids(Oid catalogid);
 static PgStat_TableStatus *get_tabstat_entry(Oid rel_id, bool isshared);
 
 static void pgstat_setup_memcxt(void);
+static StringInfo pgstat_setup_serial_buffer(MemoryContext *context);
 
 static const char *pgstat_get_wait_activity(WaitEventActivity w);
 static const char *pgstat_get_wait_client(WaitEventClient w);
@@ -4633,7 +4634,8 @@ pgstat_write_statsfiles(bool permanent, bool allDbs)
 	const char *tmpfile = permanent ? PGSTAT_STAT_PERMANENT_TMPFILE : pgstat_stat_tmpname;
 	const char *statfile = permanent ? PGSTAT_STAT_PERMANENT_FILENAME : pgstat_stat_filename;
 	int			rc;
-	StringInfo	buf = makeStringInfo();
+	StringInfo	buf;
+	MemoryContext	serialContext;
 
 	elog(DEBUG2, "writing stats file \"%s\"", statfile);
 
@@ -4654,6 +4656,11 @@ pgstat_write_statsfiles(bool permanent, bool allDbs)
 	 * Set the timestamp of the stats file.
 	 */
 	globalStats.stats_timestamp = GetCurrentTimestamp();
+
+	/*
+	 * Memory for data serialization.
+	 */
+	buf = pgstat_setup_serial_buffer(&serialContext);
 
 	/*
 	 * Write the file header --- currently just a format ID.
@@ -4735,7 +4742,9 @@ pgstat_write_statsfiles(bool permanent, bool allDbs)
 	 */
 	rc = fwrite(buf->data, buf->len, 1, fpout);
 	(void) rc;				/* we'll check for error with ferror */
-	pfree(buf->data);
+
+	/* Free the temporary storage. */
+	MemoryContextResetOnly(serialContext);
 
 	/*
 	 * Close the temp file and replace the old pgstat.stat with it.
@@ -4820,7 +4829,8 @@ pgstat_write_db_statsfile(PgStat_StatDBEntry *dbentry, bool permanent)
 	int			rc;
 	char		tmpfile[MAXPGPATH];
 	char		statfile[MAXPGPATH];
-	StringInfo	buf = makeStringInfo();
+	StringInfo	buf;
+	MemoryContext	serialContext;
 
 	get_dbstat_filename(permanent, true, dbid, tmpfile, MAXPGPATH);
 	get_dbstat_filename(permanent, false, dbid, statfile, MAXPGPATH);
@@ -4839,6 +4849,11 @@ pgstat_write_db_statsfile(PgStat_StatDBEntry *dbentry, bool permanent)
 						tmpfile)));
 		return;
 	}
+
+	/*
+	 * Memory for data serialization.
+	 */
+	buf = pgstat_setup_serial_buffer(&serialContext);
 
 	/*
 	 * Write the file header --- currently just a format ID.
@@ -4903,7 +4918,9 @@ pgstat_write_db_statsfile(PgStat_StatDBEntry *dbentry, bool permanent)
 	 */
 	rc = fwrite(buf->data, buf->len, 1, fpout);
 	(void) rc;				/* we'll check for error with ferror */
-	pfree(buf->data);
+
+	/* Free the temporary storage. */
+	MemoryContextResetOnly(serialContext);
 
 	/*
 	 * Close the temp file and replace the old pgstat.stat with it.
@@ -4974,7 +4991,8 @@ pgstat_read_statsfiles(Oid onlydb, bool permanent, bool deep)
 	int32		format_id;
 	bool		found;
 	const char *statfile = permanent ? PGSTAT_STAT_PERMANENT_FILENAME : pgstat_stat_filename;
-	StringInfo	buf = makeStringInfo();
+	StringInfo	buf;
+	MemoryContext	serialContext;
 
 	/*
 	 * The tables will live in pgStatLocalContext.
@@ -5023,6 +5041,11 @@ pgstat_read_statsfiles(Oid onlydb, bool permanent, bool deep)
 							statfile)));
 		return dbhash;
 	}
+
+	/*
+	 * Memory for data serialization.
+	 */
+	buf = pgstat_setup_serial_buffer(&serialContext);
 
 	/*
 	 * Read the data into memory.
@@ -5224,7 +5247,9 @@ pgstat_read_statsfiles(Oid onlydb, bool permanent, bool deep)
 
 done:
 	FreeFile(fpin);
-	pfree(buf->data);
+
+	/* Free the temporary storage. */
+	MemoryContextResetOnly(serialContext);
 
 	/* If requested to read the permanent file, also get rid of it. */
 	if (permanent)
@@ -5263,7 +5288,8 @@ pgstat_read_db_statsfile(Oid databaseid, HTAB *tabhash, HTAB *funchash,
 	int32		format_id;
 	bool		found;
 	char		statfile[MAXPGPATH];
-	StringInfo	buf = makeStringInfo();
+	StringInfo	buf;
+	MemoryContext	serialContext;
 
 	get_dbstat_filename(permanent, false, databaseid, statfile, MAXPGPATH);
 
@@ -5285,6 +5311,11 @@ pgstat_read_db_statsfile(Oid databaseid, HTAB *tabhash, HTAB *funchash,
 							statfile)));
 		return;
 	}
+
+	/*
+	 * Memory for data serialization.
+	 */
+	buf = pgstat_setup_serial_buffer(&serialContext);
 
 	/*
 	 * Read the data into memory.
@@ -5442,7 +5473,9 @@ pgstat_read_db_statsfile(Oid databaseid, HTAB *tabhash, HTAB *funchash,
 
 done:
 	FreeFile(fpin);
-	pfree(buf->data);
+
+	/* Free the temporary storage. */
+	MemoryContextResetOnly(serialContext);
 
 	if (permanent)
 	{
@@ -5478,7 +5511,8 @@ pgstat_read_db_statsfile_timestamp(Oid databaseid, bool permanent,
 	FILE	   *fpin;
 	int32		format_id;
 	const char *statfile = permanent ? PGSTAT_STAT_PERMANENT_FILENAME : pgstat_stat_filename;
-	StringInfo	buf = makeStringInfo();
+	StringInfo	buf;
+	MemoryContext	serialContext;
 
 	/*
 	 * Try to open the stats file.  As above, anything but ENOENT is worthy of
@@ -5493,6 +5527,11 @@ pgstat_read_db_statsfile_timestamp(Oid databaseid, bool permanent,
 							statfile)));
 		return false;
 	}
+
+	/*
+	 * Memory for data serialization.
+	 */
+	buf = pgstat_setup_serial_buffer(&serialContext);
 
 	/*
 	 * Read the data into memory.
@@ -5548,6 +5587,7 @@ pgstat_read_db_statsfile_timestamp(Oid databaseid, bool permanent,
 		ereport(pgStatRunningInCollector ? LOG : WARNING,
 				(errmsg("corrupted statistics file \"%s\"", statfile)));
 		FreeFile(fpin);
+		MemoryContextResetOnly(serialContext);
 		return false;
 	}
 
@@ -5559,6 +5599,7 @@ pgstat_read_db_statsfile_timestamp(Oid databaseid, bool permanent,
 		ereport(pgStatRunningInCollector ? LOG : WARNING,
 				(errmsg("corrupted statistics file \"%s\"", statfile)));
 		FreeFile(fpin);
+		MemoryContextResetOnly(serialContext);
 		return false;
 	}
 
@@ -5570,6 +5611,7 @@ pgstat_read_db_statsfile_timestamp(Oid databaseid, bool permanent,
 		ereport(pgStatRunningInCollector ? LOG : WARNING,
 				(errmsg("corrupted statistics file \"%s\"", statfile)));
 		FreeFile(fpin);
+		MemoryContextResetOnly(serialContext);
 		return false;
 	}
 
@@ -5632,7 +5674,7 @@ pgstat_read_db_statsfile_timestamp(Oid databaseid, bool permanent,
 
 done:
 	FreeFile(fpin);
-	pfree(buf->data);
+	MemoryContextResetOnly(serialContext);
 	return true;
 }
 
@@ -5782,6 +5824,30 @@ pgstat_setup_memcxt(void)
 		pgStatLocalContext = AllocSetContextCreate(TopMemoryContext,
 												   "Statistics snapshot",
 												   ALLOCSET_SMALL_SIZES);
+}
+
+/* ----------
+ * pgstat_setup_serial_buffer() -
+ *
+ *	Allocate memory for data serialization and return the containing memory
+ *	context.
+ *
+ * ----------
+ */
+static StringInfo
+pgstat_setup_serial_buffer(MemoryContext *context)
+{
+	MemoryContext	oldCxt;
+	StringInfo		result;
+
+	*context = AllocSetContextCreate(TopMemoryContext,
+									 "Statistics encryption",
+									 ALLOCSET_DEFAULT_SIZES);
+	oldCxt = MemoryContextSwitchTo(*context);
+	result = makeStringInfo();
+	MemoryContextSwitchTo(oldCxt);
+
+	return result;
 }
 
 
