@@ -362,7 +362,7 @@ main(int argc, char *argv[])
 	 */
 	if (ControlFile.data_encrypted)
 	{
-		setup_encryption();
+		setup_encryption(false);
 		data_encrypted = true;
 	}
 

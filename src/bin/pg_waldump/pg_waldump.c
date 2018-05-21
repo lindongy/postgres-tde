@@ -1042,7 +1042,7 @@ main(int argc, char **argv)
 	/* done with argument parsing, do the actual work */
 
 	if (data_encrypted)
-		setup_encryption();
+		setup_encryption(false);
 
 	/* we have everything we need, start reading */
 	xlogreader_state = XLogReaderAllocate(XLogDumpReadPage, &private);

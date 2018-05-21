@@ -379,9 +379,15 @@ AuxiliaryProcessMain(int argc, char *argv[])
 	 * If data_encryption is set because of command line argument, do the
 	 * setup now. (If set by postmaster, postmaster should have performed the
 	 * setup.)
+	 *
+	 * This should only be useful for the bootstrap process. Anyone else
+	 * initializes the encryption via ReadControlFile().
 	 */
-	if (data_encrypted && !IsUnderPostmaster)
-		setup_encryption();
+	if (data_encrypted && MyAuxProcType == BootstrapProcess)
+	{
+		Assert(!IsUnderPostmaster);
+		setup_encryption(true);
+	}
 
 	BaseInit();
 

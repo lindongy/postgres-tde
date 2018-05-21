@@ -4687,14 +4687,14 @@ ReadControlFile(void)
 	{
 		char sample[ENCRYPTION_SAMPLE_SIZE];
 
-		setup_encryption();
+		setup_encryption(false);
 
 		memset(sample, 0, ENCRYPTION_SAMPLE_SIZE);
 		sample_encryption(sample);
 		if (memcmp(ControlFile->encryption_verification, sample, ENCRYPTION_SAMPLE_SIZE))
 			ereport(FATAL,
 							(errmsg("invalid encryption key"),
-					errdetail("The key specified in PGENCRYPTIONKEY does not match"
+					errdetail("The passed encryption key does not match"
 							  " database encryption key.")));
 	}
 

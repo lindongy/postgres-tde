@@ -3325,10 +3325,7 @@ main(int argc, char *argv[])
 
 #ifdef	USE_OPENSSL
 	if (encryption_key_command)
-	{
-		setup_encryption_key();
 		printf(_("Data encryption is enabled.\n"));
-	}
 	else
 		printf(_("Data encryption is disabled.\n"));
 #endif	/* USE_OPENSSL */
