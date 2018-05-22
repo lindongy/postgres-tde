@@ -1,0 +1,86 @@
+PostgreSQL instance encryption
+==============================
+
+If the instance (cluster) encryption is enabled, data (including WAL) is
+encrypted before it's stored to disk. Conversely, decryption is the first
+thing to happen when the data is read from disk into memory.
+
+
+Installation
+------------
+
+1. openssl library is used to perform the actual encryption. Therefore you
+need to make sure that you have openssl installed.
+
+2. Run the configure script and (besides other options) pass --with-openssl to
+it.
+
+3. make install
+
+
+Create encrypted instance
+-------------------------
+
+In order to encrypt / decrypt data, the PostgreSQL processes need an
+encryption key.  You need to provide the server either with the actual key or
+with a password from which the key will be derived.
+
+The initdb utility accepts command line option -K, whose argument is a command
+that returns the key or the password. Depending on your choice, the expected
+output of the command is
+
+encryption_key=<your key>
+
+(The key length is 64 bytes and it's expected in hexadecimal format, hence 128
+hexadecimal digits.)
+
+or
+
+encryption_password=<your password>
+
+Whichever kind of credentials you prefer, simply run initdb with the -K
+option, and that's it. For example:
+
+initdb -K /data/my_pwd_command.sh -D data_encrypted
+
+The command should now appear in your postgresql.conf file (see the variable
+encryption_key_command) so you don't have to pass it again when starting the
+instance.
+
+If you passed encryption password (as opposed the encryption key), it's
+recommended to generate the key as well. While the PostgreSQL server (backend)
+accepts either kind of credentials, the front-end utilities (pg_waldump,
+pg_resetwal, pg_rewind, etc.) only accept the encryption key.
+
+To derive the key, run the pg_keysetup utility and pass your data directory to
+it. The utility reads the password from standard input and writes the key to
+the standard output. For example:
+
+echo <encryption password> | pg_keysetup -D data_encrypted
+
+Once you have a command that returns this key (with the "encryption_key="
+prefix as explained above), you can set it as the value of the
+encryption_key_command configuration variable or use it to run the front-end
+commands. For example:
+
+pg_waldump -K /data/my_key_command.sh -p data_encrypted/pg_wal/ 000000010000000000000001
+
+CAUTION! Different key is derived if you run pg_keysetup on a different data
+directory, even if the password is identical.
+
+
+Startup
+-------
+
+Since the key command is in postgresql.conf, there's nothing special about the
+instance startup. Once you have your instance running, the first thing you
+should do is to connect and check the "data_encryption" variable:
+
+    SHOW data_encryption;
+     data_encryption
+    -----------------
+     on
+    (1 row)
+
+The "on" value indicates that encryption of your new instance was successfully
+enabled.
