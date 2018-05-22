@@ -31,7 +31,7 @@
  */
 #define ENCRYPTION_PWD_MIN_LENGTH	8
 #define ENCRYPTION_PWD_MAX_LENGTH	16
-#define ENCRYPTION_KDF_NITER		100000
+#define ENCRYPTION_KDF_NITER		1048576
 #define	ENCRYPTION_KDF_SALT_LEN		8
 
 extern unsigned char	*encryption_key;
