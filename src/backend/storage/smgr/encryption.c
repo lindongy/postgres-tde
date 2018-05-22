@@ -64,7 +64,6 @@ static bool initialized = false;
 static void setup_encryption_internal(void);
 static char *run_encryption_key_command(bool *is_key_p, size_t *len_p);
 static void evp_error(void);
-#endif
 
 /*
  * Pointer to the KDF parameters.
@@ -197,6 +196,7 @@ read_kdf_file(void)
 				(errmsg("unsupported KDF function %d", KDFParams->function)));
 }
 #endif	/* FRONTEND */
+#endif	/* USE_OPENSSL */
 
 /*
  * Encrypts a fixed value into *buf to verify that encryption key is correct.
@@ -395,6 +395,7 @@ encryption_error(bool fatal, char *message)
 void
 setup_encryption(bool bootstrap)
 {
+#ifdef USE_OPENSSL
 	char	*credentials;
 	bool	is_key;
 	size_t	len;
@@ -423,12 +424,17 @@ setup_encryption(bool bootstrap)
 	setup_encryption_key(credentials, is_key, len);
 	pfree(credentials);
 	setup_encryption_internal();
+#else
+	encryption_error(true,
+			"data encryption cannot be used because SSL is not supported by this build\n"
+			"Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
 }
 
+#ifdef USE_OPENSSL
 static void
 setup_encryption_internal(void)
 {
-#ifdef USE_OPENSSL
 	/*
 	 * Setup OpenSSL.
 	 *
@@ -444,12 +450,8 @@ setup_encryption_internal(void)
 	Assert(!initialized);
 
 	initialized = true;
-#else
-	encryption_error(true,
-			"data encryption cannot be used because SSL is not supported by this build\n"
-			"Compile with --with-openssl to use SSL connections.");
-#endif	/* USE_OPENSSL */
 }
+#endif	/* USE_OPENSSL */
 
 /*
  * If credentials is a key, just copy it to encryption_key. If it's a

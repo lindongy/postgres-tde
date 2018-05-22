@@ -35,6 +35,7 @@
 #define	ENCRYPTION_KDF_SALT_LEN		8
 
 extern unsigned char	*encryption_key;
+#endif	/* USE_OPENSSL */
 
 /*
  * The encrypted data is a series of blocks of size
@@ -43,6 +44,7 @@ extern unsigned char	*encryption_key;
  */
 #define ENCRYPTION_BLOCK 16
 
+#ifdef	USE_OPENSSL
 /*
  * The openssl EVP API refers to a block in terms of padding of the output
  * chunk. That's the purpose of this constant. However the openssl
@@ -52,7 +54,6 @@ extern unsigned char	*encryption_key;
 #define ENCRYPTION_BLOCK_OPENSSL 1
 
 #define TWEAK_SIZE 16
-#endif
 
 #define KDF_PARAMS_FILE			"global/pg_keysetup"
 #define KDF_PARAMS_FILE_SIZE	512
@@ -95,6 +96,7 @@ typedef struct KDFParamsData
 } KDFParamsData;
 
 extern KDFParamsData	*KDFParams;
+#endif	/* USE_OPENSSL */
 
 extern PGDLLIMPORT bool data_encrypted;
 

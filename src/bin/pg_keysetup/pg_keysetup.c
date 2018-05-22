@@ -19,6 +19,7 @@
 #include "storage/encryption.h"
 #include "getopt_long.h"
 
+#ifdef USE_OPENSSL
 static const char *progname;
 
 static void
@@ -92,11 +93,12 @@ read_kdf_file(char *path)
 	if (KDFParams->function != KDF_OPENSSL_PKCS5_PBKDF2_HMAC_SHA)
 		fatal_error("unsupported KDF function %d", KDFParams->function);
 }
-
+#endif	/* USE_OPENSSL */
 
 int
 main(int argc, char **argv)
 {
+#ifdef USE_OPENSSL
 	int	c;
 	char	   *DataDir = NULL;
 	char		fpath[MAXPGPATH];
@@ -198,6 +200,10 @@ main(int argc, char **argv)
 	for (i = 0; i < ENCRYPTION_KEY_LENGTH; i++)
 		printf("%.2x", encryption_key[i]);
 	printf("\n");
-
+#else
+		encryption_error(FATAL,
+			 "data encryption cannot be used because SSL is not supported by this build\n"
+			 "Compile with --with-openssl to use SSL connections.");
+#endif	/* USE_OPENSSL */
 	return 0;
 }
