@@ -1040,7 +1040,6 @@ main(int argc, char **argv)
 	}
 
 	/* done with argument parsing, do the actual work */
-
 	if (data_encrypted)
 		setup_encryption(false);
 
