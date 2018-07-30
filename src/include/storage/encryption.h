@@ -16,7 +16,6 @@
 
 #include "access/xlogdefs.h"
 #include "port/pg_crc32c.h"
-#include "lib/ilist.h"
 
 #ifdef USE_OPENSSL
 /*
