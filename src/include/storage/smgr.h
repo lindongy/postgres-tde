@@ -144,7 +144,7 @@ extern void RememberFsyncRequest(RelFileNode rnode, ForkNumber forknum,
 extern void ForgetRelationFsyncRequests(RelFileNode rnode, ForkNumber forknum);
 extern void ForgetDatabaseFsyncRequests(Oid dbid);
 
-#ifdef USE_OPENSSL
+#ifdef USE_ENCRYPTION
 extern BlockNumber ReencryptBlock(char *buffer, int blocks,
 		RelFileNode *srcNode, RelFileNode *dstNode,
 		ForkNumber srcForkNum, ForkNumber dstForkNum,

@@ -167,7 +167,7 @@ copy_file(char *fromfile, char *tofile, RelFileNode *fromNode,
 	int			bytesread;
 	off_t		offset;
 	off_t		flush_offset;
-#ifdef USE_OPENSSL
+#ifdef USE_ENCRYPTION
 	BlockNumber blockNum = segment*RELSEG_SIZE;
 #endif
 
@@ -261,7 +261,7 @@ copy_file(char *fromfile, char *tofile, RelFileNode *fromNode,
 		 */
 		if (data_encrypted)
 		{
-#ifdef USE_OPENSSL
+#ifdef USE_ENCRYPTION
 			if (fromNode != NULL)
 			{
 				Assert(toNode != NULL);

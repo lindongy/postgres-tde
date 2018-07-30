@@ -2042,6 +2042,7 @@ mddecrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *des
 	decrypt_block(md_encryption_buffer, dest, BLCKSZ, md_encryption_tweak);
 }
 
+#ifdef USE_ENCRYPTION
 /*
  * Copying relations between tablespaces/databases means that the tweak values
  * of each block will change. This function transcodes a series of blocks with
@@ -2067,4 +2068,5 @@ ReencryptBlock(char *buffer, int blocks,
 	}
 	return blockNum;
 }
+#endif
 #endif
