@@ -150,11 +150,4 @@ extern BlockNumber ReencryptBlock(char *buffer, int blocks,
 		ForkNumber srcForkNum, ForkNumber dstForkNum,
 		BlockNumber blockNum);
 #endif
-
-/* smgrtype.c */
-extern Datum smgrout(PG_FUNCTION_ARGS);
-extern Datum smgrin(PG_FUNCTION_ARGS);
-extern Datum smgreq(PG_FUNCTION_ARGS);
-extern Datum smgrne(PG_FUNCTION_ARGS);
-
-#endif   /* SMGR_H */
+#endif							/* SMGR_H */
