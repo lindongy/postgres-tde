@@ -77,6 +77,7 @@
 #include "replication/walsender.h"
 #include "replication/walsender_private.h"
 #include "storage/condition_variable.h"
+#include "storage/encryption.h"
 #include "storage/fd.h"
 #include "storage/ipc.h"
 #include "storage/pmsignal.h"
@@ -2319,9 +2320,16 @@ XLogRead(char *buf, XLogRecPtr startptr, Size count)
 	XLogRecPtr	recptr;
 	Size		nbytes;
 	XLogSegNo	segno;
+#ifdef USE_ENCRYPTION
+	char	   *decrypt_p;
+	uint32		decryptOff;
+#endif
 
 retry:
 	p = buf;
+#ifdef USE_ENCRYPTION
+	decrypt_p = p;
+#endif
 	recptr = startptr;
 	nbytes = count;
 
@@ -2332,6 +2340,9 @@ retry:
 		int			readbytes;
 
 		startoff = recptr % XLogSegSize;
+#ifdef USE_ENCRYPTION
+		decryptOff = startoff;
+#endif
 
 		if (sendFile < 0 || !XLByteInSeg(recptr, sendSegNo))
 		{
@@ -2439,6 +2450,27 @@ retry:
 		sendOff += readbytes;
 		nbytes -= readbytes;
 		p += readbytes;
+
+		/* Decrypt completed blocks */
+		if (data_encrypted)
+		{
+#ifdef USE_ENCRYPTION
+			while (decrypt_p + XLOG_BLCKSZ <= p)
+			{
+				char		tweak[TWEAK_SIZE];
+
+				XLogEncryptionTweak(tweak, sendSegNo, decryptOff);
+				decrypt_block(decrypt_p, decrypt_p, XLOG_BLCKSZ, tweak);
+
+				decrypt_p += XLOG_BLCKSZ;
+				decryptOff += XLOG_BLCKSZ;
+			}
+#else
+			elog(FATAL,
+				"data encryption cannot be used because SSL is not supported by this build\n"
+				 "Compile with --with-openssl to use SSL connections.");
+#endif							/* USE_ENCRYPTION */
+		}
 	}
 
 	/*
