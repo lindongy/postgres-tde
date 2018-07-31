@@ -18,6 +18,9 @@
 #include "port/pg_crc32c.h"
 
 #ifdef USE_OPENSSL
+
+#define USE_ENCRYPTION
+
 /*
  * Full database encryption key.
  *
