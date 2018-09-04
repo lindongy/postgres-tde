@@ -264,7 +264,7 @@ encrypt_block(const char *input, char *output, Size size, const char *tweak)
 		if((ctx = EVP_CIPHER_CTX_new()) == NULL)
 			evp_error();
 
-		if(EVP_EncryptInit_ex(ctx, EVP_aes_256_xts(), NULL, encryption_key,
+		if(EVP_EncryptInit_ex(ctx, EVP_aes_128_xts(), NULL, encryption_key,
 							  (unsigned char *) tweak) != 1)
 			evp_error();
 
@@ -346,7 +346,7 @@ decrypt_block(const char *input, char *output, Size size, const char *tweak)
 		if((ctx = EVP_CIPHER_CTX_new()) == NULL)
 			evp_error();
 
-		if(EVP_DecryptInit_ex(ctx, EVP_aes_256_xts(), NULL, encryption_key,
+		if(EVP_DecryptInit_ex(ctx, EVP_aes_128_xts(), NULL, encryption_key,
 							  (unsigned char *) tweak) != 1)
 			evp_error();
 
@@ -691,6 +691,7 @@ run_encryption_key_command(bool *is_key_p, size_t *len_p)
 	}
 
 	bytes_read = fread(buf, 1, read_len, fp);
+	printf("check: %d, %zu\n", is_key, bytes_read);
 
 	if ((is_key && bytes_read < read_len) ||
 		(!is_key && bytes_read < (ENCRYPTION_PWD_MIN_LENGTH + 1)))

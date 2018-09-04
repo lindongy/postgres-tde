@@ -24,9 +24,9 @@
 /*
  * Full database encryption key.
  *
- * EVP_aes_256_xts() needs the key twice as long as AES would do in general.
+ * EVP_aes_128_xts() needs the key twice as long as AES would do in general.
  */
-#define	ENCRYPTION_KEY_LENGTH	64
+#define	ENCRYPTION_KEY_LENGTH	32
 
 /*
  * TODO Tune these values.
