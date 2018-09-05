@@ -59,7 +59,6 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 	bool		got_date_is_int = false;
 	bool		got_data_checksum_version = false;
 	bool		got_cluster_state = false;
-	bool		got_data_encrypted = false;
 	char	   *lc_collate = NULL;
 	char	   *lc_ctype = NULL;
 	char	   *lc_monetary = NULL;
@@ -194,13 +193,6 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 	{
 		cluster->controldata.data_checksum_version = 0;
 		got_data_checksum_version = true;
-	}
-
-	/* Only in <= 9.6 */
-	if (GET_MAJOR_VERSION(cluster->major_version) <= 906)
-	{
-		cluster->controldata.data_encrypted = false;
-		got_data_encrypted = true;
 	}
 
 	/* we have the result of cmd in "output". so parse it line by line now */
@@ -511,7 +503,6 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 			for(i = 0; i < 16; i++)
 				sscanf(p + 2*i, "%2hhx",
 						cluster->controldata.encryption_verification + i);
-			got_data_encrypted = true;
 		}
 	}
 
@@ -567,7 +558,7 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 		!got_index || !got_toast ||
 		(!got_large_object &&
 		 cluster->controldata.ctrl_ver >= LARGE_OBJECT_SIZE_PG_CONTROL_VER) ||
-		!got_date_is_int || !got_data_checksum_version || !got_data_encrypted)
+		!got_date_is_int || !got_data_checksum_version)
 	{
 		if (cluster == &old_cluster)
 			pg_log(PG_REPORT,
@@ -632,10 +623,6 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 		/* value added in Postgres 9.3 */
 		if (!got_data_checksum_version)
 			pg_log(PG_REPORT, "  data checksum version\n");
-
-		/* value added in Postgres 10 */
-		if (!got_data_encrypted)
-			pg_log(PG_REPORT, "  data encryption status\n");
 
 		pg_fatal("Cannot continue without required control information, terminating\n");
 	}
