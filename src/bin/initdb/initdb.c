@@ -1418,18 +1418,13 @@ bootstrap_template1(void)
 		encr_key_cmd_str = (char *) pg_malloc(len);
 		snprintf(encr_key_cmd_str, len, "-K %s", encryption_key_command);
 	}
-	else
-	{
-		encr_key_cmd_str = (char *) pg_malloc(1);
-		encr_key_cmd_str[0] = '\0';
-	}
 #endif	/* USE_OPENSSL */
 
 	snprintf(cmd, sizeof(cmd),
 			 "\"%s\" --boot -x1 %s %s %s %s",
 			 backend_exec,
 			 data_checksums ? "-k" : "",
-			 encr_key_cmd_str,
+			 encr_key_cmd_str ? encr_key_cmd_str : "",
 			 boot_options, talkargs);
 
 	PG_CMD_OPEN;
@@ -2986,7 +2981,8 @@ initialize_data_directory(void)
 
 	snprintf(cmd, sizeof(cmd),
 			 "\"%s\" %s %s template1 >%s",
-			 backend_exec, backend_options, encr_key_cmd_str,
+			 backend_exec, backend_options,
+			 encr_key_cmd_str ? encr_key_cmd_str : "",
 			 DEVNULL);
 
 	PG_CMD_OPEN;
