@@ -40,6 +40,7 @@
 #include "catalog/pg_class.h"
 #include "common/restricted_token.h"
 #include "fe_utils/string_utils.h"
+#include "storage/encryption.h"
 
 #ifdef HAVE_LANGINFO_H
 #include <langinfo.h>
@@ -75,6 +76,11 @@ main(int argc, char **argv)
 	char	   *analyze_script_file_name = NULL;
 	char	   *deletion_script_file_name = NULL;
 	bool		live_check = false;
+	char		keycmd_opt_str[MAX_STRING];
+	char		*keysetup_command = NULL;
+
+	if (getenv("KEYSETUP_COMMAND"))
+		keysetup_command = pg_strdup(getenv("KEYSETUP_COMMAND"));
 
 	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_upgrade"));
 
@@ -134,6 +140,11 @@ main(int argc, char **argv)
 
 	stop_postmaster(false);
 
+	encryption_key = NULL;
+	if (getenv("KEYSETUP_COMMAND"))
+		encryption_key_command = pg_strdup(getenv("KEYSETUP_COMMAND"));
+	setup_encryption(false);
+
 	/*
 	 * Most failures happen in create_new_objects(), which has completed at
 	 * this point.  We do this here because it is just before linking, which
@@ -146,6 +157,11 @@ main(int argc, char **argv)
 	transfer_all_new_tablespaces(&old_cluster.dbarr, &new_cluster.dbarr,
 								 old_cluster.pgdata, new_cluster.pgdata);
 
+	if (keysetup_command)
+		snprintf(keycmd_opt_str, sizeof(keycmd_opt_str),
+				 " -K %s", keysetup_command);
+	else
+		keycmd_opt_str[0] = '\0';
 	/*
 	 * Assuming OIDs are only used in system tables, there is no need to
 	 * restore the OID counter because we have not transferred any OIDs from
@@ -154,8 +170,10 @@ main(int argc, char **argv)
 	 */
 	prep_status("Setting next OID for new cluster");
 	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
-			  "\"%s/pg_resetwal\" -o %u \"%s\"",
-			  new_cluster.bindir, old_cluster.controldata.chkpnt_nxtoid,
+			  "\"%s/pg_resetwal\"%s -o %u \"%s\"",
+			  new_cluster.bindir,
+			  keycmd_opt_str,
+			  old_cluster.controldata.chkpnt_nxtoid,
 			  new_cluster.pgdata);
 	check_ok();
 
@@ -412,6 +430,12 @@ copy_subdir_files(char *old_subdir, char *new_subdir)
 static void
 copy_xact_xlog_xid(void)
 {
+	char		keycmd_opt_str[MAX_STRING];
+	char		*keysetup_command = NULL;
+
+	if (getenv("KEYSETUP_COMMAND"))
+		keysetup_command = pg_strdup(getenv("KEYSETUP_COMMAND"));
+
 	/*
 	 * Copy old commit logs to new data dir. pg_clog has been renamed to
 	 * pg_xact in post-10 clusters.
@@ -421,20 +445,31 @@ copy_xact_xlog_xid(void)
 					  GET_MAJOR_VERSION(new_cluster.major_version) < 1000 ?
 					  "pg_clog" : "pg_xact");
 
+	if (keysetup_command)
+		snprintf(keycmd_opt_str, sizeof(keycmd_opt_str),
+				 " -K %s", keysetup_command);
+	else
+		keycmd_opt_str[0] = '\0';
+
 	/* set the next transaction id and epoch of the new cluster */
 	prep_status("Setting next transaction ID and epoch for new cluster");
 	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
-			  "\"%s/pg_resetwal\" -f -x %u \"%s\"",
-			  new_cluster.bindir, old_cluster.controldata.chkpnt_nxtxid,
+			  "\"%s/pg_resetwal\"%s -f -x %u \"%s\"",
+			  new_cluster.bindir,
+			  keycmd_opt_str,
+			  old_cluster.controldata.chkpnt_nxtxid,
 			  new_cluster.pgdata);
 	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
-			  "\"%s/pg_resetwal\" -f -e %u \"%s\"",
-			  new_cluster.bindir, old_cluster.controldata.chkpnt_nxtepoch,
+			  "\"%s/pg_resetwal\"%s -f -e %u \"%s\"",
+			  new_cluster.bindir,
+			  keycmd_opt_str,
+			  old_cluster.controldata.chkpnt_nxtepoch,
 			  new_cluster.pgdata);
 	/* must reset commit timestamp limits also */
 	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
-			  "\"%s/pg_resetwal\" -f -c %u,%u \"%s\"",
+			  "\"%s/pg_resetwal\"%s -f -c %u,%u \"%s\"",
 			  new_cluster.bindir,
+			  keycmd_opt_str,
 			  old_cluster.controldata.chkpnt_nxtxid,
 			  old_cluster.controldata.chkpnt_nxtxid,
 			  new_cluster.pgdata);
@@ -459,8 +494,9 @@ copy_xact_xlog_xid(void)
 		 * counters here and the oldest multi present on system.
 		 */
 		exec_prog(UTILITY_LOG_FILE, NULL, true, true,
-				  "\"%s/pg_resetwal\" -O %u -m %u,%u \"%s\"",
+				  "\"%s/pg_resetwal\"%s -O %u -m %u,%u \"%s\"",
 				  new_cluster.bindir,
+				  keycmd_opt_str,
 				  old_cluster.controldata.chkpnt_nxtmxoff,
 				  old_cluster.controldata.chkpnt_nxtmulti,
 				  old_cluster.controldata.chkpnt_oldstMulti,
@@ -487,8 +523,9 @@ copy_xact_xlog_xid(void)
 		 * next=MaxMultiXactId, but multixact.c can cope with that just fine.
 		 */
 		exec_prog(UTILITY_LOG_FILE, NULL, true, true,
-				  "\"%s/pg_resetwal\" -m %u,%u \"%s\"",
+				  "\"%s/pg_resetwal\"%s -m %u,%u \"%s\"",
 				  new_cluster.bindir,
+				  keycmd_opt_str,
 				  old_cluster.controldata.chkpnt_nxtmulti + 1,
 				  old_cluster.controldata.chkpnt_nxtmulti,
 				  new_cluster.pgdata);
@@ -499,7 +536,8 @@ copy_xact_xlog_xid(void)
 	prep_status("Resetting WAL archives");
 	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
 	/* use timeline 1 to match controldata and no WAL history file */
-			  "\"%s/pg_resetwal\" -l 00000001%s \"%s\"", new_cluster.bindir,
+			  "\"%s/pg_resetwal\"%s -l 00000001%s \"%s\"", new_cluster.bindir,
+			  keycmd_opt_str,
 			  old_cluster.controldata.nextxlogfile + 8,
 			  new_cluster.pgdata);
 	check_ok();

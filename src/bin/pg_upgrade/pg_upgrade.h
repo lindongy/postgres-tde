@@ -11,6 +11,7 @@
 #include <sys/time.h>
 
 #include "libpq-fe.h"
+#include "storage/relfilenode.h"
 
 /* Use port in the private/dynamic port number range */
 #define DEF_PGUPORT			50432
@@ -145,6 +146,7 @@ typedef struct
 	Oid			indtable;		/* if index, OID of its table, else 0 */
 	Oid			toastheap;		/* if toast table, OID of base table, else 0 */
 	char	   *tablespace;		/* tablespace path; "" for cluster default */
+	Oid			tablespace_oid;
 	bool		nsp_alloc;		/* should nspname be freed? */
 	bool		tblsp_alloc;	/* should tablespace be freed? */
 } RelInfo;
@@ -162,6 +164,8 @@ typedef struct
 {
 	const char *old_tablespace;
 	const char *new_tablespace;
+	Oid	old_tablespace_oid;
+	Oid	new_tablespace_oid;
 	const char *old_tablespace_suffix;
 	const char *new_tablespace_suffix;
 	Oid			old_db_oid;
@@ -187,6 +191,7 @@ typedef struct
 	char	   *db_name;		/* database name */
 	char		db_tablespace[MAXPGPATH];	/* database default tablespace
 											 * path */
+	Oid			db_tablespace_oid;
 	char	   *db_collate;
 	char	   *db_ctype;
 	int			db_encoding;
@@ -368,8 +373,8 @@ bool		pid_lock_file_exists(const char *datadir);
 
 
 /* file.c */
-
-void copyFile(const char *src, const char *dst,
+void copyFile(const char *src, RelFileNode *src_relnode, ForkNumber src_forknum,
+		 const char *dst, RelFileNode *dst_relnode, ForkNumber dst_forknum,
 		 const char *schemaName, const char *relName);
 void linkFile(const char *src, const char *dst,
 		 const char *schemaName, const char *relName);

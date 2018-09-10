@@ -9,9 +9,9 @@ include $(top_builddir)/src/Makefile.global
 
 OBJS = check.o controldata.o dump.o exec.o file.o function.o info.o \
        option.o parallel.o pg_upgrade.o relfilenode.o server.o \
-       tablespace.o util.o version.o $(WIN32RES)
+       tablespace.o util.o version.o encryption.o $(WIN32RES)
 
-override CPPFLAGS := -DDLSUFFIX=\"$(DLSUFFIX)\" -I$(srcdir) -I$(libpq_srcdir) $(CPPFLAGS)
+override CPPFLAGS := -DDLSUFFIX=\"$(DLSUFFIX)\" -I$(srcdir) -I$(libpq_srcdir) -DFRONTEND $(CPPFLAGS)
 LDFLAGS_INTERNAL += -L$(top_builddir)/src/fe_utils -lpgfeutils $(libpq_pgport)
 
 
@@ -19,6 +19,9 @@ all: pg_upgrade
 
 pg_upgrade: $(OBJS) | submake-libpq submake-libpgport submake-libpgfeutils
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o $@$(X)
+
+encryption.c: % : $(top_srcdir)/src/backend/storage/smgr/%
+	rm -f $@ && $(LN_S) $< .
 
 install: all installdirs
 	$(INSTALL_PROGRAM) pg_upgrade$(X) '$(DESTDIR)$(bindir)/pg_upgrade$(X)'
@@ -34,7 +37,8 @@ clean distclean maintainer-clean:
 	rm -rf analyze_new_cluster.sh delete_old_cluster.sh log/ tmp_check/ \
 	       loadable_libraries.txt reindex_hash.sql \
 	       pg_upgrade_dump_globals.sql \
-	       pg_upgrade_dump_*.custom pg_upgrade_*.log
+	       pg_upgrade_dump_*.custom pg_upgrade_*.log \
+		encryption.c
 
 check: test.sh all
 	MAKE=$(MAKE) bindir=$(bindir) libdir=$(libdir) EXTRA_REGRESS_OPTS="$(EXTRA_REGRESS_OPTS)" $(SHELL) $< --install

@@ -12,8 +12,10 @@
 #include "access/visibilitymap.h"
 #include "pg_upgrade.h"
 #include "storage/bufpage.h"
+#include "storage/encryption.h"
 #include "storage/checksum.h"
 #include "storage/checksum_impl.h"
+#include "storage/relfilenode.h"
 
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -23,21 +25,63 @@
 static int	win32_pghardlink(const char *src, const char *dst);
 #endif
 
+/*
+ * Both mdtweak() and ReencryptBlock() functions are copy and pasted from the
+ * backend code. We only need them here for one particular migration and
+ * #include of the corresponding headers would require many other includes.
+ */
+#define TWEAK_SIZE 16
+static void
+mdtweak(char *tweak, RelFileNode *relnode, ForkNumber forknum, BlockNumber blocknum)
+{
+	uint32 fork_and_block = (forknum << 24) ^ blocknum;
+
+	memcpy(tweak, relnode, sizeof(RelFileNode));
+	memcpy(tweak + sizeof(RelFileNode), &fork_and_block, 4);
+}
+
+static BlockNumber
+ReencryptBlock(char *buffer, int blocks,
+		RelFileNode *srcNode, RelFileNode *dstNode,
+		ForkNumber srcForkNum, ForkNumber dstForkNum,
+		BlockNumber blockNum)
+{
+	char *cur;
+	char srcTweak[TWEAK_SIZE];
+	char dstTweak[TWEAK_SIZE];
+
+	for (cur = buffer; cur < buffer + blocks * BLCKSZ; cur += BLCKSZ)
+	{
+		mdtweak(srcTweak, srcNode, srcForkNum, blockNum);
+		mdtweak(dstTweak, dstNode, dstForkNum, blockNum);
+		decrypt_block(cur, cur, BLCKSZ, srcTweak);
+		encrypt_block(cur, cur, BLCKSZ, dstTweak);
+		blockNum++;
+	}
+	return blockNum;
+}
 
 /*
  * copyFile()
  *
  * Copies a relation file from src to dst.
  * schemaName/relName are relation's SQL name (used for error messages only).
+ *
+ * Re-encrypt each block in order to handle change of relfilenode.
+ *
+ * TODO Pass segment number so block numbers match for other than the first
+ * segment.
  */
 void
-copyFile(const char *src, const char *dst,
+copyFile(const char *src, RelFileNode *src_relnode, ForkNumber src_forknum,
+		 const char *dst, RelFileNode *dst_relnode, ForkNumber dst_forknum,
 		 const char *schemaName, const char *relName)
 {
 #ifndef WIN32
 	int			src_fd;
 	int			dest_fd;
 	char	   *buffer;
+	BlockNumber	block_num = 0;
 
 	if ((src_fd = open(src, O_RDONLY | PG_BINARY, 0)) < 0)
 		pg_fatal("error while copying relation \"%s.%s\": could not open file \"%s\": %s\n",
@@ -49,7 +93,12 @@ copyFile(const char *src, const char *dst,
 				 schemaName, relName, dst, strerror(errno));
 
 	/* copy in fairly large chunks for best efficiency */
-#define COPY_BUF_SIZE (50 * BLCKSZ)
+	/*
+	 * TODO Handle cases when the number of bytes read is not whole multiple
+	 * of BLCKSZ and process multiple blocks per iteration.
+	 */
+//#define COPY_BUF_SIZE (50 * BLCKSZ)
+#define COPY_BUF_SIZE BLCKSZ
 
 	buffer = (char *) pg_malloc(COPY_BUF_SIZE);
 
@@ -58,12 +107,22 @@ copyFile(const char *src, const char *dst,
 	{
 		ssize_t		nbytes = read(src_fd, buffer, COPY_BUF_SIZE);
 
-		if (nbytes < 0)
+		if (nbytes < 0 || (nbytes % BLCKSZ) != 0)
 			pg_fatal("error while copying relation \"%s.%s\": could not read file \"%s\": %s\n",
 					 schemaName, relName, src, strerror(errno));
 
 		if (nbytes == 0)
 			break;
+
+		/* Re-encrypt the block if copying changes its encryption tweak. */
+		if (src_relnode->spcNode != dst_relnode->spcNode ||
+			src_relnode->dbNode != dst_relnode->dbNode ||
+			src_relnode->relNode != dst_relnode->relNode ||
+			src_forknum != dst_forknum)
+			ReencryptBlock(buffer, 1, src_relnode, dst_relnode, src_forknum,
+						   dst_forknum, block_num);
+
+		block_num++;
 
 		errno = 0;
 		if (write(dest_fd, buffer, nbytes) != nbytes)

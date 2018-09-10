@@ -248,13 +248,33 @@ transfer_relfile(FileNameMap *map, const char *type_suffix, bool vm_must_add_fro
 			/* Need to rewrite visibility map format */
 			pg_log(PG_VERBOSE, "rewriting \"%s\" to \"%s\"\n",
 				   old_file, new_file);
+			/* TODO Re-encrypt. */
 			rewriteVisibilityMap(old_file, new_file, map->nspname, map->relname);
 		}
 		else if (user_opts.transfer_mode == TRANSFER_MODE_COPY)
 		{
+			RelFileNode	old_relnode, new_relnode;
+			ForkNumber	old_forknum, new_forknum;
+
 			pg_log(PG_VERBOSE, "copying \"%s\" to \"%s\"\n",
 				   old_file, new_file);
-			copyFile(old_file, new_file, map->nspname, map->relname);
+
+			old_relnode.spcNode = map->old_tablespace_oid;
+			old_relnode.dbNode = map->old_db_oid;
+			old_relnode.relNode = map->old_relfilenode;
+			new_relnode.spcNode = map->new_tablespace_oid;
+			new_relnode.dbNode = map->new_db_oid;
+			new_relnode.relNode = map->new_relfilenode;
+
+			/*
+			 * TODO Handle all possible suffixes and convert them to form
+			 * names.
+			 */
+			old_forknum = new_forknum = MAIN_FORKNUM;
+
+			copyFile(old_file, &old_relnode, old_forknum,
+					 new_file, &new_relnode, new_forknum,
+					 map->nspname, map->relname);
 		}
 		else
 		{
