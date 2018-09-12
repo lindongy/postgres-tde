@@ -376,8 +376,8 @@ bool		pid_lock_file_exists(const char *datadir);
 
 
 /* file.c */
-void copyFile(const char *src, RelFileNode *src_relnode, ForkNumber src_forknum,
-		 const char *dst, RelFileNode *dst_relnode, ForkNumber dst_forknum,
+void copyFile(const char *src, RelFileNode *src_relnode,
+		 const char *dst, RelFileNode *dst_relnode, ForkNumber forknum,
 		 const char *schemaName, const char *relName);
 void linkFile(const char *src, const char *dst,
 		 const char *schemaName, const char *relName);

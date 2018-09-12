@@ -17,7 +17,8 @@
 
 
 static void transfer_single_new_db(FileNameMap *maps, int size, char *old_tablespace);
-static void transfer_relfile(FileNameMap *map, const char *suffix, bool vm_must_add_frozenbit);
+static void transfer_relfile(FileNameMap *map, const char *suffix, ForkNumber forknum,
+							 bool vm_must_add_frozenbit);
 
 
 /*
@@ -158,7 +159,8 @@ transfer_single_new_db(FileNameMap *maps, int size, char *old_tablespace)
 			strcmp(maps[mapnum].old_tablespace, old_tablespace) == 0)
 		{
 			/* transfer primary file */
-			transfer_relfile(&maps[mapnum], "", vm_must_add_frozenbit);
+			transfer_relfile(&maps[mapnum], "", MAIN_FORKNUM,
+							 vm_must_add_frozenbit);
 
 			/* fsm/vm files added in PG 8.4 */
 			if (GET_MAJOR_VERSION(old_cluster.major_version) >= 804)
@@ -166,9 +168,11 @@ transfer_single_new_db(FileNameMap *maps, int size, char *old_tablespace)
 				/*
 				 * Copy/link any fsm and vm files, if they exist
 				 */
-				transfer_relfile(&maps[mapnum], "_fsm", vm_must_add_frozenbit);
+				transfer_relfile(&maps[mapnum], "_fsm", FSM_FORKNUM,
+								 vm_must_add_frozenbit);
 				if (vm_crashsafe_match)
-					transfer_relfile(&maps[mapnum], "_vm", vm_must_add_frozenbit);
+					transfer_relfile(&maps[mapnum], "_vm", VISIBILITYMAP_FORKNUM,
+									 vm_must_add_frozenbit);
 			}
 		}
 	}
@@ -183,7 +187,8 @@ transfer_single_new_db(FileNameMap *maps, int size, char *old_tablespace)
  * mode.
  */
 static void
-transfer_relfile(FileNameMap *map, const char *type_suffix, bool vm_must_add_frozenbit)
+transfer_relfile(FileNameMap *map, const char *type_suffix, ForkNumber forknum,
+				 bool vm_must_add_frozenbit)
 {
 	char		old_file[MAXPGPATH];
 	char		new_file[MAXPGPATH];
@@ -254,7 +259,6 @@ transfer_relfile(FileNameMap *map, const char *type_suffix, bool vm_must_add_fro
 		else if (user_opts.transfer_mode == TRANSFER_MODE_COPY)
 		{
 			RelFileNode	old_relnode, new_relnode;
-			ForkNumber	old_forknum, new_forknum;
 
 			pg_log(PG_VERBOSE, "copying \"%s\" to \"%s\"\n",
 				   old_file, new_file);
@@ -266,14 +270,8 @@ transfer_relfile(FileNameMap *map, const char *type_suffix, bool vm_must_add_fro
 			new_relnode.dbNode = map->new_db_oid;
 			new_relnode.relNode = map->new_relfilenode;
 
-			/*
-			 * TODO Handle all possible suffixes and convert them to form
-			 * names.
-			 */
-			old_forknum = new_forknum = MAIN_FORKNUM;
-
-			copyFile(old_file, &old_relnode, old_forknum,
-					 new_file, &new_relnode, new_forknum,
+			copyFile(old_file, &old_relnode,
+					 new_file, &new_relnode, forknum,
 					 map->nspname, map->relname);
 		}
 		else

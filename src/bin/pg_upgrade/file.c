@@ -73,9 +73,9 @@ ReencryptBlock(char *buffer, int blocks,
  * segment.
  */
 void
-copyFile(const char *src, RelFileNode *src_relnode, ForkNumber src_forknum,
-		 const char *dst, RelFileNode *dst_relnode, ForkNumber dst_forknum,
-		 const char *schemaName, const char *relName)
+copyFile(const char *src, RelFileNode *src_relnode,
+		 const char *dst, RelFileNode *dst_relnode,
+		 ForkNumber forknum, const char *schemaName, const char *relName)
 {
 #ifndef WIN32
 	int			src_fd;
@@ -134,14 +134,13 @@ copyFile(const char *src, RelFileNode *src_relnode, ForkNumber src_forknum,
 		/* Re-encrypt the block(s) if copying changes encryption tweak. */
 		if (src_relnode->spcNode != dst_relnode->spcNode ||
 			src_relnode->dbNode != dst_relnode->dbNode ||
-			src_relnode->relNode != dst_relnode->relNode ||
-			src_forknum != dst_forknum)
+			src_relnode->relNode != dst_relnode->relNode)
 			block_num = ReencryptBlock(buffer,
 									   nbytes_total / BLCKSZ,
 									   src_relnode,
 									   dst_relnode,
-									   src_forknum,
-									   dst_forknum,
+									   forknum,
+									   forknum,
 									   block_num);
 
 		errno = 0;
