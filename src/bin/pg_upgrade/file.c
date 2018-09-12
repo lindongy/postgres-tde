@@ -93,39 +93,59 @@ copyFile(const char *src, RelFileNode *src_relnode, ForkNumber src_forknum,
 				 schemaName, relName, dst, strerror(errno));
 
 	/* copy in fairly large chunks for best efficiency */
-	/*
-	 * TODO Handle cases when the number of bytes read is not whole multiple
-	 * of BLCKSZ and process multiple blocks per iteration.
-	 */
-//#define COPY_BUF_SIZE (50 * BLCKSZ)
-#define COPY_BUF_SIZE BLCKSZ
+#define COPY_BUF_SIZE (50 * BLCKSZ)
 
 	buffer = (char *) pg_malloc(COPY_BUF_SIZE);
 
-	/* perform data copying i.e read src source, write to destination */
+	/*
+	 * Perform data copying i.e read src source, write to destination. As the
+	 * file can be encrypted, we only handle whole pages.
+	 */
 	while (true)
 	{
-		ssize_t		nbytes = read(src_fd, buffer, COPY_BUF_SIZE);
+		ssize_t		nbytes_total = 0;
 
-		if (nbytes < 0 || (nbytes % BLCKSZ) != 0)
+		while (nbytes_total < COPY_BUF_SIZE)
+		{
+			ssize_t		nbytes;
+
+			nbytes = read(src_fd, buffer + nbytes_total, COPY_BUF_SIZE - nbytes_total);
+			nbytes_total += nbytes;
+
+			if (nbytes < 0)
+				pg_fatal("error while copying relation \"%s.%s\": could not read file \"%s\": %s\n",
+						 schemaName, relName, src, strerror(errno));
+
+			if (nbytes == 0)
+				break;
+		}
+
+		/*
+		 * The buffer is not necessarily full but the data must end at page
+		 * boundary.
+		 */
+		if ((nbytes_total % BLCKSZ) != 0)
 			pg_fatal("error while copying relation \"%s.%s\": could not read file \"%s\": %s\n",
 					 schemaName, relName, src, strerror(errno));
 
-		if (nbytes == 0)
+		if (nbytes_total == 0)
 			break;
 
-		/* Re-encrypt the block if copying changes its encryption tweak. */
+		/* Re-encrypt the block(s) if copying changes encryption tweak. */
 		if (src_relnode->spcNode != dst_relnode->spcNode ||
 			src_relnode->dbNode != dst_relnode->dbNode ||
 			src_relnode->relNode != dst_relnode->relNode ||
 			src_forknum != dst_forknum)
-			ReencryptBlock(buffer, 1, src_relnode, dst_relnode, src_forknum,
-						   dst_forknum, block_num);
-
-		block_num++;
+			block_num = ReencryptBlock(buffer,
+									   nbytes_total / BLCKSZ,
+									   src_relnode,
+									   dst_relnode,
+									   src_forknum,
+									   dst_forknum,
+									   block_num);
 
 		errno = 0;
-		if (write(dest_fd, buffer, nbytes) != nbytes)
+		if (write(dest_fd, buffer, nbytes_total) != nbytes_total)
 		{
 			/* if write didn't set errno, assume problem is no disk space */
 			if (errno == 0)
