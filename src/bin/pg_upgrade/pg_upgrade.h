@@ -282,6 +282,8 @@ typedef struct
 	char		major_version_str[64];	/* string PG_VERSION of cluster */
 	uint32		bin_version;	/* version returned from pg_ctl */
 	const char *tablespace_suffix;	/* directory specification */
+	const char *encryption_key_command;	/* command to retrieve encryption key
+									 * or passphrase */
 } ClusterInfo;
 
 
@@ -348,6 +350,7 @@ void		check_cluster_versions(void);
 void		check_cluster_compatibility(bool live_check);
 void		create_script_for_old_cluster_deletion(char **deletion_script_file_name);
 void		create_script_for_cluster_analyze(char **analyze_script_file_name);
+void		get_encryption_key_command(ClusterInfo *cluster);
 
 
 /* controldata.c */

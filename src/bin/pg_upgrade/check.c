@@ -797,6 +797,40 @@ check_for_prepared_transactions(ClusterInfo *cluster)
 	check_ok();
 }
 
+/*
+ *	get_encryption_key_command()
+ *
+ *	Retrieve the value of encryption_key_command configuration variable.
+ */
+void
+get_encryption_key_command(ClusterInfo *cluster)
+{
+	PGresult   *res;
+	PGconn	   *conn = connectToServer(cluster, "template1");
+
+	prep_status("Retrieving encryption_key_command");
+
+	res = executeQueryOrDie(conn,
+							"SELECT setting "
+							"FROM pg_catalog.pg_settings "
+							"WHERE name = 'encryption_key_command'");
+
+	if (PQntuples(res) != 0)
+	{
+		int i_setting = PQfnumber(res, "setting");
+		char	*setting = PQgetvalue(res, 0, i_setting);
+
+		cluster->encryption_key_command = setting != NULL ?
+			pg_strdup(setting) : NULL;
+	}
+
+	PQclear(res);
+
+	PQfinish(conn);
+
+	check_ok();
+}
+
 
 /*
  *	check_for_isn_and_int8_passing_mismatch()

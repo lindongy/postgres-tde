@@ -77,10 +77,6 @@ main(int argc, char **argv)
 	char	   *deletion_script_file_name = NULL;
 	bool		live_check = false;
 	char		keycmd_opt_str[MAX_STRING];
-	char		*keysetup_command = NULL;
-
-	if (getenv("KEYSETUP_COMMAND"))
-		keysetup_command = pg_strdup(getenv("KEYSETUP_COMMAND"));
 
 	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_upgrade"));
 
@@ -102,6 +98,17 @@ main(int argc, char **argv)
 
 	get_sock_dir(&old_cluster, live_check);
 	get_sock_dir(&new_cluster, false);
+
+	/*
+	 * One extra start / stop cycle of the new cluster is needed to retrieve
+	 * the encryption_key_command, which we'll be needed by
+	 * check_cluster_compatibility(). XXX Should we get the value from
+	 * postgresql.conf (note that it can be located outside the data
+	 * directory)?
+	 */
+	start_postmaster(&new_cluster, true);
+	get_encryption_key_command(&new_cluster);
+	stop_postmaster(false);
 
 	check_cluster_compatibility(live_check);
 
@@ -141,8 +148,8 @@ main(int argc, char **argv)
 	stop_postmaster(false);
 
 	encryption_key = NULL;
-	if (getenv("KEYSETUP_COMMAND"))
-		encryption_key_command = pg_strdup(getenv("KEYSETUP_COMMAND"));
+	if (new_cluster.encryption_key_command)
+		encryption_key_command = pg_strdup(new_cluster.encryption_key_command);
 	setup_encryption(false);
 
 	/*
@@ -157,9 +164,9 @@ main(int argc, char **argv)
 	transfer_all_new_tablespaces(&old_cluster.dbarr, &new_cluster.dbarr,
 								 old_cluster.pgdata, new_cluster.pgdata);
 
-	if (keysetup_command)
+	if (new_cluster.encryption_key_command)
 		snprintf(keycmd_opt_str, sizeof(keycmd_opt_str),
-				 " -K %s", keysetup_command);
+				 " -K %s", new_cluster.encryption_key_command);
 	else
 		keycmd_opt_str[0] = '\0';
 	/*
@@ -431,10 +438,6 @@ static void
 copy_xact_xlog_xid(void)
 {
 	char		keycmd_opt_str[MAX_STRING];
-	char		*keysetup_command = NULL;
-
-	if (getenv("KEYSETUP_COMMAND"))
-		keysetup_command = pg_strdup(getenv("KEYSETUP_COMMAND"));
 
 	/*
 	 * Copy old commit logs to new data dir. pg_clog has been renamed to
@@ -445,9 +448,9 @@ copy_xact_xlog_xid(void)
 					  GET_MAJOR_VERSION(new_cluster.major_version) < 1000 ?
 					  "pg_clog" : "pg_xact");
 
-	if (keysetup_command)
+	if (new_cluster.encryption_key_command)
 		snprintf(keycmd_opt_str, sizeof(keycmd_opt_str),
-				 " -K %s", keysetup_command);
+				 " -K %s", new_cluster.encryption_key_command);
 	else
 		keycmd_opt_str[0] = '\0';
 

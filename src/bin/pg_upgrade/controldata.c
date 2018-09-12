@@ -69,7 +69,6 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 	char	   *language = NULL;
 	char	   *lc_all = NULL;
 	char	   *lc_messages = NULL;
-	char		*keysetup_command = NULL;
 	uint32		tli = 0;
 	uint32		logid = 0;
 	uint32		segno = 0;
@@ -98,8 +97,6 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 		lc_all = pg_strdup(getenv("LC_ALL"));
 	if (getenv("LC_MESSAGES"))
 		lc_messages = pg_strdup(getenv("LC_MESSAGES"));
-	if (getenv("KEYSETUP_COMMAND"))
-		keysetup_command = pg_strdup(getenv("KEYSETUP_COMMAND"));
 
 	pg_putenv("LC_COLLATE", NULL);
 	pg_putenv("LC_CTYPE", NULL);
@@ -181,9 +178,9 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 		resetwal_bin = "pg_resetxlog\" -n";
 	else
 		resetwal_bin = "pg_resetwal\" -n";
-	if (keysetup_command)
+	if (cluster->encryption_key_command)
 		snprintf(keycmd_opt_str, sizeof(keycmd_opt_str),
-				 " -K %s", keysetup_command);
+				 " -K %s", cluster->encryption_key_command);
 	else
 		keycmd_opt_str[0] = '\0';
 	snprintf(cmd, sizeof(cmd), "\"%s/%s%s \"%s\"",
