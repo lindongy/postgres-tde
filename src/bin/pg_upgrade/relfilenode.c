@@ -279,7 +279,7 @@ transfer_relfile(FileNameMap *map, const char *type_suffix, ForkNumber forknum,
 
 			copyFile(old_file, &old_relnode,
 					 new_file, &new_relnode, forknum,
-					 map->nspname, map->relname);
+					 segno, map->nspname, map->relname);
 		}
 		else
 		{

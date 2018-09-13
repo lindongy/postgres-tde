@@ -68,20 +68,18 @@ ReencryptBlock(char *buffer, int blocks,
  * schemaName/relName are relation's SQL name (used for error messages only).
  *
  * Re-encrypt each block in order to handle change of relfilenode.
- *
- * TODO Pass segment number so block numbers match for other than the first
- * segment.
  */
 void
 copyFile(const char *src, RelFileNode *src_relnode,
 		 const char *dst, RelFileNode *dst_relnode,
-		 ForkNumber forknum, const char *schemaName, const char *relName)
+		 ForkNumber forknum, int segno, const char *schemaName,
+		 const char *relName)
 {
 #ifndef WIN32
 	int			src_fd;
 	int			dest_fd;
 	char	   *buffer;
-	BlockNumber	block_num = 0;
+	BlockNumber	block_num = segno * RELSEG_SIZE;
 
 	if ((src_fd = open(src, O_RDONLY | PG_BINARY, 0)) < 0)
 		pg_fatal("error while copying relation \"%s.%s\": could not open file \"%s\": %s\n",

@@ -379,7 +379,8 @@ bool		pid_lock_file_exists(const char *datadir);
 /* file.c */
 void copyFile(const char *src, RelFileNode *src_relnode,
 		 const char *dst, RelFileNode *dst_relnode, ForkNumber forknum,
-		 const char *schemaName, const char *relName);
+			  int segno,
+			  const char *schemaName, const char *relName);
 void linkFile(const char *src, const char *dst,
 		 const char *schemaName, const char *relName);
 void rewriteVisibilityMap(const char *fromfile, const char *tofile,
