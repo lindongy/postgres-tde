@@ -46,6 +46,8 @@
 #include <langinfo.h>
 #endif
 
+#include <dirent.h>
+
 static void prepare_new_cluster(void);
 static void prepare_new_databases(void);
 static void create_new_objects(void);
@@ -70,6 +72,8 @@ char	   *output_files[] = {
 };
 
 bool	encryption_enabled = false;
+static char slru_encryption_tweak[TWEAK_SIZE];
+static void SlruEncryptionTweak(char *tweak, int pageno);
 
 int
 main(int argc, char **argv)
@@ -133,22 +137,9 @@ main(int argc, char **argv)
 
 	/*
 	 * Destructive Changes to New Cluster
+	 *
+	 * We'll deal with encrypted files, so prepare for it.
 	 */
-
-	copy_xact_xlog_xid();
-
-	/* New now using xids of the old system */
-
-	/* -- NEW -- */
-	start_postmaster(&new_cluster, true);
-
-	prepare_new_databases();
-
-	create_new_objects();
-
-	stop_postmaster(false);
-
-	encryption_key = NULL;
 	if (new_cluster.encryption_key_command)
 	{
 		/*
@@ -164,6 +155,19 @@ main(int argc, char **argv)
 	}
 	setup_encryption(false);
 	encryption_enabled = true;
+
+	copy_xact_xlog_xid();
+
+	/* New now using xids of the old system */
+
+	/* -- NEW -- */
+	start_postmaster(&new_cluster, true);
+
+	prepare_new_databases();
+
+	create_new_objects();
+
+	stop_postmaster(false);
 
 	/*
 	 * Most failures happen in create_new_objects(), which has completed at
@@ -435,14 +439,110 @@ copy_subdir_files(char *old_subdir, char *new_subdir)
 
 	prep_status("Copying old %s to new server", old_subdir);
 
-	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
+	if (!encryption_enabled)
+	{
+		exec_prog(UTILITY_LOG_FILE, NULL, true, true,
 #ifndef WIN32
-			  "cp -Rf \"%s\" \"%s\"",
+				  "cp -Rf \"%s\" \"%s\"",
 #else
-	/* flags: everything, no confirm, quiet, overwrite read-only */
-			  "xcopy /e /y /q /r \"%s\" \"%s\\\"",
+				  /* flags: everything, no confirm, quiet, overwrite read-only */
+				  "xcopy /e /y /q /r \"%s\" \"%s\\\"",
 #endif
-			  old_path, new_path);
+				  old_path, new_path);
+	}
+	else if (GET_MAJOR_VERSION(old_cluster.major_version) <= 906)
+	{
+		DIR		*dir;
+		struct dirent *de;
+		char	*buffer;
+
+#ifdef WIN32
+		#error "SLRU decryption not supported on W32"
+#endif
+
+		/*
+		 * SLRU is eventually not encrypted, however our 9.6 version did
+		 * so. Copy and decrypt one file after another.
+		 */
+		exec_prog(UTILITY_LOG_FILE, NULL, true, true, "mkdir \"%s\"",
+				  new_path);
+
+		dir = opendir(old_path);
+		if (dir == NULL)
+			pg_fatal("failed to open directory \"%s\"\n", old_path);
+
+		buffer = (char *) pg_malloc(BLCKSZ);
+		while ((de = readdir(dir)) != NULL)
+		{
+			char			   src_file[MAXPGPATH];
+			char			   dst_file[MAXPGPATH];
+			int			src_fd;
+			int			dest_fd;
+			int	pageno;
+
+			if (strcmp(de->d_name, ".") == 0 ||
+				strcmp(de->d_name, "..") == 0)
+				continue;
+
+			/*
+			 * XXX Is it worth checking the file name format? If it's
+			 * something we do not expect, the length will probably differ
+			 * from BLCKSZ and therefore we'll fail to read it.
+			 */
+			if (strlen(de->d_name) != 4)
+				pg_fatal("unrecognized file in \"%s\" directory\n", old_path);
+
+			snprintf(src_file, sizeof(src_file), "%s/%s", old_path, de->d_name);
+			if ((src_fd = open(src_file, O_RDONLY | PG_BINARY, 0)) < 0)
+				pg_fatal("failed to open file \"%s\"%s\n", src_file,
+						 strerror(errno));
+
+			snprintf(dst_file, sizeof(dst_file), "%s/%s", new_path, de->d_name);
+			if ((dest_fd = open(dst_file, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
+								S_IRUSR | S_IWUSR)) < 0)
+				pg_fatal("failed to create file \"%s\": %s\n", dst_file,
+						 strerror(errno));
+
+			for (pageno = 0;; pageno++)
+			{
+				ssize_t		nbytes;
+
+				if ((nbytes = read(src_fd, buffer, BLCKSZ)) < 0)
+					pg_fatal("failed to read from \"%s\": %s\n",
+							 src_file, strerror(errno));
+				if (nbytes == 0)
+					break;
+
+				if (nbytes != BLCKSZ)
+					pg_fatal("read %zu bytes from \"%s\" instead of %d: %s\n",
+							 nbytes, src_file, BLCKSZ, strerror(errno));
+
+				SlruEncryptionTweak(slru_encryption_tweak, pageno);
+				decrypt_block(buffer, buffer, BLCKSZ, slru_encryption_tweak);
+
+				errno = 0;
+				if (write(dest_fd, buffer, BLCKSZ) != BLCKSZ)
+				{
+					/* if write didn't set errno, assume problem is no disk space */
+					if (errno == 0)
+						errno = ENOSPC;
+					pg_fatal("could not write file \"%s\": %s\n", dst_file,
+							 strerror(errno));
+				}
+			}
+
+			close(src_fd);
+			close(dest_fd);
+		}
+		closedir(dir);
+		pg_free(buffer);
+/*
+ * #define SlruFileName(ctl, path, seg) \
+ *			   snprintf(path, MAXPGPATH, "%s/%04X", (ctl)->Dir, seg)
+ */
+
+	}
+
 
 	check_ok();
 }
@@ -710,4 +810,12 @@ cleanup(void)
 				unlink(log_file_name);
 			}
 	}
+}
+
+static void
+SlruEncryptionTweak(char *tweak, int pageno)
+{
+		/* TODO: would be nice to incorporate SLRU type in tweak */
+		memcpy(tweak, &pageno, sizeof(pageno));
+		memset(tweak + sizeof(pageno), 0, TWEAK_SIZE - sizeof(pageno));
 }
