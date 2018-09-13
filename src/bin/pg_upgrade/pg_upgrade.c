@@ -150,7 +150,18 @@ main(int argc, char **argv)
 
 	encryption_key = NULL;
 	if (new_cluster.encryption_key_command)
+	{
+		/*
+		 * If encryption is in place, we expect that some files will need
+		 * re-encryption due to change of their RelFileNode, so link does not
+		 * help. (We might copy files that need re-encryption and link the
+		 * others, but not sure it's worth the effort.)
+		 */
+		if (user_opts.transfer_mode == TRANSFER_MODE_LINK)
+			pg_fatal("link mode cannot be used for encrypted instance\n");
+
 		encryption_key_command = pg_strdup(new_cluster.encryption_key_command);
+	}
 	setup_encryption(false);
 	encryption_enabled = true;
 
