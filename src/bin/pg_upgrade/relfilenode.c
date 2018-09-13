@@ -250,10 +250,17 @@ transfer_relfile(FileNameMap *map, const char *type_suffix, ForkNumber forknum,
 
 		if (vm_must_add_frozenbit && strcmp(type_suffix, "_vm") == 0)
 		{
+			/*
+			 * Encryption is not supported for the old versions that need to
+			 * rewrite the visibility map. Something bad must have happened if
+			 * this condition is met.
+			 */
+			if (encryption_enabled)
+				pg_fatal("the old cluster is too old to be encrypted\n");
+
 			/* Need to rewrite visibility map format */
 			pg_log(PG_VERBOSE, "rewriting \"%s\" to \"%s\"\n",
 				   old_file, new_file);
-			/* TODO Re-encrypt. */
 			rewriteVisibilityMap(old_file, new_file, map->nspname, map->relname);
 		}
 		else if (user_opts.transfer_mode == TRANSFER_MODE_COPY)

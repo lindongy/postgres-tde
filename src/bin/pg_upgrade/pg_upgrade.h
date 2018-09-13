@@ -336,6 +336,7 @@ extern ClusterInfo old_cluster,
 			new_cluster;
 extern OSInfo os_info;
 
+extern	bool	encryption_enabled;
 
 /* check.c */
 

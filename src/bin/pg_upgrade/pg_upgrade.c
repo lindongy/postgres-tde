@@ -69,6 +69,7 @@ char	   *output_files[] = {
 	NULL
 };
 
+bool	encryption_enabled = false;
 
 int
 main(int argc, char **argv)
@@ -151,6 +152,7 @@ main(int argc, char **argv)
 	if (new_cluster.encryption_key_command)
 		encryption_key_command = pg_strdup(new_cluster.encryption_key_command);
 	setup_encryption(false);
+	encryption_enabled = true;
 
 	/*
 	 * Most failures happen in create_new_objects(), which has completed at
