@@ -185,6 +185,10 @@ create_rel_filename_map(const char *old_data, const char *new_data,
 		map->old_tablespace = old_rel->tablespace;
 		map->old_tablespace_suffix = old_cluster.tablespace_suffix;
 	}
+	if (old_rel->tablespace_oid != InvalidOid)
+		map->old_tablespace_oid = old_rel->tablespace_oid;
+	else
+		map->old_tablespace_oid = old_db->db_tablespace_oid;
 
 	/* Do the same for new tablespaces */
 	if (strlen(new_rel->tablespace) == 0)
@@ -197,6 +201,10 @@ create_rel_filename_map(const char *old_data, const char *new_data,
 		map->new_tablespace = new_rel->tablespace;
 		map->new_tablespace_suffix = new_cluster.tablespace_suffix;
 	}
+	if (new_rel->tablespace_oid != InvalidOid)
+		map->new_tablespace_oid = new_rel->tablespace_oid;
+	else
+		map->new_tablespace_oid = new_db->db_tablespace_oid;
 
 	map->old_db_oid = old_db->db_oid;
 	map->new_db_oid = new_db->db_oid;
@@ -349,12 +357,13 @@ get_db_infos(ClusterInfo *cluster)
 				i_encoding,
 				i_datcollate,
 				i_datctype,
-				i_spclocation;
+		i_spclocation,
+		i_tablespace;
 	char		query[QUERY_ALLOC];
 
 	snprintf(query, sizeof(query),
 			 "SELECT d.oid, d.datname, d.encoding, d.datcollate, d.datctype, "
-			 "%s AS spclocation "
+			 "%s AS spclocation, d.dattablespace "
 			 "FROM pg_catalog.pg_database d "
 			 " LEFT OUTER JOIN pg_catalog.pg_tablespace t "
 			 " ON d.dattablespace = t.oid "
@@ -373,6 +382,7 @@ get_db_infos(ClusterInfo *cluster)
 	i_datcollate = PQfnumber(res, "datcollate");
 	i_datctype = PQfnumber(res, "datctype");
 	i_spclocation = PQfnumber(res, "spclocation");
+	i_tablespace = PQfnumber(res, "dattablespace");
 
 	ntups = PQntuples(res);
 	dbinfos = (DbInfo *) pg_malloc(sizeof(DbInfo) * ntups);
@@ -386,6 +396,7 @@ get_db_infos(ClusterInfo *cluster)
 		dbinfos[tupnum].db_ctype = pg_strdup(PQgetvalue(res, tupnum, i_datctype));
 		snprintf(dbinfos[tupnum].db_tablespace, sizeof(dbinfos[tupnum].db_tablespace), "%s",
 				 PQgetvalue(res, tupnum, i_spclocation));
+		dbinfos[tupnum].db_tablespace_oid = atooid(PQgetvalue(res, tupnum, i_tablespace));
 	}
 	PQclear(res);
 
@@ -562,7 +573,8 @@ get_rel_infos(ClusterInfo *cluster, DbInfo *dbinfo)
 		curr->tblsp_alloc = false;
 
 		/* Is the tablespace oid non-default? */
-		if (atooid(PQgetvalue(res, relnum, i_reltablespace)) != 0)
+		curr->tablespace_oid = atooid(PQgetvalue(res, relnum, i_reltablespace));
+		if (curr->tablespace_oid != 0)
 		{
 			/*
 			 * The tablespace location might be "", meaning the cluster
@@ -646,9 +658,10 @@ print_rel_infos(RelInfoArr *rel_arr)
 	int			relnum;
 
 	for (relnum = 0; relnum < rel_arr->nrels; relnum++)
-		pg_log(PG_VERBOSE, "relname: %s.%s: reloid: %u reltblspace: %s\n",
+		pg_log(PG_VERBOSE, "relname: %s.%s: reloid: %u reltblspace: %s reltblspaceoid: %u\n",
 			   rel_arr->rels[relnum].nspname,
 			   rel_arr->rels[relnum].relname,
 			   rel_arr->rels[relnum].reloid,
-			   rel_arr->rels[relnum].tablespace);
+			   rel_arr->rels[relnum].tablespace,
+			   rel_arr->rels[relnum].tablespace_oid);
 }

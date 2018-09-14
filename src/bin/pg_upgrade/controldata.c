@@ -35,6 +35,7 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 {
 	char		cmd[MAXPGPATH];
 	char		bufin[MAX_STRING];
+	char		keycmd_opt_str[MAX_STRING];
 	FILE	   *output;
 	char	   *p;
 	bool		got_tli = false;
@@ -177,9 +178,15 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 		resetwal_bin = "pg_resetxlog\" -n";
 	else
 		resetwal_bin = "pg_resetwal\" -n";
-	snprintf(cmd, sizeof(cmd), "\"%s/%s \"%s\"",
+	if (cluster->encryption_key_command)
+		snprintf(keycmd_opt_str, sizeof(keycmd_opt_str),
+				 " -K %s", cluster->encryption_key_command);
+	else
+		keycmd_opt_str[0] = '\0';
+	snprintf(cmd, sizeof(cmd), "\"%s/%s%s \"%s\"",
 			 cluster->bindir,
 			 live_check ? "pg_controldata\"" : resetwal_bin,
+			 keycmd_opt_str,
 			 cluster->pgdata);
 	fflush(stdout);
 	fflush(stderr);

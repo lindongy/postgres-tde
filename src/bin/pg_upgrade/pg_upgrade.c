@@ -40,10 +40,13 @@
 #include "catalog/pg_class.h"
 #include "common/restricted_token.h"
 #include "fe_utils/string_utils.h"
+#include "storage/encryption.h"
 
 #ifdef HAVE_LANGINFO_H
 #include <langinfo.h>
 #endif
+
+#include <dirent.h>
 
 static void prepare_new_cluster(void);
 static void prepare_new_databases(void);
@@ -68,6 +71,9 @@ char	   *output_files[] = {
 	NULL
 };
 
+bool	encryption_enabled = false;
+static char slru_encryption_tweak[TWEAK_SIZE];
+static void SlruEncryptionTweak(char *tweak, int pageno);
 
 int
 main(int argc, char **argv)
@@ -75,6 +81,7 @@ main(int argc, char **argv)
 	char	   *analyze_script_file_name = NULL;
 	char	   *deletion_script_file_name = NULL;
 	bool		live_check = false;
+	char		keycmd_opt_str[MAX_STRING];
 
 	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_upgrade"));
 
@@ -96,6 +103,17 @@ main(int argc, char **argv)
 
 	get_sock_dir(&old_cluster, live_check);
 	get_sock_dir(&new_cluster, false);
+
+	/*
+	 * One extra start / stop cycle of the new cluster is needed to retrieve
+	 * the encryption_key_command, which we'll be needed by
+	 * check_cluster_compatibility(). XXX Should we get the value from
+	 * postgresql.conf (note that it can be located outside the data
+	 * directory)?
+	 */
+	start_postmaster(&new_cluster, true);
+	get_encryption_key_command(&new_cluster);
+	stop_postmaster(false);
 
 	check_cluster_compatibility(live_check);
 
@@ -119,7 +137,24 @@ main(int argc, char **argv)
 
 	/*
 	 * Destructive Changes to New Cluster
+	 *
+	 * We'll deal with encrypted files, so prepare for it.
 	 */
+	if (new_cluster.encryption_key_command)
+	{
+		/*
+		 * If encryption is in place, we expect that some files will need
+		 * re-encryption due to change of their RelFileNode, so link does not
+		 * help. (We might copy files that need re-encryption and link the
+		 * others, but not sure it's worth the effort.)
+		 */
+		if (user_opts.transfer_mode == TRANSFER_MODE_LINK)
+			pg_fatal("link mode cannot be used for encrypted instance\n");
+
+		encryption_key_command = pg_strdup(new_cluster.encryption_key_command);
+	}
+	setup_encryption(false);
+	encryption_enabled = true;
 
 	copy_xact_xlog_xid();
 
@@ -146,6 +181,11 @@ main(int argc, char **argv)
 	transfer_all_new_tablespaces(&old_cluster.dbarr, &new_cluster.dbarr,
 								 old_cluster.pgdata, new_cluster.pgdata);
 
+	if (new_cluster.encryption_key_command)
+		snprintf(keycmd_opt_str, sizeof(keycmd_opt_str),
+				 " -K %s", new_cluster.encryption_key_command);
+	else
+		keycmd_opt_str[0] = '\0';
 	/*
 	 * Assuming OIDs are only used in system tables, there is no need to
 	 * restore the OID counter because we have not transferred any OIDs from
@@ -154,8 +194,10 @@ main(int argc, char **argv)
 	 */
 	prep_status("Setting next OID for new cluster");
 	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
-			  "\"%s/pg_resetwal\" -o %u \"%s\"",
-			  new_cluster.bindir, old_cluster.controldata.chkpnt_nxtoid,
+			  "\"%s/pg_resetwal\"%s -o %u \"%s\"",
+			  new_cluster.bindir,
+			  keycmd_opt_str,
+			  old_cluster.controldata.chkpnt_nxtoid,
 			  new_cluster.pgdata);
 	check_ok();
 
@@ -397,14 +439,110 @@ copy_subdir_files(char *old_subdir, char *new_subdir)
 
 	prep_status("Copying old %s to new server", old_subdir);
 
-	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
+	if (!encryption_enabled)
+	{
+		exec_prog(UTILITY_LOG_FILE, NULL, true, true,
 #ifndef WIN32
-			  "cp -Rf \"%s\" \"%s\"",
+				  "cp -Rf \"%s\" \"%s\"",
 #else
-	/* flags: everything, no confirm, quiet, overwrite read-only */
-			  "xcopy /e /y /q /r \"%s\" \"%s\\\"",
+				  /* flags: everything, no confirm, quiet, overwrite read-only */
+				  "xcopy /e /y /q /r \"%s\" \"%s\\\"",
 #endif
-			  old_path, new_path);
+				  old_path, new_path);
+	}
+	else if (GET_MAJOR_VERSION(old_cluster.major_version) <= 906)
+	{
+		DIR		*dir;
+		struct dirent *de;
+		char	*buffer;
+
+#ifdef WIN32
+		#error "SLRU decryption not supported on W32"
+#endif
+
+		/*
+		 * SLRU is eventually not encrypted, however our 9.6 version did
+		 * so. Copy and decrypt one file after another.
+		 */
+		exec_prog(UTILITY_LOG_FILE, NULL, true, true, "mkdir \"%s\"",
+				  new_path);
+
+		dir = opendir(old_path);
+		if (dir == NULL)
+			pg_fatal("failed to open directory \"%s\"\n", old_path);
+
+		buffer = (char *) pg_malloc(BLCKSZ);
+		while ((de = readdir(dir)) != NULL)
+		{
+			char			   src_file[MAXPGPATH];
+			char			   dst_file[MAXPGPATH];
+			int			src_fd;
+			int			dest_fd;
+			int	pageno;
+
+			if (strcmp(de->d_name, ".") == 0 ||
+				strcmp(de->d_name, "..") == 0)
+				continue;
+
+			/*
+			 * XXX Is it worth checking the file name format? If it's
+			 * something we do not expect, the length will probably differ
+			 * from BLCKSZ and therefore we'll fail to read it.
+			 */
+			if (strlen(de->d_name) != 4)
+				pg_fatal("unrecognized file in \"%s\" directory\n", old_path);
+
+			snprintf(src_file, sizeof(src_file), "%s/%s", old_path, de->d_name);
+			if ((src_fd = open(src_file, O_RDONLY | PG_BINARY, 0)) < 0)
+				pg_fatal("failed to open file \"%s\"%s\n", src_file,
+						 strerror(errno));
+
+			snprintf(dst_file, sizeof(dst_file), "%s/%s", new_path, de->d_name);
+			if ((dest_fd = open(dst_file, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
+								S_IRUSR | S_IWUSR)) < 0)
+				pg_fatal("failed to create file \"%s\": %s\n", dst_file,
+						 strerror(errno));
+
+			for (pageno = 0;; pageno++)
+			{
+				ssize_t		nbytes;
+
+				if ((nbytes = read(src_fd, buffer, BLCKSZ)) < 0)
+					pg_fatal("failed to read from \"%s\": %s\n",
+							 src_file, strerror(errno));
+				if (nbytes == 0)
+					break;
+
+				if (nbytes != BLCKSZ)
+					pg_fatal("read %zu bytes from \"%s\" instead of %d: %s\n",
+							 nbytes, src_file, BLCKSZ, strerror(errno));
+
+				SlruEncryptionTweak(slru_encryption_tweak, pageno);
+				decrypt_block(buffer, buffer, BLCKSZ, slru_encryption_tweak);
+
+				errno = 0;
+				if (write(dest_fd, buffer, BLCKSZ) != BLCKSZ)
+				{
+					/* if write didn't set errno, assume problem is no disk space */
+					if (errno == 0)
+						errno = ENOSPC;
+					pg_fatal("could not write file \"%s\": %s\n", dst_file,
+							 strerror(errno));
+				}
+			}
+
+			close(src_fd);
+			close(dest_fd);
+		}
+		closedir(dir);
+		pg_free(buffer);
+/*
+ * #define SlruFileName(ctl, path, seg) \
+ *			   snprintf(path, MAXPGPATH, "%s/%04X", (ctl)->Dir, seg)
+ */
+
+	}
+
 
 	check_ok();
 }
@@ -412,6 +550,8 @@ copy_subdir_files(char *old_subdir, char *new_subdir)
 static void
 copy_xact_xlog_xid(void)
 {
+	char		keycmd_opt_str[MAX_STRING];
+
 	/*
 	 * Copy old commit logs to new data dir. pg_clog has been renamed to
 	 * pg_xact in post-10 clusters.
@@ -421,20 +561,31 @@ copy_xact_xlog_xid(void)
 					  GET_MAJOR_VERSION(new_cluster.major_version) < 1000 ?
 					  "pg_clog" : "pg_xact");
 
+	if (new_cluster.encryption_key_command)
+		snprintf(keycmd_opt_str, sizeof(keycmd_opt_str),
+				 " -K %s", new_cluster.encryption_key_command);
+	else
+		keycmd_opt_str[0] = '\0';
+
 	/* set the next transaction id and epoch of the new cluster */
 	prep_status("Setting next transaction ID and epoch for new cluster");
 	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
-			  "\"%s/pg_resetwal\" -f -x %u \"%s\"",
-			  new_cluster.bindir, old_cluster.controldata.chkpnt_nxtxid,
+			  "\"%s/pg_resetwal\"%s -f -x %u \"%s\"",
+			  new_cluster.bindir,
+			  keycmd_opt_str,
+			  old_cluster.controldata.chkpnt_nxtxid,
 			  new_cluster.pgdata);
 	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
-			  "\"%s/pg_resetwal\" -f -e %u \"%s\"",
-			  new_cluster.bindir, old_cluster.controldata.chkpnt_nxtepoch,
+			  "\"%s/pg_resetwal\"%s -f -e %u \"%s\"",
+			  new_cluster.bindir,
+			  keycmd_opt_str,
+			  old_cluster.controldata.chkpnt_nxtepoch,
 			  new_cluster.pgdata);
 	/* must reset commit timestamp limits also */
 	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
-			  "\"%s/pg_resetwal\" -f -c %u,%u \"%s\"",
+			  "\"%s/pg_resetwal\"%s -f -c %u,%u \"%s\"",
 			  new_cluster.bindir,
+			  keycmd_opt_str,
 			  old_cluster.controldata.chkpnt_nxtxid,
 			  old_cluster.controldata.chkpnt_nxtxid,
 			  new_cluster.pgdata);
@@ -459,8 +610,9 @@ copy_xact_xlog_xid(void)
 		 * counters here and the oldest multi present on system.
 		 */
 		exec_prog(UTILITY_LOG_FILE, NULL, true, true,
-				  "\"%s/pg_resetwal\" -O %u -m %u,%u \"%s\"",
+				  "\"%s/pg_resetwal\"%s -O %u -m %u,%u \"%s\"",
 				  new_cluster.bindir,
+				  keycmd_opt_str,
 				  old_cluster.controldata.chkpnt_nxtmxoff,
 				  old_cluster.controldata.chkpnt_nxtmulti,
 				  old_cluster.controldata.chkpnt_oldstMulti,
@@ -487,8 +639,9 @@ copy_xact_xlog_xid(void)
 		 * next=MaxMultiXactId, but multixact.c can cope with that just fine.
 		 */
 		exec_prog(UTILITY_LOG_FILE, NULL, true, true,
-				  "\"%s/pg_resetwal\" -m %u,%u \"%s\"",
+				  "\"%s/pg_resetwal\"%s -m %u,%u \"%s\"",
 				  new_cluster.bindir,
+				  keycmd_opt_str,
 				  old_cluster.controldata.chkpnt_nxtmulti + 1,
 				  old_cluster.controldata.chkpnt_nxtmulti,
 				  new_cluster.pgdata);
@@ -499,7 +652,8 @@ copy_xact_xlog_xid(void)
 	prep_status("Resetting WAL archives");
 	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
 	/* use timeline 1 to match controldata and no WAL history file */
-			  "\"%s/pg_resetwal\" -l 00000001%s \"%s\"", new_cluster.bindir,
+			  "\"%s/pg_resetwal\"%s -l 00000001%s \"%s\"", new_cluster.bindir,
+			  keycmd_opt_str,
 			  old_cluster.controldata.nextxlogfile + 8,
 			  new_cluster.pgdata);
 	check_ok();
@@ -656,4 +810,12 @@ cleanup(void)
 				unlink(log_file_name);
 			}
 	}
+}
+
+static void
+SlruEncryptionTweak(char *tweak, int pageno)
+{
+		/* TODO: would be nice to incorporate SLRU type in tweak */
+		memcpy(tweak, &pageno, sizeof(pageno));
+		memset(tweak + sizeof(pageno), 0, TWEAK_SIZE - sizeof(pageno));
 }
