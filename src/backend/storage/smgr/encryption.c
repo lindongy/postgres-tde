@@ -576,7 +576,7 @@ run_encryption_key_command(bool *is_key_p, size_t *len_p)
 {
 	FILE *fp;
 	char *buf, *result;
-	bool	is_key;
+	bool	is_key = false;
 	size_t	key_pref_len, pwd_pref_len, read_len, bytes_read;
 	size_t	buf_size, result_size;
 	int	i;
