@@ -3670,7 +3670,7 @@ static struct config_string ConfigureNamesString[] =
 		{"encryption_key_command", PGC_POSTMASTER, 0,
 			gettext_noop("Sets the shell command that will be called to fetch database encryption key."),
 			NULL,
-			GUC_IS_NAME | GUC_NOT_IN_SAMPLE
+			GUC_NOT_IN_SAMPLE | GUC_SUPERUSER_ONLY | GUC_IS_NAME
 		},
 		&encryption_key_command,
 		NULL,
