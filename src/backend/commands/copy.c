@@ -2392,13 +2392,25 @@ CopyFrom(CopyState cstate)
 	/*
 	 * Optimize if new relfilenode was created in this subxact or one of its
 	 * committed children and we won't see those rows later as part of an
-	 * earlier scan or command. This ensures that if this subtransaction
-	 * aborts then the frozen rows won't be visible after xact cleanup. Note
+	 * earlier scan or command. The subxact test ensures that if this subxact
+	 * aborts then the frozen rows won't be visible after xact cleanup.  Note
 	 * that the stronger test of exactly which subtransaction created it is
-	 * crucial for correctness of this optimization.
+	 * crucial for correctness of this optimization. The test for an earlier
+	 * scan or command tolerates false negatives. FREEZE causes other sessions
+	 * to see rows they would not see under MVCC, and a false negative merely
+	 * spreads that anomaly to the current session.
 	 */
 	if (cstate->freeze)
 	{
+		/*
+		 * Tolerate one registration for the benefit of FirstXactSnapshot.
+		 * Scan-bearing queries generally create at least two registrations,
+		 * though relying on that is fragile, as is ignoring ActiveSnapshot.
+		 * Clear CatalogSnapshot to avoid counting its registration.  We'll
+		 * still detect ongoing catalog scans, each of which separately
+		 * registers the snapshot it uses.
+		 */
+		InvalidateCatalogSnapshot();
 		if (!ThereAreNoPriorRegisteredSnapshots() || !ThereAreNoReadyPortals())
 			ereport(ERROR,
 					(errcode(ERRCODE_INVALID_TRANSACTION_STATE),
@@ -2644,13 +2656,12 @@ CopyFrom(CopyState cstate)
 			if (cstate->transition_capture != NULL)
 			{
 				if (resultRelInfo->ri_TrigDesc &&
-					(resultRelInfo->ri_TrigDesc->trig_insert_before_row ||
-					 resultRelInfo->ri_TrigDesc->trig_insert_instead_row))
+					resultRelInfo->ri_TrigDesc->trig_insert_before_row)
 				{
 					/*
-					 * If there are any BEFORE or INSTEAD triggers on the
-					 * partition, we'll have to be ready to convert their
-					 * result back to tuplestore format.
+					 * If there are any BEFORE triggers on the partition,
+					 * we'll have to be ready to convert their result back to
+					 * tuplestore format.
 					 */
 					cstate->transition_capture->tcs_original_insert_tuple = NULL;
 					cstate->transition_capture->tcs_map =
@@ -2733,7 +2744,8 @@ CopyFrom(CopyState cstate)
 					check_partition_constr = false;
 
 				/* Check the constraints of the tuple */
-				if (cstate->rel->rd_att->constr || check_partition_constr)
+				if (resultRelInfo->ri_RelationDesc->rd_att->constr ||
+					check_partition_constr)
 					ExecConstraints(resultRelInfo, slot, estate);
 
 				if (useHeapMultiInsert)
@@ -2791,12 +2803,13 @@ CopyFrom(CopyState cstate)
 			 * tuples inserted by an INSERT command.
 			 */
 			processed++;
+		}
 
-			if (saved_resultRelInfo)
-			{
-				resultRelInfo = saved_resultRelInfo;
-				estate->es_result_relation_info = resultRelInfo;
-			}
+		/* Restore the saved ResultRelInfo */
+		if (saved_resultRelInfo)
+		{
+			resultRelInfo = saved_resultRelInfo;
+			estate->es_result_relation_info = resultRelInfo;
 		}
 	}
 

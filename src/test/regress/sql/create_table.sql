@@ -415,13 +415,18 @@ DROP FUNCTION plusone(int);
 
 -- partitioned table cannot participate in regular inheritance
 CREATE TABLE partitioned2 (
-	a int
-) PARTITION BY LIST ((a+1));
+	a int,
+	b text
+) PARTITION BY RANGE ((a+1), substr(b, 1, 5));
 CREATE TABLE fail () INHERITS (partitioned2);
 
 -- Partition key in describe output
 \d partitioned
-\d partitioned2
+\d+ partitioned2
+
+INSERT INTO partitioned2 VALUES (1, 'hello');
+CREATE TABLE part2_1 PARTITION OF partitioned2 FOR VALUES FROM (-1, 'aaaaa') TO (100, 'ccccc');
+\d+ part2_1
 
 DROP TABLE partitioned, partitioned2;
 
@@ -632,8 +637,23 @@ CREATE TABLE range_parted4_3 PARTITION OF range_parted4 FOR VALUES FROM (6, 8, M
 \d+ range_parted4_3
 DROP TABLE range_parted4;
 
+-- user-defined operator class in partition key
+CREATE FUNCTION my_int4_sort(int4,int4) RETURNS int LANGUAGE sql
+  AS $$ SELECT case WHEN $1 = $2 THEN 0 WHEN $1 > $2 THEN 1 ELSE -1 END; $$;
+CREATE OPERATOR CLASS test_int4_ops FOR TYPE int4 USING btree AS
+  OPERATOR 1 < (int4,int4), OPERATOR 2 <= (int4,int4),
+  OPERATOR 3 = (int4,int4), OPERATOR 4 >= (int4,int4),
+  OPERATOR 5 > (int4,int4), FUNCTION 1 my_int4_sort(int4,int4);
+CREATE TABLE partkey_t (a int4) PARTITION BY RANGE (a test_int4_ops);
+CREATE TABLE partkey_t_1 PARTITION OF partkey_t FOR VALUES FROM (0) TO (1000);
+INSERT INTO partkey_t VALUES (100);
+INSERT INTO partkey_t VALUES (200);
+
 -- cleanup
 DROP TABLE parted, list_parted, range_parted, list_parted2, range_parted2, range_parted3;
+DROP TABLE partkey_t;
+DROP OPERATOR CLASS test_int4_ops USING btree;
+DROP FUNCTION my_int4_sort(int4,int4);
 
 -- comments on partitioned tables columns
 CREATE TABLE parted_col_comment (a int, b text) PARTITION BY LIST (a);
@@ -642,3 +662,16 @@ COMMENT ON COLUMN parted_col_comment.a IS 'Partition key';
 SELECT obj_description('parted_col_comment'::regclass);
 \d+ parted_col_comment
 DROP TABLE parted_col_comment;
+
+-- list partitioning on array type column
+CREATE TABLE arrlp (a int[]) PARTITION BY LIST (a);
+CREATE TABLE arrlp12 PARTITION OF arrlp FOR VALUES IN ('{1}', '{2}');
+\d+ arrlp12
+DROP TABLE arrlp;
+
+-- partition on boolean column
+create table boolspart (a bool) partition by list (a);
+create table boolspart_t partition of boolspart for values in (true);
+create table boolspart_f partition of boolspart for values in (false);
+\d+ boolspart
+drop table boolspart;

@@ -1,15 +1,13 @@
 # Russian message translation file for pg_upgrade
 # Copyright (C) 2017 PostgreSQL Global Development Group
 # This file is distributed under the same license as the PostgreSQL package.
-# Alexander LAW <exclusion@gmail.com>, 2017.
 # Alexander Lakhin <a.lakhin@postgrespro.ru>, 2017.
-#
 msgid ""
 msgstr ""
 "Project-Id-Version: pg_upgrade (PostgreSQL) 10\n"
 "Report-Msgid-Bugs-To: pgsql-bugs@postgresql.org\n"
-"POT-Creation-Date: 2017-09-27 06:15+0000\n"
-"PO-Revision-Date: 2017-09-21 13:01+0300\n"
+"POT-Creation-Date: 2018-04-27 15:35+0300\n"
+"PO-Revision-Date: 2017-12-09 07:44+0300\n"
 "Last-Translator: Alexander Lakhin <exclusion@gmail.com>\n"
 "Language-Team: Russian <pgsql-ru-general@postgresql.org>\n"
 "Language: ru\n"
@@ -415,7 +413,7 @@ msgstr "не удалось восстановить старую локаль \
 msgid "could not get control data using %s: %s\n"
 msgstr "не удалось получить управляющие данные, выполнив %s: %s\n"
 
-#: controldata.c:141 dump.c:59 pg_upgrade.c:325 relfilenode.c:244 util.c:80
+#: controldata.c:141 dump.c:51 pg_upgrade.c:329 relfilenode.c:244 util.c:80
 #, c-format
 msgid "%s"
 msgstr "%s"
@@ -677,12 +675,12 @@ msgstr ""
 "после того, как будет запущен новый, не гарантируется.\n"
 "\n"
 
-#: dump.c:23
+#: dump.c:22
 #, c-format
 msgid "Creating dump of global objects"
 msgstr "Формирование выгрузки глобальных объектов"
 
-#: dump.c:34
+#: dump.c:33
 #, c-format
 msgid "Creating dump of database schemas\n"
 msgstr "Формирование выгрузки схем базы данных\n"
@@ -692,27 +690,27 @@ msgstr "Формирование выгрузки схем базы данных
 msgid "could not get pg_ctl version data using %s: %s\n"
 msgstr "не удалось получить данные версии pg_ctl, выполнив %s: %s\n"
 
-#: exec.c:54
+#: exec.c:50
 #, c-format
 msgid "could not get pg_ctl version output from %s\n"
 msgstr "не удалось получить версию pg_ctl из результата %s\n"
 
-#: exec.c:101 exec.c:105
+#: exec.c:104 exec.c:108
 #, c-format
 msgid "command too long\n"
 msgstr "команда слишком длинная\n"
 
-#: exec.c:107 util.c:38 util.c:226
+#: exec.c:110 util.c:38 util.c:226
 #, c-format
 msgid "%s\n"
 msgstr "%s\n"
 
-#: exec.c:146 exec.c:201 option.c:101 option.c:217
+#: exec.c:148 exec.c:202 option.c:101 option.c:217
 #, c-format
 msgid "could not write to log file \"%s\"\n"
-msgstr "не удалось записать в файл протокола \"%s\n"
+msgstr "не удалось записать в файл протокола \"%s\"\n"
 
-#: exec.c:175
+#: exec.c:177
 #, c-format
 msgid ""
 "\n"
@@ -721,12 +719,12 @@ msgstr ""
 "\n"
 "*ошибка*"
 
-#: exec.c:178
+#: exec.c:180
 #, c-format
 msgid "There were problems executing \"%s\"\n"
 msgstr "При выполнении \"%s\" возникли проблемы\n"
 
-#: exec.c:181
+#: exec.c:183
 #, c-format
 msgid ""
 "Consult the last few lines of \"%s\" or \"%s\" for\n"
@@ -735,7 +733,7 @@ msgstr ""
 "Чтобы понять причину ошибки, просмотрите последние несколько строк\n"
 "файла \"%s\" или \"%s\".\n"
 
-#: exec.c:186
+#: exec.c:188
 #, c-format
 msgid ""
 "Consult the last few lines of \"%s\" for\n"
@@ -744,38 +742,38 @@ msgstr ""
 "Чтобы понять причину ошибки, просмотрите последние несколько строк\n"
 "файла \"%s\".\n"
 
-#: exec.c:227
+#: exec.c:228
 #, c-format
 msgid "could not open file \"%s\" for reading: %s\n"
 msgstr "не удалось открыть файл \"%s\" для чтения: %s\n"
 
-#: exec.c:254
+#: exec.c:255
 #, c-format
 msgid "You must have read and write access in the current directory.\n"
 msgstr "У вас должны быть права на чтение и запись в текущем каталоге.\n"
 
-#: exec.c:307 exec.c:370 exec.c:426
+#: exec.c:308 exec.c:370 exec.c:425
 #, c-format
 msgid "check for \"%s\" failed: %s\n"
 msgstr "проверка существования \"%s\" не пройдена: %s\n"
 
-#: exec.c:310 exec.c:373
+#: exec.c:311 exec.c:373
 #, c-format
 msgid "\"%s\" is not a directory\n"
 msgstr "\"%s\" не является каталогом\n"
 
-#: exec.c:429
+#: exec.c:428
 #, c-format
 msgid "check for \"%s\" failed: not a regular file\n"
 msgstr "проверка файла \"%s\" не пройдена: это не обычный файл\n"
 
-#: exec.c:441
+#: exec.c:440
 #, c-format
 msgid "check for \"%s\" failed: cannot read file (permission denied)\n"
 msgstr ""
 "проверка файла \"%s\" не пройдена: не удаётся прочитать файл (нет доступа)\n"
 
-#: exec.c:449
+#: exec.c:448
 #, c-format
 msgid "check for \"%s\" failed: cannot execute (permission denied)\n"
 msgstr ""
@@ -1348,22 +1346,22 @@ msgstr "не удалось прочитать строку %d из файла \
 msgid "user-supplied old port number %hu corrected to %hu\n"
 msgstr "заданный пользователем старый номер порта %hu изменён на %hu\n"
 
-#: parallel.c:128 parallel.c:242
+#: parallel.c:128 parallel.c:241
 #, c-format
 msgid "could not create worker process: %s\n"
 msgstr "не удалось создать рабочий процесс: %s\n"
 
-#: parallel.c:147 parallel.c:263
+#: parallel.c:147 parallel.c:262
 #, c-format
 msgid "could not create worker thread: %s\n"
 msgstr "не удалось создать рабочий поток: %s\n"
 
-#: parallel.c:311 parallel.c:326
+#: parallel.c:310 parallel.c:325
 #, c-format
 msgid "child worker exited abnormally: %s\n"
 msgstr "дочерний процесс завершился аварийно: %s\n"
 
-#: pg_upgrade.c:108
+#: pg_upgrade.c:112
 #, c-format
 msgid ""
 "\n"
@@ -1374,17 +1372,17 @@ msgstr ""
 "Выполнение обновления\n"
 "---------------------\n"
 
-#: pg_upgrade.c:151
+#: pg_upgrade.c:155
 #, c-format
 msgid "Setting next OID for new cluster"
 msgstr "Установка следующего OID для нового кластера"
 
-#: pg_upgrade.c:158
+#: pg_upgrade.c:162
 #, c-format
 msgid "Sync data directory to disk"
 msgstr "Синхронизация каталога данных с ФС"
 
-#: pg_upgrade.c:170
+#: pg_upgrade.c:174
 #, c-format
 msgid ""
 "\n"
@@ -1395,7 +1393,7 @@ msgstr ""
 "Обновление завершено\n"
 "--------------------\n"
 
-#: pg_upgrade.c:215
+#: pg_upgrade.c:219
 #, c-format
 msgid ""
 "There seems to be a postmaster servicing the old cluster.\n"
@@ -1404,7 +1402,7 @@ msgstr ""
 "Видимо, запущен процесс postmaster, обслуживающий старый кластер.\n"
 "Остановите его и попробуйте ещё раз.\n"
 
-#: pg_upgrade.c:228
+#: pg_upgrade.c:232
 #, c-format
 msgid ""
 "There seems to be a postmaster servicing the new cluster.\n"
@@ -1413,75 +1411,75 @@ msgstr ""
 "Видимо, запущен процесс postmaster, обслуживающий новый кластер.\n"
 "Остановите его и попробуйте ещё раз.\n"
 
-#: pg_upgrade.c:234
+#: pg_upgrade.c:238
 #, c-format
 msgid "%s: could not find own program executable\n"
 msgstr "%s: не удалось найти свой исполняемый файл\n"
 
-#: pg_upgrade.c:251
+#: pg_upgrade.c:255
 #, c-format
 msgid "Analyzing all rows in the new cluster"
 msgstr "Анализ всех строк в новом кластере"
 
-#: pg_upgrade.c:264
+#: pg_upgrade.c:268
 #, c-format
 msgid "Freezing all rows in the new cluster"
 msgstr "Замораживание всех строк в новом кластере"
 
-#: pg_upgrade.c:284
+#: pg_upgrade.c:288
 #, c-format
 msgid "Restoring global objects in the new cluster"
 msgstr "Восстановление глобальных объектов в новом кластере"
 
-#: pg_upgrade.c:308
+#: pg_upgrade.c:312
 #, c-format
 msgid "Restoring database schemas in the new cluster\n"
 msgstr "Восстановление схем баз данных в новом кластере\n"
 
-#: pg_upgrade.c:370
+#: pg_upgrade.c:374
 #, c-format
 msgid "Deleting files from new %s"
 msgstr "Удаление файлов из нового каталога %s"
 
-#: pg_upgrade.c:374
+#: pg_upgrade.c:378
 #, c-format
 msgid "could not delete directory \"%s\"\n"
 msgstr "ошибка при удалении каталога \"%s\"\n"
 
-#: pg_upgrade.c:393
+#: pg_upgrade.c:397
 #, c-format
 msgid "Copying old %s to new server"
 msgstr "Копирование старого каталога %s на новый сервер"
 
-#: pg_upgrade.c:420
+#: pg_upgrade.c:424
 #, c-format
 msgid "Setting next transaction ID and epoch for new cluster"
 msgstr ""
 "Установка следующего идентификатора транзакции и эпохи для нового кластера"
 
-#: pg_upgrade.c:450
+#: pg_upgrade.c:454
 #, c-format
 msgid "Setting next multixact ID and offset for new cluster"
 msgstr ""
 "Установка следующего идентификатора и смещения мультитранзакции для нового "
 "кластера"
 
-#: pg_upgrade.c:474
+#: pg_upgrade.c:478
 #, c-format
 msgid "Setting oldest multixact ID in new cluster"
 msgstr "Установка старейшего идентификатора мультитранзакции в новом кластере"
 
-#: pg_upgrade.c:494
+#: pg_upgrade.c:498
 #, c-format
 msgid "Resetting WAL archives"
 msgstr "Сброс архивов WAL"
 
-#: pg_upgrade.c:526
+#: pg_upgrade.c:541
 #, c-format
 msgid "Setting frozenxid and minmxid counters in new cluster"
 msgstr "Установка счётчиков frozenxid и minmxid в новом кластере"
 
-#: pg_upgrade.c:528
+#: pg_upgrade.c:543
 #, c-format
 msgid "Setting minmxid counter in new cluster"
 msgstr "Установка счётчика minmxid в новом кластере"
@@ -1524,22 +1522,22 @@ msgstr "копирование \"%s\" в \"%s\"\n"
 msgid "linking \"%s\" to \"%s\"\n"
 msgstr "создание ссылки на \"%s\" в \"%s\"\n"
 
-#: server.c:33
+#: server.c:34
 #, c-format
 msgid "connection to database failed: %s"
 msgstr "не удалось подключиться к базе: %s"
 
-#: server.c:39 server.c:139 util.c:136 util.c:166
+#: server.c:40 server.c:142 util.c:136 util.c:166
 #, c-format
 msgid "Failure, exiting\n"
 msgstr "Ошибка, выполняется выход\n"
 
-#: server.c:129
+#: server.c:132
 #, c-format
 msgid "executing: %s\n"
 msgstr "выполняется: %s\n"
 
-#: server.c:135
+#: server.c:138
 #, c-format
 msgid ""
 "SQL command failed\n"
@@ -1550,17 +1548,17 @@ msgstr ""
 "%s\n"
 "%s"
 
-#: server.c:165
+#: server.c:168
 #, c-format
 msgid "could not open version file: %s\n"
 msgstr "не удалось открыть файл с версией: %s\n"
 
-#: server.c:170
+#: server.c:172
 #, c-format
 msgid "could not parse PG_VERSION file from %s\n"
 msgstr "не удалось разобрать файл PG_VERSION из %s\n"
 
-#: server.c:284
+#: server.c:295
 #, c-format
 msgid ""
 "\n"
@@ -1569,7 +1567,7 @@ msgstr ""
 "\n"
 "не удалось подключиться к базе: %s"
 
-#: server.c:289
+#: server.c:300
 #, c-format
 msgid ""
 "could not connect to source postmaster started with the command:\n"
@@ -1579,7 +1577,7 @@ msgstr ""
 "командой:\n"
 "%s\n"
 
-#: server.c:293
+#: server.c:304
 #, c-format
 msgid ""
 "could not connect to target postmaster started with the command:\n"
@@ -1589,26 +1587,26 @@ msgstr ""
 "командой:\n"
 "%s\n"
 
-#: server.c:307
+#: server.c:318
 #, c-format
 msgid "pg_ctl failed to start the source server, or connection failed\n"
 msgstr ""
 "программа pg_ctl не смогла запустить исходный сервер, либо к нему не удалось "
 "подключиться\n"
 
-#: server.c:309
+#: server.c:320
 #, c-format
 msgid "pg_ctl failed to start the target server, or connection failed\n"
 msgstr ""
 "программа pg_ctl не смогла запустить целевой сервер, либо к нему не удалось "
 "подключиться\n"
 
-#: server.c:354
+#: server.c:365
 #, c-format
 msgid "out of memory\n"
 msgstr "нехватка памяти\n"
 
-#: server.c:367
+#: server.c:378
 #, c-format
 msgid "libpq environment variable %s has a non-local server value: %s\n"
 msgstr "в переменной окружения для libpq %s задано не локальное значение: %s\n"

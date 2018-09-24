@@ -81,6 +81,7 @@ sub DeterminePlatform
 sub IsNewer
 {
 	my ($newfile, $oldfile) = @_;
+	-e $oldfile or warn "source file \"$oldfile\" does not exist";
 	if (   $oldfile ne 'src/tools/msvc/config.pl'
 		&& $oldfile ne 'src/tools/msvc/config_default.pl')
 	{
@@ -327,7 +328,7 @@ s{PG_VERSION_STR "[^"]+"}{PG_VERSION_STR "PostgreSQL $self->{strver}$extraver, c
 	if ($self->{options}->{python}
 		&& IsNewer(
 			'src/pl/plpython/spiexceptions.h',
-			'src/include/backend/errcodes.txt'))
+			'src/backend/utils/errcodes.txt'))
 	{
 		print "Generating spiexceptions.h...\n";
 		system(
@@ -425,10 +426,11 @@ s{PG_VERSION_STR "[^"]+"}{PG_VERSION_STR "PostgreSQL $self->{strver}$extraver, c
 		  || confess "Could not open ecpg_config.h";
 		print $o <<EOF;
 #if (_MSC_VER > 1200)
+#define HAVE_LONG_LONG_INT 1
 #define HAVE_LONG_LONG_INT_64 1
+#endif
 #define ENABLE_THREAD_SAFETY 1
 EOF
-		print $o "#endif\n";
 		close($o);
 	}
 
@@ -536,10 +538,12 @@ sub AddProject
 		}
 		else
 		{
+			# We don't expect the config-specific library to be here,
+			# so don't ask for it in last parameter
 			$proj->AddLibrary(
-				$self->{options}->{openssl} . '\lib\ssleay32.lib', 1);
+				$self->{options}->{openssl} . '\lib\ssleay32.lib', 0);
 			$proj->AddLibrary(
-				$self->{options}->{openssl} . '\lib\libeay32.lib', 1);
+				$self->{options}->{openssl} . '\lib\libeay32.lib', 0);
 		}
 	}
 	if ($self->{options}->{nls})

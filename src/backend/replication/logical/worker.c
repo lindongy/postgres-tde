@@ -100,8 +100,9 @@ static dlist_head lsn_mapping = DLIST_STATIC_INIT(lsn_mapping);
 
 typedef struct SlotErrCallbackArg
 {
-	LogicalRepRelation *rel;
-	int			attnum;
+	LogicalRepRelMapEntry *rel;
+	int			local_attnum;
+	int			remote_attnum;
 } SlotErrCallbackArg;
 
 static MemoryContext ApplyMessageContext = NULL;
@@ -204,6 +205,8 @@ create_estate_for_relation(LogicalRepRelMapEntry *rel)
 	estate->es_num_result_relations = 1;
 	estate->es_result_relation_info = resultRelInfo;
 
+	estate->es_output_cid = GetCurrentCommandId(true);
+
 	/* Triggers might need a slot */
 	if (resultRelInfo->ri_TrigDesc)
 		estate->es_trig_tuple_slot = ExecInitExtraTupleSlot(estate);
@@ -280,19 +283,29 @@ static void
 slot_store_error_callback(void *arg)
 {
 	SlotErrCallbackArg *errarg = (SlotErrCallbackArg *) arg;
+	LogicalRepRelMapEntry *rel;
+	char	   *remotetypname;
 	Oid			remotetypoid,
 				localtypoid;
 
-	if (errarg->attnum < 0)
+	/* Nothing to do if remote attribute number is not set */
+	if (errarg->remote_attnum < 0)
 		return;
 
-	remotetypoid = errarg->rel->atttyps[errarg->attnum];
-	localtypoid = logicalrep_typmap_getid(remotetypoid);
+	rel = errarg->rel;
+	remotetypoid = rel->remoterel.atttyps[errarg->remote_attnum];
+
+	/* Fetch remote type name from the LogicalRepTypMap cache */
+	remotetypname = logicalrep_typmap_gettypname(remotetypoid);
+
+	/* Fetch local type OID from the local sys cache */
+	localtypoid = get_atttype(rel->localreloid, errarg->local_attnum + 1);
+
 	errcontext("processing remote data for replication target relation \"%s.%s\" column \"%s\", "
 			   "remote type %s, local type %s",
-			   errarg->rel->nspname, errarg->rel->relname,
-			   errarg->rel->attnames[errarg->attnum],
-			   format_type_be(remotetypoid),
+			   rel->remoterel.nspname, rel->remoterel.relname,
+			   rel->remoterel.attnames[errarg->remote_attnum],
+			   remotetypname,
 			   format_type_be(localtypoid));
 }
 
@@ -313,8 +326,9 @@ slot_store_cstrings(TupleTableSlot *slot, LogicalRepRelMapEntry *rel,
 	ExecClearTuple(slot);
 
 	/* Push callback + info on the error context stack */
-	errarg.rel = &rel->remoterel;
-	errarg.attnum = -1;
+	errarg.rel = rel;
+	errarg.local_attnum = -1;
+	errarg.remote_attnum = -1;
 	errcallback.callback = slot_store_error_callback;
 	errcallback.arg = (void *) &errarg;
 	errcallback.previous = error_context_stack;
@@ -332,14 +346,17 @@ slot_store_cstrings(TupleTableSlot *slot, LogicalRepRelMapEntry *rel,
 			Oid			typinput;
 			Oid			typioparam;
 
-			errarg.attnum = remoteattnum;
+			errarg.local_attnum = i;
+			errarg.remote_attnum = remoteattnum;
 
 			getTypeInputInfo(att->atttypid, &typinput, &typioparam);
-			slot->tts_values[i] = OidInputFunctionCall(typinput,
-													   values[remoteattnum],
-													   typioparam,
-													   att->atttypmod);
+			slot->tts_values[i] =
+				OidInputFunctionCall(typinput, values[remoteattnum],
+									 typioparam, att->atttypmod);
 			slot->tts_isnull[i] = false;
+
+			errarg.local_attnum = -1;
+			errarg.remote_attnum = -1;
 		}
 		else
 		{
@@ -378,8 +395,9 @@ slot_modify_cstrings(TupleTableSlot *slot, LogicalRepRelMapEntry *rel,
 	ExecClearTuple(slot);
 
 	/* Push callback + info on the error context stack */
-	errarg.rel = &rel->remoterel;
-	errarg.attnum = -1;
+	errarg.rel = rel;
+	errarg.local_attnum = -1;
+	errarg.remote_attnum = -1;
 	errcallback.callback = slot_store_error_callback;
 	errcallback.arg = (void *) &errarg;
 	errcallback.previous = error_context_stack;
@@ -391,22 +409,28 @@ slot_modify_cstrings(TupleTableSlot *slot, LogicalRepRelMapEntry *rel,
 		Form_pg_attribute att = slot->tts_tupleDescriptor->attrs[i];
 		int			remoteattnum = rel->attrmap[i];
 
-		if (remoteattnum >= 0 && !replaces[remoteattnum])
+		if (remoteattnum < 0)
 			continue;
 
-		if (remoteattnum >= 0 && values[remoteattnum] != NULL)
+		if (!replaces[remoteattnum])
+			continue;
+
+		if (values[remoteattnum] != NULL)
 		{
 			Oid			typinput;
 			Oid			typioparam;
 
-			errarg.attnum = remoteattnum;
+			errarg.local_attnum = i;
+			errarg.remote_attnum = remoteattnum;
 
 			getTypeInputInfo(att->atttypid, &typinput, &typioparam);
-			slot->tts_values[i] = OidInputFunctionCall(typinput,
-													   values[remoteattnum],
-													   typioparam,
-													   att->atttypmod);
+			slot->tts_values[i] =
+				OidInputFunctionCall(typinput, values[remoteattnum],
+									 typioparam, att->atttypmod);
 			slot->tts_isnull[i] = false;
+
+			errarg.local_attnum = -1;
+			errarg.remote_attnum = -1;
 		}
 		else
 		{

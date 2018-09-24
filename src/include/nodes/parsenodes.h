@@ -647,6 +647,8 @@ typedef struct ColumnDef
 	Node	   *raw_default;	/* default value (untransformed parse tree) */
 	Node	   *cooked_default; /* default value (transformed expr tree) */
 	char		identity;		/* attidentity setting */
+	RangeVar   *identitySequence; /* to store identity sequence name for ALTER
+								   * TABLE ... ADD COLUMN */
 	CollateClause *collClause;	/* untransformed COLLATE spec, if any */
 	Oid			collOid;		/* collation OID (InvalidOid if not set) */
 	List	   *constraints;	/* other constraints on column */
@@ -672,6 +674,7 @@ typedef enum TableLikeOption
 	CREATE_TABLE_LIKE_INDEXES = 1 << 3,
 	CREATE_TABLE_LIKE_STORAGE = 1 << 4,
 	CREATE_TABLE_LIKE_COMMENTS = 1 << 5,
+	CREATE_TABLE_LIKE_STATISTICS = 1 << 6,
 	CREATE_TABLE_LIKE_ALL = PG_INT32_MAX
 } TableLikeOption;
 
