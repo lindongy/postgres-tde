@@ -83,7 +83,7 @@ quote_postgres(char *arg, bool quote, int lineno)
 }
 
 static void
-free_variable(struct variable * var)
+free_variable(struct variable *var)
 {
 	struct variable *var_next;
 
@@ -96,7 +96,7 @@ free_variable(struct variable * var)
 }
 
 static void
-free_statement(struct statement * stmt)
+free_statement(struct statement *stmt)
 {
 	if (stmt == NULL)
 		return;
@@ -147,7 +147,7 @@ next_insert(char *text, int pos, bool questionmarks)
 }
 
 static bool
-ecpg_type_infocache_push(struct ECPGtype_information_cache ** cache, int oid, enum ARRAY_TYPE isarray, int lineno)
+ecpg_type_infocache_push(struct ECPGtype_information_cache **cache, int oid, enum ARRAY_TYPE isarray, int lineno)
 {
 	struct ECPGtype_information_cache *new_entry
 	= (struct ECPGtype_information_cache *) ecpg_alloc(sizeof(struct ECPGtype_information_cache), lineno);
@@ -163,7 +163,7 @@ ecpg_type_infocache_push(struct ECPGtype_information_cache ** cache, int oid, en
 }
 
 static enum ARRAY_TYPE
-ecpg_is_type_an_array(int type, const struct statement * stmt, const struct variable * var)
+ecpg_is_type_an_array(int type, const struct statement *stmt, const struct variable *var)
 {
 	char	   *array_query;
 	enum ARRAY_TYPE isarray = ECPG_ARRAY_NOT_SET;
@@ -311,11 +311,13 @@ bool
 ecpg_store_result(const PGresult *results,
 				  int start, int ntuples, int direction,
 				  int act_field,
-				  const struct statement * stmt,
-				  struct variable * var, int var_index)
+				  const struct statement *stmt,
+				  struct variable *var, int var_index)
 {
 	enum ARRAY_TYPE isarray;
-	int			tuples_left, act_tuple, act_index;
+	int			tuples_left,
+				act_tuple,
+				act_index;
 	bool		status = true;
 
 	if ((isarray = ecpg_is_type_an_array(PQftype(results, act_field), stmt, var)) == ECPG_ARRAY_ERROR)
@@ -368,7 +370,7 @@ ecpg_store_result(const PGresult *results,
 						/* special mode for handling char**foo=0 */
 						for (tuples_left = ntuples, act_tuple = start; tuples_left; tuples_left--, act_tuple += direction)
 							len += strlen(PQgetvalue(results, act_tuple, act_field)) + 1;
-						len *= var->offset;		/* should be 1, but YMNK */
+						len *= var->offset; /* should be 1, but YMNK */
 						len += (ntuples + 1) * sizeof(char *);
 					}
 					else
@@ -435,7 +437,7 @@ ecpg_store_result(const PGresult *results,
 			int			len = strlen(PQgetvalue(results, act_tuple, act_field)) + 1;
 
 			if (!ecpg_get_data(results, act_tuple, act_field, act_index, stmt->lineno,
-							 var->type, var->ind_type, current_data_location,
+							   var->type, var->ind_type, current_data_location,
 							   var->ind_value, len, 0, var->ind_offset, isarray, stmt->compat, stmt->force_indicator))
 				status = false;
 			else
@@ -495,7 +497,7 @@ sprintf_float_value(char *ptr, float value, const char *delim)
 }
 
 bool
-ecpg_store_input(const int lineno, const bool force_indicator, const struct variable * var,
+ecpg_store_input(const int lineno, const bool force_indicator, const struct variable *var,
 				 char **tobeinserted_p, bool quote)
 {
 	char	   *mallocedval = NULL;
@@ -538,7 +540,7 @@ ecpg_store_input(const int lineno, const bool force_indicator, const struct vari
 			if (*(long long int *) var->ind_value < (long long) 0)
 				*tobeinserted_p = NULL;
 			break;
-#endif   /* HAVE_LONG_LONG_INT */
+#endif							/* HAVE_LONG_LONG_INT */
 		case ECPGt_NO_INDICATOR:
 			if (force_indicator == false)
 			{
@@ -708,7 +710,7 @@ ecpg_store_input(const int lineno, const bool force_indicator, const struct vari
 
 				*tobeinserted_p = mallocedval;
 				break;
-#endif   /* HAVE_LONG_LONG_INT */
+#endif							/* HAVE_LONG_LONG_INT */
 			case ECPGt_float:
 				if (!(mallocedval = ecpg_alloc(asize * 25, lineno)))
 					return false;
@@ -1070,7 +1072,7 @@ ecpg_free_params(struct statement *stmt, bool print)
 
 
 static bool
-insert_tobeinserted(int position, int ph_len, struct statement * stmt, char *tobeinserted)
+insert_tobeinserted(int position, int ph_len, struct statement *stmt, char *tobeinserted)
 {
 	char	   *newcopy;
 
@@ -1107,7 +1109,7 @@ insert_tobeinserted(int position, int ph_len, struct statement * stmt, char *tob
  *	an array of strings for PQexecParams().
  */
 bool
-ecpg_build_params(struct statement * stmt, bool first_0_is_cursor_amount)
+ecpg_build_params(struct statement *stmt, bool first_0_is_cursor_amount)
 {
 	struct variable *var;
 	int			desc_counter = 0;
@@ -1375,8 +1377,8 @@ ecpg_build_params(struct statement * stmt, bool first_0_is_cursor_amount)
 			if (stmt->command[position] == '?')
 			{
 				/* yes, replace with new style */
-				int			buffersize = sizeof(int) * CHAR_BIT * 10 / 3;		/* a rough guess of the
-																				 * size we need */
+				int			buffersize = sizeof(int) * CHAR_BIT * 10 / 3;	/* a rough guess of the
+																			 * size we need */
 
 				if (!(tobeinserted = (char *) ecpg_alloc(buffersize, stmt->lineno)))
 				{
@@ -1403,7 +1405,7 @@ ecpg_build_params(struct statement * stmt, bool first_0_is_cursor_amount)
 	if (next_insert(stmt->command, position, stmt->questionmarks) >= 0)
 	{
 		ecpg_raise(stmt->lineno, ECPG_TOO_FEW_ARGUMENTS,
-				 ECPG_SQLSTATE_USING_CLAUSE_DOES_NOT_MATCH_PARAMETERS, NULL);
+				   ECPG_SQLSTATE_USING_CLAUSE_DOES_NOT_MATCH_PARAMETERS, NULL);
 		ecpg_free_params(stmt, false);
 		return false;
 	}
@@ -1417,7 +1419,7 @@ ecpg_build_params(struct statement * stmt, bool first_0_is_cursor_amount)
  *	a transaction.
  */
 bool
-ecpg_autostart_transaction(struct statement * stmt)
+ecpg_autostart_transaction(struct statement *stmt)
 {
 	if (PQtransactionStatus(stmt->connection->connection) == PQTRANS_IDLE && !stmt->connection->autocommit)
 	{
@@ -1438,7 +1440,7 @@ ecpg_autostart_transaction(struct statement * stmt)
  *	Execute the SQL statement.
  */
 bool
-ecpg_execute(struct statement * stmt)
+ecpg_execute(struct statement *stmt)
 {
 	ecpg_log("ecpg_execute on line %d: query: %s; with %d parameter(s) on connection %s\n", stmt->lineno, stmt->command, stmt->nparams, stmt->connection->name);
 	if (stmt->statement_type == ECPGst_execute)
@@ -1489,7 +1491,7 @@ ecpg_execute(struct statement * stmt)
  * Returns success as boolean. Also an SQL error is raised in case of failure.
  */
 bool
-ecpg_process_output(struct statement * stmt, int start, int ntuples, int direction, int var_index, bool clear_result, bool append_result)
+ecpg_process_output(struct statement *stmt, int start, int ntuples, int direction, int var_index, bool clear_result, bool append_result)
 {
 	struct variable *var;
 	bool		status = false;
@@ -1544,16 +1546,16 @@ ecpg_process_output(struct statement * stmt, int start, int ntuples, int directi
 				{
 					if (append_result && desc->result)
 					{
-						int		row = PQntuples(desc->result);
+						int			row = PQntuples(desc->result);
 
 						for (tuples_left = ntuples, act_tuple = start; tuples_left; tuples_left--, act_tuple += direction, row++)
 							for (act_field = 0; act_field < nfields; act_field++)
 							{
-								bool	isnull = PQgetisnull(stmt->results, act_tuple, act_field);
+								bool		isnull = PQgetisnull(stmt->results, act_tuple, act_field);
 
 								if (!PQsetvalue(desc->result, row, act_field,
-										isnull ? NULL : PQgetvalue(stmt->results, act_tuple, act_field),
-										isnull ? -1 : PQgetlength(stmt->results, act_tuple, act_field)))
+												isnull ? NULL : PQgetvalue(stmt->results, act_tuple, act_field),
+												isnull ? -1 : PQgetlength(stmt->results, act_tuple, act_field)))
 								{
 									ecpg_raise(stmt->lineno, ECPG_OUT_OF_MEMORY, ECPG_SQLSTATE_ECPG_OUT_OF_MEMORY, NULL);
 									status = false;
@@ -1567,23 +1569,23 @@ ecpg_process_output(struct statement * stmt, int start, int ntuples, int directi
 					{
 						if (desc->result)
 							PQclear(desc->result);
+
 						/*
-						 * Copy the SQL DESCRIPTOR's new results
-						 * from the current one. This allows data
-						 * in the descriptor to survive changes
-						 * in the cursor readahead cache and to
-						 * avoid overriding "clear_result".
+						 * Copy the SQL DESCRIPTOR's new results from the
+						 * current one. This allows data in the descriptor to
+						 * survive changes in the cursor readahead cache and
+						 * to avoid overriding "clear_result".
 						 */
 						desc->result = PQcopyResult(stmt->results,
-										PG_COPYRES_ATTRS |
-										PG_COPYRES_TUPLES |
-										PG_COPYRES_EVENTS |
-										PG_COPYRES_NOTICEHOOKS);
+													PG_COPYRES_ATTRS |
+													PG_COPYRES_TUPLES |
+													PG_COPYRES_EVENTS |
+													PG_COPYRES_NOTICEHOOKS);
 						if (desc->result == NULL)
 						{
 							ecpg_raise(stmt->lineno, ECPG_OUT_OF_MEMORY,
-										ECPG_SQLSTATE_ECPG_OUT_OF_MEMORY,
-										NULL);
+									   ECPG_SQLSTATE_ECPG_OUT_OF_MEMORY,
+									   NULL);
 							status = false;
 							break;
 						}
@@ -1613,8 +1615,8 @@ ecpg_process_output(struct statement * stmt, int start, int ntuples, int directi
 					else
 					{
 						/*
-						 * If we are passed in a previously existing sqlda (chain)
-						 * then free it.
+						 * If we are passed in a previously existing sqlda
+						 * (chain) then free it.
 						 */
 						while (sqlda)
 						{
@@ -1687,8 +1689,8 @@ ecpg_process_output(struct statement * stmt, int start, int ntuples, int directi
 					else
 					{
 						/*
-						 * If we are passed in a previously existing sqlda (chain)
-						 * then free it.
+						 * If we are passed in a previously existing sqlda
+						 * (chain) then free it.
 						 */
 						while (sqlda)
 						{
@@ -1845,9 +1847,9 @@ ecpg_process_output(struct statement * stmt, int start, int ntuples, int directi
  */
 bool
 ecpg_do_prologue(int lineno, const int compat, const int force_indicator,
-		 const char *connection_name, const bool questionmarks,
-		 enum ECPG_statement_type statement_type, const char *query,
-		 va_list args, struct statement **stmt_out)
+				 const char *connection_name, const bool questionmarks,
+				 enum ECPG_statement_type statement_type, const char *query,
+				 va_list args, struct statement **stmt_out)
 {
 	struct statement *stmt;
 	struct connection *con;
@@ -2110,12 +2112,12 @@ ecpg_do_epilogue(struct statement *stmt)
 bool
 ecpg_do(const int lineno, const int compat, const int force_indicator, const char *connection_name, const bool questionmarks, const int st, const char *query, va_list args)
 {
-	struct statement   *stmt;
+	struct statement *stmt;
 
 	if (!ecpg_do_prologue(lineno, compat, force_indicator,
-				connection_name, questionmarks,
-				(enum ECPG_statement_type) st,
-				query, args, &stmt))
+						  connection_name, questionmarks,
+						  (enum ECPG_statement_type) st,
+						  query, args, &stmt))
 	{
 		ecpg_do_epilogue(stmt);
 		return false;
@@ -2162,8 +2164,8 @@ ECPGdo(const int lineno, const int compat, const int force_indicator, const char
 
 	va_start(args, query);
 	ret = ecpg_do(lineno, compat, force_indicator, connection_name,
-							questionmarks,
-							st, query, args);
+				  questionmarks,
+				  st, query, args);
 	va_end(args);
 	return ret;
 }

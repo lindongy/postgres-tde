@@ -44,7 +44,7 @@ ecpg_raise(int line, int code, const char *sqlstate, const char *str)
 			snprintf(sqlca->sqlerrm.sqlerrmc, sizeof(sqlca->sqlerrm.sqlerrmc),
 			/*------
 			   translator: this string will be truncated at 149 characters expanded.  */
-			  ecpg_gettext("unsupported type \"%s\" on line %d"), str, line);
+					 ecpg_gettext("unsupported type \"%s\" on line %d"), str, line);
 			break;
 
 		case ECPG_TOO_MANY_ARGUMENTS:
@@ -106,7 +106,7 @@ ecpg_raise(int line, int code, const char *sqlstate, const char *str)
 			snprintf(sqlca->sqlerrm.sqlerrmc, sizeof(sqlca->sqlerrm.sqlerrmc),
 			/*------
 			   translator: this string will be truncated at 149 characters expanded.  */
-			  ecpg_gettext("null value without indicator on line %d"), line);
+					 ecpg_gettext("null value without indicator on line %d"), line);
 			break;
 
 		case ECPG_NO_ARRAY:
@@ -162,7 +162,7 @@ ecpg_raise(int line, int code, const char *sqlstate, const char *str)
 			snprintf(sqlca->sqlerrm.sqlerrmc, sizeof(sqlca->sqlerrm.sqlerrmc),
 			/*------
 			   translator: this string will be truncated at 149 characters expanded.  */
-			 ecpg_gettext("descriptor index out of range on line %d"), line);
+					 ecpg_gettext("descriptor index out of range on line %d"), line);
 			break;
 
 		case ECPG_UNKNOWN_DESCRIPTOR_ITEM:
@@ -190,23 +190,23 @@ ecpg_raise(int line, int code, const char *sqlstate, const char *str)
 			if (strcmp(sqlstate, ECPG_SQLSTATE_IN_FAILED_SQL_TRANSACTION) == 0)
 			{
 				snprintf(sqlca->sqlerrm.sqlerrmc, sizeof(sqlca->sqlerrm.sqlerrmc),
-			/*------
-			   translator: this string will be truncated at 149 characters expanded.  */
-			   		 ecpg_gettext("current transaction is aborted, commands ignored until end of transaction block on line %d"), line);
+				/*------
+				   translator: this string will be truncated at 149 characters expanded.  */
+						 ecpg_gettext("current transaction is aborted, commands ignored until end of transaction block on line %d"), line);
 			}
 			else if (strcmp(sqlstate, ECPG_SQLSTATE_S_E_INVALID_SPECIFICATION) == 0)
 			{
 				snprintf(sqlca->sqlerrm.sqlerrmc, sizeof(sqlca->sqlerrm.sqlerrmc),
-			/*------
-			   translator: this string will be truncated at 149 characters expanded.  */
-					 ecpg_gettext("no such savepoint \"%s\" on line %d"), str, line);
+				/*------
+				   translator: this string will be truncated at 149 characters expanded.  */
+						 ecpg_gettext("no such savepoint \"%s\" on line %d"), str, line);
 			}
 			else
 			{
 				snprintf(sqlca->sqlerrm.sqlerrmc, sizeof(sqlca->sqlerrm.sqlerrmc),
-			/*------
-			   translator: this string will be truncated at 149 characters expanded.  */
-					 ecpg_gettext("error in transaction processing on line %d"), line);
+				/*------
+				   translator: this string will be truncated at 149 characters expanded.  */
+						 ecpg_gettext("error in transaction processing on line %d"), line);
 			}
 			break;
 
@@ -226,30 +226,30 @@ ecpg_raise(int line, int code, const char *sqlstate, const char *str)
 			if (strcmp(sqlstate, ECPG_SQLSTATE_INVALID_CURSOR_STATE) == 0)
 			{
 				snprintf(sqlca->sqlerrm.sqlerrmc, sizeof(sqlca->sqlerrm.sqlerrmc),
-			/*------
-			   translator: this string will be truncated at 149 characters expanded.  */
-					 ecpg_gettext("invalid readahead window size for cursor \"%s\" on line %d"), str, line);
+				/*------
+				   translator: this string will be truncated at 149 characters expanded.  */
+						 ecpg_gettext("invalid readahead window size for cursor \"%s\" on line %d"), str, line);
 			}
 			else if (strcmp(sqlstate, ECPG_SQLSTATE_INVALID_CURSOR_NAME) == 0)
 			{
 				snprintf(sqlca->sqlerrm.sqlerrmc, sizeof(sqlca->sqlerrm.sqlerrmc),
-			/*------
-			   translator: this string will be truncated at 149 characters expanded.  */
-					 ecpg_gettext("invalid cursorname \"%s\" on line %d"), str, line);
+				/*------
+				   translator: this string will be truncated at 149 characters expanded.  */
+						 ecpg_gettext("invalid cursorname \"%s\" on line %d"), str, line);
 			}
 			else if (strcmp(sqlstate, ECPG_SQLSTATE_OBJECT_NOT_IN_PREREQUISITE_STATE) == 0)
 			{
 				snprintf(sqlca->sqlerrm.sqlerrmc, sizeof(sqlca->sqlerrm.sqlerrmc),
-			/*------
-			   translator: this string will be truncated at 149 characters expanded.  */
-					 ecpg_gettext("cursor \"%s\" can only scan forward on line %d"), str, line);
+				/*------
+				   translator: this string will be truncated at 149 characters expanded.  */
+						 ecpg_gettext("cursor \"%s\" can only scan forward on line %d"), str, line);
 			}
 			else
 			{
 				snprintf(sqlca->sqlerrm.sqlerrmc, sizeof(sqlca->sqlerrm.sqlerrmc),
-			/*------
-			   translator: this string will be truncated at 149 characters expanded.  */
-					 ecpg_gettext("invalid cursor error %d on line %d"), code, line);
+				/*------
+				   translator: this string will be truncated at 149 characters expanded.  */
+						 ecpg_gettext("invalid cursor error %d on line %d"), code, line);
 			}
 			break;
 

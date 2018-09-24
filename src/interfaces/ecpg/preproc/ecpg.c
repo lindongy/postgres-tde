@@ -20,7 +20,7 @@ bool		autocommit = false,
 			regression_mode = false,
 			auto_prepare = false,
 			cursor_rssz = false;
-long		fetch_readahead = 1; /* No readahead by default */
+long		fetch_readahead = 1;	/* No readahead by default */
 
 char	   *output_filename;
 
@@ -53,8 +53,8 @@ help(const char *progname)
 	printf(_("  -I DIRECTORY   search DIRECTORY for include files\n"));
 	printf(_("  -o OUTFILE     write result to OUTFILE\n"));
 	printf(_("  -r OPTION      specify run-time behavior; OPTION can be:\n"
-	 "                 \"no_indicator\", \"prepare\", \"questionmarks\",\n"
-	 "                 \"readahead=number\", \"detect-cursor-resultset-size\"\n"));
+			 "                 \"no_indicator\", \"prepare\", \"questionmarks\",\n"
+			 "                 \"readahead=number\", \"detect-cursor-resultset-size\"\n"));
 	printf(_("  --regression   run in regression testing mode\n"));
 	printf(_("  -t             turn on autocommit of transactions\n"));
 	printf(_("  -V, --version  output version information, then exit\n"));
