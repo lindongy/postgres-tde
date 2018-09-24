@@ -34,7 +34,7 @@ typedef struct PartitionDescData
 {
 	int			nparts;			/* Number of partitions */
 	Oid		   *oids;			/* OIDs of partitions */
-	PartitionBoundInfo boundinfo;		/* collection of partition bounds */
+	PartitionBoundInfo boundinfo;	/* collection of partition bounds */
 } PartitionDescData;
 
 typedef struct PartitionDescData *PartitionDesc;
@@ -80,14 +80,14 @@ extern Oid	get_partition_parent(Oid relid);
 extern List *get_qual_from_partbound(Relation rel, Relation parent,
 						PartitionBoundSpec *spec);
 extern List *map_partition_varattnos(List *expr, int target_varno,
-						Relation partrel, Relation parent);
+						Relation partrel, Relation parent,
+						bool *found_whole_row);
 extern List *RelationGetPartitionQual(Relation rel);
 extern Expr *get_partition_qual_relid(Oid relid);
 
 /* For tuple routing */
 extern PartitionDispatch *RelationGetPartitionDispatchInfo(Relation rel,
-								 int lockmode, int *num_parted,
-								 List **leaf_part_oids);
+								 int *num_parted, List **leaf_part_oids);
 extern void FormPartitionKeyDatum(PartitionDispatch pd,
 					  TupleTableSlot *slot,
 					  EState *estate,
@@ -98,4 +98,4 @@ extern int get_partition_for_tuple(PartitionDispatch *pd,
 						EState *estate,
 						PartitionDispatchData **failed_at,
 						TupleTableSlot **failed_slot);
-#endif   /* PARTITION_H */
+#endif							/* PARTITION_H */

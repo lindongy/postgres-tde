@@ -22,6 +22,7 @@ main(void)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <process.h>
+#include <locale.h>
 #else
 #include <pthread.h>
 #endif
@@ -99,7 +100,7 @@ struct sqlca_t *ECPGget_sqlca(void);
 
 #endif
 
-#line 24 "prep.pgc"
+#line 25 "prep.pgc"
 
 
 #line 1 "regression.h"
@@ -109,176 +110,143 @@ struct sqlca_t *ECPGget_sqlca(void);
 
 
 
-#line 25 "prep.pgc"
+#line 26 "prep.pgc"
 
 
 /* exec sql whenever sqlerror  sqlprint ; */
-#line 27 "prep.pgc"
+#line 28 "prep.pgc"
 
 /* exec sql whenever not found  sqlprint ; */
-#line 28 "prep.pgc"
+#line 29 "prep.pgc"
 
 
 #ifdef WIN32
-static unsigned __stdcall
-fn(void *arg)
+static unsigned __stdcall fn(void* arg)
 #else
-static void *
-fn(void *arg)
+static void* fn(void* arg)
 #endif
 {
-	int			i;
+	int i;
 
 	/* exec sql begin declare section */
-
-
-
-
-#line 39 "prep.pgc"
-	int			value;
-
+	  
+	 
+	   
+	
 #line 40 "prep.pgc"
-	char		name[100];
-
+ int value ;
+ 
 #line 41 "prep.pgc"
-	char		query[256] = "INSERT INTO T VALUES ( ? )";
-
-/* exec sql end declare section */
+ char name [ 100 ] ;
+ 
 #line 42 "prep.pgc"
+ char query [ 256 ] = "INSERT INTO T VALUES ( ? )" ;
+/* exec sql end declare section */
+#line 43 "prep.pgc"
 
 
-	value = (long) arg;
+#ifdef WIN32
+#ifdef _MSC_VER                /* requires MSVC */
+	_configthreadlocale(_ENABLE_PER_THREAD_LOCALE);
+#endif
+#endif
+
+	value = (long)arg;
 	sprintf(name, "Connection: %d", value);
 
-	{
-		ECPGconnect(__LINE__, 0, "ecpg1_regression", NULL, NULL, name, 0);
-#line 47 "prep.pgc"
+	{ ECPGconnect(__LINE__, 0, "ecpg1_regression" , NULL, NULL , name, 0); 
+#line 54 "prep.pgc"
 
-		if (sqlca.sqlcode < 0)
-			sqlprint();
-	}
-#line 47 "prep.pgc"
+if (sqlca.sqlcode < 0) sqlprint();}
+#line 54 "prep.pgc"
 
-	{
-		ECPGsetcommit(__LINE__, 1, NULL);
-#line 48 "prep.pgc"
+	{ ECPGsetcommit(__LINE__, 1, NULL);
+#line 55 "prep.pgc"
 
-		if (sqlca.sqlcode < 0)
-			sqlprint();
-	}
-#line 48 "prep.pgc"
+if (sqlca.sqlcode < 0) sqlprint();}
+#line 55 "prep.pgc"
 
 	for (i = 1; i <= REPEATS; ++i)
 	{
-		{
-			ECPGprepare(__LINE__, NULL, 0, "i", query);
-#line 51 "prep.pgc"
+		{ ECPGprepare(__LINE__, NULL, 0, "i", query);
+#line 58 "prep.pgc"
 
-			if (sqlca.sqlcode < 0)
-				sqlprint();
-		}
-#line 51 "prep.pgc"
+if (sqlca.sqlcode < 0) sqlprint();}
+#line 58 "prep.pgc"
 
-		{
-			ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_execute, "i",
-				   ECPGt_int, &(value), (long) 1, (long) 1, sizeof(int),
-				   ECPGt_NO_INDICATOR, NULL, 0L, 0L, 0L, ECPGt_EOIT, ECPGt_EORT);
-#line 52 "prep.pgc"
+		{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_execute, "i", 
+	ECPGt_int,&(value),(long)1,(long)1,sizeof(int), 
+	ECPGt_NO_INDICATOR, NULL , 0L, 0L, 0L, ECPGt_EOIT, ECPGt_EORT);
+#line 59 "prep.pgc"
 
-			if (sqlca.sqlcode == ECPG_NOT_FOUND)
-				sqlprint();
-#line 52 "prep.pgc"
+if (sqlca.sqlcode == ECPG_NOT_FOUND) sqlprint();
+#line 59 "prep.pgc"
 
-			if (sqlca.sqlcode < 0)
-				sqlprint();
-		}
-#line 52 "prep.pgc"
+if (sqlca.sqlcode < 0) sqlprint();}
+#line 59 "prep.pgc"
 
 	}
-	{
-		ECPGdeallocate(__LINE__, 0, NULL, "i");
-#line 54 "prep.pgc"
+	{ ECPGdeallocate(__LINE__, 0, NULL, "i");
+#line 61 "prep.pgc"
 
-		if (sqlca.sqlcode < 0)
-			sqlprint();
-	}
-#line 54 "prep.pgc"
+if (sqlca.sqlcode < 0) sqlprint();}
+#line 61 "prep.pgc"
 
-	{
-		ECPGdisconnect(__LINE__, name);
-#line 55 "prep.pgc"
+	{ ECPGdisconnect(__LINE__, name);
+#line 62 "prep.pgc"
 
-		if (sqlca.sqlcode < 0)
-			sqlprint();
-	}
-#line 55 "prep.pgc"
+if (sqlca.sqlcode < 0) sqlprint();}
+#line 62 "prep.pgc"
 
 
 	return 0;
 }
 
-int
-main()
+int main ()
 {
-	int			i;
+	int i;
 #ifdef WIN32
-	HANDLE		threads[THREADS];
+	HANDLE threads[THREADS];
 #else
-	pthread_t	threads[THREADS];
+	pthread_t threads[THREADS];
 #endif
 
-	{
-		ECPGconnect(__LINE__, 0, "ecpg1_regression", NULL, NULL, NULL, 0);
-#line 69 "prep.pgc"
+	{ ECPGconnect(__LINE__, 0, "ecpg1_regression" , NULL, NULL , NULL, 0); 
+#line 76 "prep.pgc"
 
-		if (sqlca.sqlcode < 0)
-			sqlprint();
-	}
-#line 69 "prep.pgc"
+if (sqlca.sqlcode < 0) sqlprint();}
+#line 76 "prep.pgc"
 
-	{
-		ECPGsetcommit(__LINE__, 1, NULL);
-#line 70 "prep.pgc"
+	{ ECPGsetcommit(__LINE__, 1, NULL);
+#line 77 "prep.pgc"
 
-		if (sqlca.sqlcode < 0)
-			sqlprint();
-	}
-#line 70 "prep.pgc"
+if (sqlca.sqlcode < 0) sqlprint();}
+#line 77 "prep.pgc"
 
-	{
-		ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "drop table if exists T", ECPGt_EOIT, ECPGt_EORT);
-#line 71 "prep.pgc"
+	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "drop table if exists T", ECPGt_EOIT, ECPGt_EORT);
+#line 78 "prep.pgc"
 
-		if (sqlca.sqlcode < 0)
-			sqlprint();
-	}
-#line 71 "prep.pgc"
+if (sqlca.sqlcode < 0) sqlprint();}
+#line 78 "prep.pgc"
 
-	{
-		ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "create table T ( i int )", ECPGt_EOIT, ECPGt_EORT);
-#line 72 "prep.pgc"
+	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "create table T ( i int )", ECPGt_EOIT, ECPGt_EORT);
+#line 79 "prep.pgc"
 
-		if (sqlca.sqlcode < 0)
-			sqlprint();
-	}
-#line 72 "prep.pgc"
+if (sqlca.sqlcode < 0) sqlprint();}
+#line 79 "prep.pgc"
 
-	{
-		ECPGdisconnect(__LINE__, "CURRENT");
-#line 73 "prep.pgc"
+	{ ECPGdisconnect(__LINE__, "CURRENT");
+#line 80 "prep.pgc"
 
-		if (sqlca.sqlcode < 0)
-			sqlprint();
-	}
-#line 73 "prep.pgc"
+if (sqlca.sqlcode < 0) sqlprint();}
+#line 80 "prep.pgc"
 
 
 #ifdef WIN32
 	for (i = 0; i < THREADS; ++i)
 	{
-		unsigned	id;
-
-		threads[i] = (HANDLE) _beginthreadex(NULL, 0, fn, (void *) i, 0, &id);
+		unsigned id;
+		threads[i] = (HANDLE)_beginthreadex(NULL, 0, fn, (void*)i, 0, &id);
 	}
 
 	WaitForMultipleObjects(THREADS, threads, TRUE, INFINITE);

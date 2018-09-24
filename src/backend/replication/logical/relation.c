@@ -280,10 +280,13 @@ logicalrep_rel_open(LogicalRepRelId remoteid, LOCKMODE lockmode)
 			int			attnum;
 
 			if (desc->attrs[i]->attisdropped)
+			{
+				entry->attrmap[i] = -1;
 				continue;
+			}
 
 			attnum = logicalrep_rel_att_by_name(remoterel,
-										   NameStr(desc->attrs[i]->attname));
+												NameStr(desc->attrs[i]->attname));
 
 			entry->attrmap[i] = attnum;
 			if (attnum >= 0)
@@ -294,9 +297,9 @@ logicalrep_rel_open(LogicalRepRelId remoteid, LOCKMODE lockmode)
 		if (found < remoterel->natts)
 			ereport(ERROR,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-			errmsg("logical replication target relation \"%s.%s\" is missing "
-				   "some replicated columns",
-				   remoterel->nspname, remoterel->relname)));
+					 errmsg("logical replication target relation \"%s.%s\" is missing "
+							"some replicated columns",
+							remoterel->nspname, remoterel->relname)));
 
 		/*
 		 * Check that replica identity matches. We allow for stricter replica
@@ -334,9 +337,9 @@ logicalrep_rel_open(LogicalRepRelId remoteid, LOCKMODE lockmode)
 			if (!AttrNumberIsForUserDefinedAttr(attnum))
 				ereport(ERROR,
 						(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("logical replication target relation \"%s.%s\" uses "
-						"system columns in REPLICA IDENTITY index",
-						remoterel->nspname, remoterel->relname)));
+						 errmsg("logical replication target relation \"%s.%s\" uses "
+								"system columns in REPLICA IDENTITY index",
+								remoterel->nspname, remoterel->relname)));
 
 			attnum = AttrNumberGetAttrOffset(attnum);
 
@@ -450,9 +453,8 @@ logicalrep_typmap_getid(Oid remoteid)
 	{
 		if (!get_typisdefined(remoteid))
 			ereport(ERROR,
-					(errmsg("builtin type %u not found", remoteid),
-					 errhint("This can be caused by having publisher with "
-							 "higher major version than subscriber")));
+					(errmsg("built-in type %u not found", remoteid),
+					 errhint("This can be caused by having a publisher with a higher PostgreSQL major version than the subscriber.")));
 		return remoteid;
 	}
 

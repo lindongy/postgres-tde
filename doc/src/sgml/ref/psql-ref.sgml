@@ -68,7 +68,8 @@ PostgreSQL documentation
       <listitem>
       <para>
       Switches to unaligned output mode. (The default output mode is
-      otherwise aligned.)
+      otherwise aligned.)  This is equivalent to <command>\pset format
+      unaligned</command>.
       </para>
       </listitem>
     </varlistentry>
@@ -371,8 +372,8 @@ EOF
       <listitem>
       <para>
       Use <replaceable class="parameter">separator</replaceable> as the
-      record separator for unaligned output. This is equivalent to the
-      <command>\pset recordsep</command> command.
+      record separator for unaligned output. This is equivalent to
+      <command>\pset recordsep</command>.
       </para>
       </listitem>
     </varlistentry>
@@ -415,7 +416,8 @@ EOF
       <listitem>
       <para>
       Turn off printing of column names and result row count footers,
-      etc. This is equivalent to the <command>\t</command> command.
+      etc. This is equivalent to <command>\t</command> or
+      <command>\pset tuples_only</command>.
       </para>
       </listitem>
     </varlistentry>
@@ -427,7 +429,7 @@ EOF
       <para>
       Specifies options to be placed within the
       <acronym>HTML</acronym> <sgmltag>table</sgmltag> tag. See
-      <command>\pset</command> for details.
+      <command>\pset tableattr</command> for details.
       </para>
       </listitem>
     </varlistentry>
@@ -522,8 +524,8 @@ EOF
       <term><option>--expanded</></term>
       <listitem>
       <para>
-      Turn on the expanded table formatting mode. This is equivalent to the
-      <command>\x</command> command.
+      Turn on the expanded table formatting mode. This is equivalent to
+      <command>\x</command> or <command>\pset expanded</command>.
       </para>
       </listitem>
     </varlistentry>
@@ -545,7 +547,8 @@ EOF
       <term><option>--field-separator-zero</option></term>
       <listitem>
       <para>
-      Set the field separator for unaligned output to a zero byte.
+      Set the field separator for unaligned output to a zero byte.  This is
+      equvalent to <command>\pset fieldsep_zero</command>.
       </para>
       </listitem>
     </varlistentry>
@@ -557,6 +560,7 @@ EOF
       <para>
       Set the record separator for unaligned output to a zero byte.  This is
       useful for interfacing, for example, with <literal>xargs -0</literal>.
+      This is equivalent to <command>\pset recordsep_zero</command>.
       </para>
       </listitem>
     </varlistentry>
@@ -1096,7 +1100,8 @@ testdb=&gt;
 
         <listitem>
         <para>
-        For each relation (table, view, index, sequence, or foreign table)
+        For each relation (table, view, materialized view, index, sequence,
+        or foreign table)
         or composite type matching the
         <replaceable class="parameter">pattern</replaceable>, show all
         columns, their types, the tablespace (if not the default) and any
@@ -1111,8 +1116,8 @@ testdb=&gt;
 
         <para>
         For some types of relation, <literal>\d</> shows additional information
-        for each column: column values for sequences, indexed expression for
-        indexes and foreign data wrapper options for foreign tables.
+        for each column: column values for sequences, indexed expressions for
+        indexes, and foreign data wrapper options for foreign tables.
         </para>
 
         <para>
@@ -1134,8 +1139,9 @@ testdb=&gt;
         <para>
         If <command>\d</command> is used without a
         <replaceable class="parameter">pattern</replaceable> argument, it is
-        equivalent to <command>\dtvsE</command> which will show a list of
-        all visible tables, views, sequences and foreign tables.
+        equivalent to <command>\dtvmsE</command> which will show a list of
+        all visible tables, views, materialized views, sequences and
+        foreign tables.
         This is purely a convenience measure.
         </para>
         </note>
@@ -1905,9 +1911,8 @@ Tue Oct 26 21:40:57 CEST 1999
         <listitem>
         <para>
         Sets the field separator for unaligned query output. The default
-        is the vertical bar (<literal>|</literal>). See also
-        <command>\pset</command> for a generic way of setting output
-        options.
+        is the vertical bar (<literal>|</literal>). It is equivalent to
+        <command>\pset fieldsep</command>.
         </para>
         </listitem>
       </varlistentry>
@@ -2808,8 +2813,9 @@ lo_import 152801
         <tip>
         <para>
         There are various shortcut commands for <command>\pset</command>. See
-        <command>\a</command>, <command>\C</command>, <command>\H</command>,
-        <command>\t</command>, <command>\T</command>, and <command>\x</command>.
+        <command>\a</command>, <command>\C</command>, <command>\f</command>,
+        <command>\H</command>, <command>\t</command>, <command>\T</command>,
+        and <command>\x</command>.
         </para>
         </tip>
 
@@ -3561,7 +3567,7 @@ bar
          will terminate the application.  If set to a larger numeric value,
          that many consecutive <acronym>EOF</> characters must be typed to
          make an interactive session terminate.  If the variable is set to a
-         non-numeric value, it is interpreted as 10.
+         non-numeric value, it is interpreted as 10.  The default is 0.
         </para>
         <note>
         <para>
@@ -3665,6 +3671,21 @@ bar
       </varlistentry>
 
       <varlistentry>
+        <term><varname>SERVER_VERSION_NAME</varname></term>
+        <term><varname>SERVER_VERSION_NUM</varname></term>
+        <listitem>
+        <para>
+        The server's version number as a string, for
+        example <literal>9.6.2</>, <literal>10.1</> or <literal>11beta1</>,
+        and in numeric form, for
+        example <literal>90602</> or <literal>100001</>.
+        These are set every time you connect to a database
+        (including program start-up), but can be changed or unset.
+        </para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><varname>SHOW_CONTEXT</varname></term>
         <listitem>
         <para>
@@ -3727,10 +3748,15 @@ bar
 
       <varlistentry>
         <term><varname>VERSION</varname></term>
+        <term><varname>VERSION_NAME</varname></term>
+        <term><varname>VERSION_NUM</varname></term>
         <listitem>
         <para>
-        This variable is set at program start-up to
-        reflect <application>psql</>'s version.  It can be changed or unset.
+        These variables are set at program start-up to reflect
+        <application>psql</>'s version, respectively as a verbose string,
+        a short string (e.g., <literal>9.6.2</>, <literal>10.1</>,
+        or <literal>11beta1</>), and a number (e.g., <literal>90602</>
+        or <literal>100001</>).  They can be changed or unset.
         </para>
         </listitem>
       </varlistentry>

@@ -466,8 +466,8 @@ CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
 				walrcv_create_slot(wrconn, slotname, false,
 								   CRS_NOEXPORT_SNAPSHOT, &lsn);
 				ereport(NOTICE,
-					  (errmsg("created replication slot \"%s\" on publisher",
-							  slotname)));
+						(errmsg("created replication slot \"%s\" on publisher",
+								slotname)));
 			}
 		}
 		PG_CATCH();
@@ -570,12 +570,11 @@ AlterSubscription_refresh(Subscription *sub, bool copy_data)
 					 list_length(subrel_states), sizeof(Oid), oid_cmp))
 		{
 			SetSubscriptionRelState(sub->oid, relid,
-						  copy_data ? SUBREL_STATE_INIT : SUBREL_STATE_READY,
+									copy_data ? SUBREL_STATE_INIT : SUBREL_STATE_READY,
 									InvalidXLogRecPtr, false);
-			ereport(NOTICE,
-					(errmsg("added subscription for table %s.%s",
-							quote_identifier(rv->schemaname),
-							quote_identifier(rv->relname))));
+			ereport(DEBUG1,
+					(errmsg("table \"%s.%s\" added to subscription \"%s\"",
+							rv->schemaname, rv->relname, sub->name)));
 		}
 	}
 
@@ -593,17 +592,15 @@ AlterSubscription_refresh(Subscription *sub, bool copy_data)
 		if (!bsearch(&relid, pubrel_local_oids,
 					 list_length(pubrel_names), sizeof(Oid), oid_cmp))
 		{
-			char	   *namespace;
-
 			RemoveSubscriptionRel(sub->oid, relid);
 
-			logicalrep_worker_stop(sub->oid, relid);
+			logicalrep_worker_stop_at_commit(sub->oid, relid);
 
-			namespace = get_namespace_name(get_rel_namespace(relid));
-			ereport(NOTICE,
-					(errmsg("removed subscription for table %s.%s",
-							quote_identifier(namespace),
-							quote_identifier(get_rel_name(relid)))));
+			ereport(DEBUG1,
+					(errmsg("table \"%s.%s\" removed from subscription \"%s\"",
+							get_namespace_name(get_rel_namespace(relid)),
+							get_rel_name(relid),
+							sub->name)));
 		}
 	}
 }
@@ -643,6 +640,9 @@ AlterSubscription(AlterSubscriptionStmt *stmt)
 
 	subid = HeapTupleGetOid(tup);
 	sub = GetSubscription(subid, false);
+
+	/* Lock the subscription so nobody else can do anything with it. */
+	LockSharedObject(SubscriptionRelationId, subid, 0, AccessExclusiveLock);
 
 	/* Form a new tuple. */
 	memset(values, 0, sizeof(values));
@@ -816,6 +816,8 @@ DropSubscription(DropSubscriptionStmt *stmt, bool isTopLevel)
 	char	   *subname;
 	char	   *conninfo;
 	char	   *slotname;
+	List	   *subworkers;
+	ListCell   *lc;
 	char		originname[NAMEDATALEN];
 	char	   *err = NULL;
 	RepOriginId originid;
@@ -906,20 +908,44 @@ DropSubscription(DropSubscriptionStmt *stmt, bool isTopLevel)
 
 	ReleaseSysCache(tup);
 
+	/*
+	 * Stop all the subscription workers immediately.
+	 *
+	 * This is necessary if we are dropping the replication slot, so that the
+	 * slot becomes accessible.
+	 *
+	 * It is also necessary if the subscription is disabled and was disabled
+	 * in the same transaction.  Then the workers haven't seen the disabling
+	 * yet and will still be running, leading to hangs later when we want to
+	 * drop the replication origin.  If the subscription was disabled before
+	 * this transaction, then there shouldn't be any workers left, so this
+	 * won't make a difference.
+	 *
+	 * New workers won't be started because we hold an exclusive lock on the
+	 * subscription till the end of the transaction.
+	 */
+	LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
+	subworkers = logicalrep_workers_find(subid, false);
+	LWLockRelease(LogicalRepWorkerLock);
+	foreach(lc, subworkers)
+	{
+		LogicalRepWorker *w = (LogicalRepWorker *) lfirst(lc);
+
+		logicalrep_worker_stop(w->subid, w->relid);
+	}
+	list_free(subworkers);
+
 	/* Clean up dependencies */
 	deleteSharedDependencyRecordsFor(SubscriptionRelationId, subid, 0);
 
 	/* Remove any associated relation synchronization states. */
 	RemoveSubscriptionRel(subid, InvalidOid);
 
-	/* Kill the apply worker so that the slot becomes accessible. */
-	logicalrep_worker_stop(subid, InvalidOid);
-
 	/* Remove the origin tracking if exists. */
 	snprintf(originname, sizeof(originname), "pg_%u", subid);
 	originid = replorigin_by_name(originname, true);
 	if (originid != InvalidRepOriginId)
-		replorigin_drop(originid);
+		replorigin_drop(originid, false);
 
 	/*
 	 * If there is no slot associated with the subscription, we can finish
@@ -938,7 +964,7 @@ DropSubscription(DropSubscriptionStmt *stmt, bool isTopLevel)
 	load_file("libpqwalreceiver", false);
 
 	initStringInfo(&cmd);
-	appendStringInfo(&cmd, "DROP_REPLICATION_SLOT %s", quote_identifier(slotname));
+	appendStringInfo(&cmd, "DROP_REPLICATION_SLOT %s WAIT", quote_identifier(slotname));
 
 	wrconn = walrcv_connect(conninfo, true, subname, &err);
 	if (wrconn == NULL)
@@ -957,9 +983,9 @@ DropSubscription(DropSubscriptionStmt *stmt, bool isTopLevel)
 
 		if (res->status != WALRCV_OK_COMMAND)
 			ereport(ERROR,
-			(errmsg("could not drop the replication slot \"%s\" on publisher",
-					slotname),
-			 errdetail("The error was: %s", res->err)));
+					(errmsg("could not drop the replication slot \"%s\" on publisher",
+							slotname),
+					 errdetail("The error was: %s", res->err)));
 		else
 			ereport(NOTICE,
 					(errmsg("dropped replication slot \"%s\" on publisher",
@@ -1003,9 +1029,9 @@ AlterSubscriptionOwner_internal(Relation rel, HeapTuple tup, Oid newOwnerId)
 	if (!superuser_arg(newOwnerId))
 		ereport(ERROR,
 				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-		   errmsg("permission denied to change owner of subscription \"%s\"",
-				  NameStr(form->subname)),
-			   errhint("The owner of a subscription must be a superuser.")));
+				 errmsg("permission denied to change owner of subscription \"%s\"",
+						NameStr(form->subname)),
+				 errhint("The owner of a subscription must be a superuser.")));
 
 	form->subowner = newOwnerId;
 	CatalogTupleUpdate(rel, &tup->t_self, tup);

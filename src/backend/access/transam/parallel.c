@@ -113,7 +113,7 @@ static const struct
 {
 	const char *fn_name;
 	parallel_worker_main_type fn_addr;
-}	InternalParallelWorkers[] =
+}			InternalParallelWorkers[] =
 
 {
 	{
@@ -480,7 +480,7 @@ LaunchParallelWorkers(ParallelContext *pcxt)
 			 */
 			any_registrations_failed = true;
 			pcxt->worker[i].bgwhandle = NULL;
-			pfree(pcxt->worker[i].error_mqh);
+			shm_mq_detach(pcxt->worker[i].error_mqh);
 			pcxt->worker[i].error_mqh = NULL;
 		}
 	}
@@ -574,7 +574,7 @@ WaitForParallelWorkersToExit(ParallelContext *pcxt)
 		if (status == BGWH_POSTMASTER_DIED)
 			ereport(FATAL,
 					(errcode(ERRCODE_ADMIN_SHUTDOWN),
-				 errmsg("postmaster exited during a parallel transaction")));
+					 errmsg("postmaster exited during a parallel transaction")));
 
 		/* Release memory. */
 		pfree(pcxt->worker[i].bgwhandle);
@@ -612,7 +612,7 @@ DestroyParallelContext(ParallelContext *pcxt)
 			{
 				TerminateBackgroundWorker(pcxt->worker[i].bgwhandle);
 
-				pfree(pcxt->worker[i].error_mqh);
+				shm_mq_detach(pcxt->worker[i].error_mqh);
 				pcxt->worker[i].error_mqh = NULL;
 			}
 		}
@@ -760,8 +760,8 @@ HandleParallelMessages(void)
 				}
 				else
 					ereport(ERROR,
-						  (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-						   errmsg("lost connection to parallel worker")));
+							(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+							 errmsg("lost connection to parallel worker")));
 			}
 		}
 	}
@@ -861,7 +861,7 @@ HandleParallelMessage(ParallelContext *pcxt, int i, StringInfo msg)
 
 		case 'X':				/* Terminate, indicating clean exit */
 			{
-				pfree(pcxt->worker[i].error_mqh);
+				shm_mq_detach(pcxt->worker[i].error_mqh);
 				pcxt->worker[i].error_mqh = NULL;
 				break;
 			}
@@ -970,7 +970,7 @@ ParallelWorkerMain(Datum main_arg)
 	if (toc == NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-		   errmsg("invalid magic number in dynamic shared memory segment")));
+				 errmsg("invalid magic number in dynamic shared memory segment")));
 
 	/* Look up fixed parallel state. */
 	fps = shm_toc_lookup(toc, PARALLEL_KEY_FIXED, false);

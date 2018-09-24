@@ -136,7 +136,7 @@ ParseVariableBool(const char *value, const char *name, bool *result)
 	{
 		/* string is not recognized; don't clobber *result */
 		if (name)
-			psql_error("unrecognized value \"%s\" for \"%s\": boolean expected\n",
+			psql_error("unrecognized value \"%s\" for \"%s\": Boolean expected\n",
 					   value, name);
 		valid = false;
 	}
@@ -273,7 +273,7 @@ SetVariable(VariableSpace space, const char *name, const char *value)
 				}
 			}
 			else if (new_value)
-				pg_free(new_value);		/* current->value is left unchanged */
+				pg_free(new_value); /* current->value is left unchanged */
 
 			return confirmed;
 		}

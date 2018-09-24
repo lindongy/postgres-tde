@@ -377,7 +377,7 @@ setup_cancel_handler(void)
 
 	SetConsoleCtrlHandler(consoleHandler, TRUE);
 }
-#endif   /* WIN32 */
+#endif							/* WIN32 */
 
 
 /* ConnectionUp
@@ -1564,6 +1564,10 @@ ExecQueryUsingCursor(const char *query, double *elapsed_msec)
 	snprintf(fetch_cmd, sizeof(fetch_cmd),
 			 "FETCH FORWARD %d FROM _psql_cursor",
 			 fetch_count);
+
+	/* one-shot expanded output requested via \gx */
+	if (pset.g_expanded)
+		my_popt.topt.expanded = 1;
 
 	/* prepare to write output to \g argument, if any */
 	if (pset.gfname)

@@ -49,13 +49,13 @@ typedef struct DependencyGeneratorData
 typedef DependencyGeneratorData *DependencyGenerator;
 
 static void generate_dependencies_recurse(DependencyGenerator state,
-						   int index, AttrNumber start, AttrNumber *current);
+							  int index, AttrNumber start, AttrNumber *current);
 static void generate_dependencies(DependencyGenerator state);
 static DependencyGenerator DependencyGenerator_init(int n, int k);
 static void DependencyGenerator_free(DependencyGenerator state);
 static AttrNumber *DependencyGenerator_next(DependencyGenerator state);
 static double dependency_degree(int numrows, HeapTuple *rows, int k,
-			 AttrNumber *dependency, VacAttrStats **stats, Bitmapset *attrs);
+				  AttrNumber *dependency, VacAttrStats **stats, Bitmapset *attrs);
 static bool dependency_is_fully_matched(MVDependency *dependency,
 							Bitmapset *attnums);
 static bool dependency_implies_attribute(MVDependency *dependency,
@@ -122,7 +122,7 @@ generate_dependencies_recurse(DependencyGenerator state, int index,
 			if (!match)
 			{
 				state->dependencies = (AttrNumber *) repalloc(state->dependencies,
-				 state->k * (state->ndependencies + 1) * sizeof(AttrNumber));
+															  state->k * (state->ndependencies + 1) * sizeof(AttrNumber));
 				memcpy(&state->dependencies[(state->k * state->ndependencies)],
 					   current, state->k * sizeof(AttrNumber));
 				state->ndependencies++;
@@ -286,14 +286,6 @@ dependency_degree(int numrows, HeapTuple *rows, int k, AttrNumber *dependency,
 	 * first (k-1) columns. If there's a single value in the last column, we
 	 * count the group as 'supporting' the functional dependency. Otherwise we
 	 * count it as contradicting.
-	 *
-	 * We also require a group to have a minimum number of rows to be
-	 * considered useful for supporting the dependency. Contradicting groups
-	 * may be of any size, though.
-	 *
-	 * XXX The minimum size requirement makes it impossible to identify case
-	 * when both columns are unique (or nearly unique), and therefore
-	 * trivially functionally dependent.
 	 */
 
 	/* start with the first row forming a group */
@@ -308,7 +300,7 @@ dependency_degree(int numrows, HeapTuple *rows, int k, AttrNumber *dependency,
 		 * to the preceding one.
 		 */
 		if (i == numrows ||
-		multi_sort_compare_dims(0, k - 2, &items[i - 1], &items[i], mss) != 0)
+			multi_sort_compare_dims(0, k - 2, &items[i - 1], &items[i], mss) != 0)
 		{
 			/*
 			 * If no violations were found in the group then track the rows of
@@ -409,7 +401,7 @@ statext_dependencies_build(int numrows, HeapTuple *rows, Bitmapset *attrs,
 				continue;
 
 			d = (MVDependency *) palloc0(offsetof(MVDependency, attributes)
-										 +k * sizeof(AttrNumber));
+										 + k * sizeof(AttrNumber));
 
 			/* copy the dependency (and keep the indexes into stxkeys) */
 			d->degree = degree;
@@ -430,8 +422,8 @@ statext_dependencies_build(int numrows, HeapTuple *rows, Bitmapset *attrs,
 
 			dependencies->ndeps++;
 			dependencies = (MVDependencies *) repalloc(dependencies,
-											   offsetof(MVDependencies, deps)
-								+dependencies->ndeps * sizeof(MVDependency));
+													   offsetof(MVDependencies, deps)
+													   + dependencies->ndeps * sizeof(MVDependency));
 
 			dependencies->deps[dependencies->ndeps - 1] = d;
 		}
@@ -552,7 +544,7 @@ statext_dependencies_deserialize(bytea *data)
 
 	/* allocate space for the MCV items */
 	dependencies = repalloc(dependencies, offsetof(MVDependencies, deps)
-							+(dependencies->ndeps * sizeof(MVDependency *)));
+							+ (dependencies->ndeps * sizeof(MVDependency *)));
 
 	for (i = 0; i < dependencies->ndeps; i++)
 	{
@@ -573,7 +565,7 @@ statext_dependencies_deserialize(bytea *data)
 
 		/* now that we know the number of attributes, allocate the dependency */
 		d = (MVDependency *) palloc0(offsetof(MVDependency, attributes)
-									 +(k * sizeof(AttrNumber)));
+									 + (k * sizeof(AttrNumber)));
 
 		d->degree = degree;
 		d->nattributes = k;
@@ -883,7 +875,7 @@ find_strongest_dependency(StatisticExtInfo *stats, MVDependencies *dependencies,
 		 * slightly more expensive than the previous checks.
 		 */
 		if (dependency_is_fully_matched(dependency, attnums))
-			strongest = dependency;		/* save new best match */
+			strongest = dependency; /* save new best match */
 	}
 
 	return strongest;

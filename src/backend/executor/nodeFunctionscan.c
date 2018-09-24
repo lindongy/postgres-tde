@@ -96,7 +96,7 @@ FunctionNext(FunctionScanState *node)
 											node->ss.ps.ps_ExprContext,
 											node->argcontext,
 											node->funcstates[0].tupdesc,
-										  node->eflags & EXEC_FLAG_BACKWARD);
+											node->eflags & EXEC_FLAG_BACKWARD);
 
 			/*
 			 * paranoia - cope if the function, which may have constructed the
@@ -155,7 +155,7 @@ FunctionNext(FunctionScanState *node)
 											node->ss.ps.ps_ExprContext,
 											node->argcontext,
 											fs->tupdesc,
-										  node->eflags & EXEC_FLAG_BACKWARD);
+											node->eflags & EXEC_FLAG_BACKWARD);
 
 			/*
 			 * paranoia - cope if the function, which may have constructed the
@@ -262,9 +262,11 @@ FunctionRecheck(FunctionScanState *node, TupleTableSlot *slot)
  *		access method functions.
  * ----------------------------------------------------------------
  */
-TupleTableSlot *
-ExecFunctionScan(FunctionScanState *node)
+static TupleTableSlot *
+ExecFunctionScan(PlanState *pstate)
 {
+	FunctionScanState *node = castNode(FunctionScanState, pstate);
+
 	return ExecScan(&node->ss,
 					(ExecScanAccessMtd) FunctionNext,
 					(ExecScanRecheckMtd) FunctionRecheck);
@@ -299,6 +301,7 @@ ExecInitFunctionScan(FunctionScan *node, EState *estate, int eflags)
 	scanstate = makeNode(FunctionScanState);
 	scanstate->ss.ps.plan = (Plan *) node;
 	scanstate->ss.ps.state = estate;
+	scanstate->ss.ps.ExecProcNode = ExecFunctionScan;
 	scanstate->eflags = eflags;
 
 	/*

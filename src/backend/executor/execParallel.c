@@ -109,8 +109,10 @@ static bool ExecParallelInitializeDSM(PlanState *node,
 						  ExecParallelInitializeDSMContext *d);
 static shm_mq_handle **ExecParallelSetupTupleQueues(ParallelContext *pcxt,
 							 bool reinitialize);
+static bool ExecParallelReInitializeDSM(PlanState *planstate,
+							ParallelContext *pcxt);
 static bool ExecParallelRetrieveInstrumentation(PlanState *planstate,
-							 SharedExecutorInstrumentation *instrumentation);
+									SharedExecutorInstrumentation *instrumentation);
 
 /* Helper function that runs in the parallel worker. */
 static DestReceiver *ExecParallelGetReceiver(dsm_segment *seg, shm_toc *toc);
@@ -365,18 +367,6 @@ ExecParallelSetupTupleQueues(ParallelContext *pcxt, bool reinitialize)
 }
 
 /*
- * Re-initialize the parallel executor info such that it can be reused by
- * workers.
- */
-void
-ExecParallelReinitialize(ParallelExecutorInfo *pei)
-{
-	ReinitializeParallelDSM(pei->pcxt);
-	pei->tqueue = ExecParallelSetupTupleQueues(pei->pcxt, true);
-	pei->finished = false;
-}
-
-/*
  * Sets up the required infrastructure for backend workers to perform
  * execution and return results to the main backend.
  */
@@ -446,7 +436,7 @@ ExecInitParallelPlan(PlanState *planstate, EState *estate, int nworkers)
 
 	/* Estimate space for tuple queues. */
 	shm_toc_estimate_chunk(&pcxt->estimator,
-						mul_size(PARALLEL_TUPLE_QUEUE_SIZE, pcxt->nworkers));
+						   mul_size(PARALLEL_TUPLE_QUEUE_SIZE, pcxt->nworkers));
 	shm_toc_estimate_keys(&pcxt->estimator, 1);
 
 	/*
@@ -504,12 +494,15 @@ ExecInitParallelPlan(PlanState *planstate, EState *estate, int nworkers)
 
 	/* Allocate space for each worker's BufferUsage; no need to initialize. */
 	bufusage_space = shm_toc_allocate(pcxt->toc,
-							  mul_size(sizeof(BufferUsage), pcxt->nworkers));
+									  mul_size(sizeof(BufferUsage), pcxt->nworkers));
 	shm_toc_insert(pcxt->toc, PARALLEL_KEY_BUFFER_USAGE, bufusage_space);
 	pei->buffer_usage = bufusage_space;
 
-	/* Set up tuple queues. */
+	/* Set up the tuple queues that the workers will write into. */
 	pei->tqueue = ExecParallelSetupTupleQueues(pcxt, false);
+
+	/* We don't need the TupleQueueReaders yet, though. */
+	pei->reader = NULL;
 
 	/*
 	 * If instrumentation options were supplied, allocate space for the data.
@@ -567,7 +560,7 @@ ExecInitParallelPlan(PlanState *planstate, EState *estate, int nworkers)
 	ExecParallelInitializeDSM(planstate, &d);
 
 	/*
-	 * Make sure that the world hasn't shifted under our feat.  This could
+	 * Make sure that the world hasn't shifted under our feet.  This could
 	 * probably just be an Assert(), but let's be conservative for now.
 	 */
 	if (e.nnodes != d.nnodes)
@@ -578,12 +571,113 @@ ExecInitParallelPlan(PlanState *planstate, EState *estate, int nworkers)
 }
 
 /*
+ * Set up tuple queue readers to read the results of a parallel subplan.
+ * All the workers are expected to return tuples matching tupDesc.
+ *
+ * This is separate from ExecInitParallelPlan() because we can launch the
+ * worker processes and let them start doing something before we do this.
+ */
+void
+ExecParallelCreateReaders(ParallelExecutorInfo *pei,
+						  TupleDesc tupDesc)
+{
+	int			nworkers = pei->pcxt->nworkers_launched;
+	int			i;
+
+	Assert(pei->reader == NULL);
+
+	if (nworkers > 0)
+	{
+		pei->reader = (TupleQueueReader **)
+			palloc(nworkers * sizeof(TupleQueueReader *));
+
+		for (i = 0; i < nworkers; i++)
+		{
+			shm_mq_set_handle(pei->tqueue[i],
+							  pei->pcxt->worker[i].bgwhandle);
+			pei->reader[i] = CreateTupleQueueReader(pei->tqueue[i],
+													tupDesc);
+		}
+	}
+}
+
+/*
+ * Re-initialize the parallel executor shared memory state before launching
+ * a fresh batch of workers.
+ */
+void
+ExecParallelReinitialize(PlanState *planstate,
+						 ParallelExecutorInfo *pei)
+{
+	/* Old workers must already be shut down */
+	Assert(pei->finished);
+
+	ReinitializeParallelDSM(pei->pcxt);
+	pei->tqueue = ExecParallelSetupTupleQueues(pei->pcxt, true);
+	pei->reader = NULL;
+	pei->finished = false;
+
+	/* Traverse plan tree and let each child node reset associated state. */
+	ExecParallelReInitializeDSM(planstate, pei->pcxt);
+}
+
+/*
+ * Traverse plan tree to reinitialize per-node dynamic shared memory state
+ */
+static bool
+ExecParallelReInitializeDSM(PlanState *planstate,
+							ParallelContext *pcxt)
+{
+	if (planstate == NULL)
+		return false;
+
+	/*
+	 * Call reinitializers for DSM-using plan nodes.
+	 */
+	if (planstate->plan->parallel_aware)
+	{
+		switch (nodeTag(planstate))
+		{
+			case T_SeqScanState:
+				ExecSeqScanReInitializeDSM((SeqScanState *) planstate,
+										   pcxt);
+				break;
+			case T_IndexScanState:
+				ExecIndexScanReInitializeDSM((IndexScanState *) planstate,
+											 pcxt);
+				break;
+			case T_IndexOnlyScanState:
+				ExecIndexOnlyScanReInitializeDSM((IndexOnlyScanState *) planstate,
+												 pcxt);
+				break;
+			case T_ForeignScanState:
+				ExecForeignScanReInitializeDSM((ForeignScanState *) planstate,
+											   pcxt);
+				break;
+			case T_CustomScanState:
+				ExecCustomScanReInitializeDSM((CustomScanState *) planstate,
+											  pcxt);
+				break;
+			case T_BitmapHeapScanState:
+				ExecBitmapHeapReInitializeDSM((BitmapHeapScanState *) planstate,
+											  pcxt);
+				break;
+
+			default:
+				break;
+		}
+	}
+
+	return planstate_tree_walker(planstate, ExecParallelReInitializeDSM, pcxt);
+}
+
+/*
  * Copy instrumentation information about this node and its descendants from
  * dynamic shared memory.
  */
 static bool
 ExecParallelRetrieveInstrumentation(PlanState *planstate,
-							  SharedExecutorInstrumentation *instrumentation)
+									SharedExecutorInstrumentation *instrumentation)
 {
 	Instrumentation *instrument;
 	int			i;
@@ -632,16 +726,45 @@ ExecParallelRetrieveInstrumentation(PlanState *planstate,
 void
 ExecParallelFinish(ParallelExecutorInfo *pei)
 {
+	int			nworkers = pei->pcxt->nworkers_launched;
 	int			i;
 
+	/* Make this be a no-op if called twice in a row. */
 	if (pei->finished)
 		return;
 
-	/* First, wait for the workers to finish. */
+	/*
+	 * Detach from tuple queues ASAP, so that any still-active workers will
+	 * notice that no further results are wanted.
+	 */
+	if (pei->tqueue != NULL)
+	{
+		for (i = 0; i < nworkers; i++)
+			shm_mq_detach(pei->tqueue[i]);
+		pfree(pei->tqueue);
+		pei->tqueue = NULL;
+	}
+
+	/*
+	 * While we're waiting for the workers to finish, let's get rid of the
+	 * tuple queue readers.  (Any other local cleanup could be done here too.)
+	 */
+	if (pei->reader != NULL)
+	{
+		for (i = 0; i < nworkers; i++)
+			DestroyTupleQueueReader(pei->reader[i]);
+		pfree(pei->reader);
+		pei->reader = NULL;
+	}
+
+	/* Now wait for the workers to finish. */
 	WaitForParallelWorkersToFinish(pei->pcxt);
 
-	/* Next, accumulate buffer usage. */
-	for (i = 0; i < pei->pcxt->nworkers_launched; ++i)
+	/*
+	 * Next, accumulate buffer usage.  (This must wait for the workers to
+	 * finish, or we might get incomplete data.)
+	 */
+	for (i = 0; i < nworkers; i++)
 		InstrAccumParallelQuery(&pei->buffer_usage[i]);
 
 	/* Finally, accumulate instrumentation, if any. */
@@ -735,7 +858,7 @@ ExecParallelGetQueryDesc(shm_toc *toc, DestReceiver *receiver,
  */
 static bool
 ExecParallelReportInstrumentation(PlanState *planstate,
-							  SharedExecutorInstrumentation *instrumentation)
+								  SharedExecutorInstrumentation *instrumentation)
 {
 	int			i;
 	int			plan_node_id = planstate->plan->plan_node_id;
@@ -804,7 +927,7 @@ ExecParallelInitializeWorker(PlanState *planstate, shm_toc *toc)
 				break;
 			case T_BitmapHeapScanState:
 				ExecBitmapHeapInitializeWorker(
-									 (BitmapHeapScanState *) planstate, toc);
+											   (BitmapHeapScanState *) planstate, toc);
 				break;
 			default:
 				break;

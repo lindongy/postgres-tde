@@ -145,8 +145,7 @@ typedef struct HashScanOpaqueData
 	 */
 	bool		hashso_buc_split;
 	/* info about killed items if any (killedItems is NULL if never used) */
-	HashScanPosItem *killedItems;		/* tids and offset numbers of killed
-										 * items */
+	HashScanPosItem *killedItems;	/* tids and offset numbers of killed items */
 	int			numKilled;		/* number of currently stored items */
 } HashScanOpaqueData;
 
@@ -159,8 +158,7 @@ typedef HashScanOpaqueData *HashScanOpaque;
 #define HASH_METAPAGE	0		/* metapage is always block 0 */
 
 #define HASH_MAGIC		0x6440640
-#define HASH_VERSION	3		/* 3 signifies multi-phased bucket allocation
-								 * to reduce doubling */
+#define HASH_VERSION	4
 
 /*
  * spares[] holds the number of overflow pages currently allocated at or
@@ -183,10 +181,10 @@ typedef HashScanOpaqueData *HashScanOpaque;
  * after HASH_SPLITPOINT_GROUPS_WITH_ONE_PHASE).
  *
  * There is no particular upper limit on the size of mapp[], other than
- * needing to fit into the metapage.  (With 8K block size, 128 bitmaps
- * limit us to 64 GB of overflow space...)
+ * needing to fit into the metapage.  (With 8K block size, 1024 bitmaps
+ * limit us to 256 GB of overflow space...)
  */
-#define HASH_MAX_BITMAPS			128
+#define HASH_MAX_BITMAPS			1024
 
 #define HASH_SPLITPOINT_PHASE_BITS	2
 #define HASH_SPLITPOINT_PHASES_PER_GRP	(1 << HASH_SPLITPOINT_PHASE_BITS)
@@ -213,13 +211,13 @@ typedef struct HashMetaPageData
 	uint32		hashm_maxbucket;	/* ID of maximum bucket in use */
 	uint32		hashm_highmask; /* mask to modulo into entire table */
 	uint32		hashm_lowmask;	/* mask to modulo into lower half of table */
-	uint32		hashm_ovflpoint;/* splitpoint from which ovflpgs being
-								 * allocated */
+	uint32		hashm_ovflpoint;	/* splitpoint from which ovflpgs being
+									 * allocated */
 	uint32		hashm_firstfree;	/* lowest-number free ovflpage (bit#) */
 	uint32		hashm_nmaps;	/* number of bitmap pages */
 	RegProcedure hashm_procid;	/* hash procedure id from pg_proc */
-	uint32		hashm_spares[HASH_MAX_SPLITPOINTS];		/* spare pages before
-														 * each splitpoint */
+	uint32		hashm_spares[HASH_MAX_SPLITPOINTS]; /* spare pages before each
+													 * splitpoint */
 	BlockNumber hashm_mapp[HASH_MAX_BITMAPS];	/* blknos of ovfl bitmaps */
 } HashMetaPageData;
 
@@ -242,7 +240,7 @@ typedef HashMetaPageData *HashMetaPage;
 /*
  * Constants
  */
-#define BYTE_TO_BIT				3		/* 2^3 bits/byte */
+#define BYTE_TO_BIT				3	/* 2^3 bits/byte */
 #define ALL_SET					((uint32) ~0)
 
 /*
@@ -339,7 +337,7 @@ extern void _hash_pgaddmultitup(Relation rel, Buffer buf, IndexTuple *itups,
 extern Buffer _hash_addovflpage(Relation rel, Buffer metabuf, Buffer buf, bool retain_pin);
 extern BlockNumber _hash_freeovflpage(Relation rel, Buffer bucketbuf, Buffer ovflbuf,
 				   Buffer wbuf, IndexTuple *itups, OffsetNumber *itup_offsets,
-			 Size *tups_size, uint16 nitups, BufferAccessStrategy bstrategy);
+				   Size *tups_size, uint16 nitups, BufferAccessStrategy bstrategy);
 extern void _hash_initbitmapbuffer(Buffer buf, uint16 bmsize, bool initpage);
 extern void _hash_squeezebucket(Relation rel,
 					Bucket bucket, BlockNumber bucket_blkno,
@@ -423,4 +421,4 @@ extern void hashbucketcleanup(Relation rel, Bucket cur_bucket,
 				  bool bucket_has_garbage,
 				  IndexBulkDeleteCallback callback, void *callback_state);
 
-#endif   /* HASH_H */
+#endif							/* HASH_H */

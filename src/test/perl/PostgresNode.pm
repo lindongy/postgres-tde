@@ -9,7 +9,7 @@ PostgresNode - class representing PostgreSQL server instance
 
   use PostgresNode;
 
-  my $node = get_new_node('mynode');
+  my $node = PostgresNode->get_new_node('mynode');
 
   # Create a data directory with initdb
   $node->init();
@@ -43,7 +43,7 @@ PostgresNode - class representing PostgreSQL server instance
   # run query every second until it returns 't'
   # or times out
   $node->poll_query_until('postgres', q|SELECT random() < 0.1;|')
-    or print "timed out";
+    or die "timed out";
 
   # Do an online pg_basebackup
   my $ret = $node->backup('testbackup1');
@@ -93,6 +93,7 @@ use RecursiveCopy;
 use Socket;
 use Test::More;
 use TestLib ();
+use Time::HiRes qw(usleep);
 use Scalar::Util qw(blessed);
 
 our @EXPORT = qw(
@@ -414,6 +415,7 @@ sub init
 	print $conf "restart_after_crash = off\n";
 	print $conf "log_line_prefix = '%m [%p] %q%a '\n";
 	print $conf "log_statement = all\n";
+	print $conf "wal_retrieve_retry_interval = '500ms'\n";
 	print $conf "port = $port\n";
 
 	if ($params{allows_streaming})
@@ -853,20 +855,24 @@ sub _update_pid
 
 =pod
 
-=item get_new_node(node_name)
+=item PostgresNode->get_new_node(node_name)
 
-Build a new PostgresNode object, assigning a free port number. Standalone
-function that's automatically imported.
+Build a new object of class C<PostgresNode> (or of a subclass, if you have
+one), assigning a free port number.  Remembers the node, to prevent its port
+number from being reused for another node, and to ensure that it gets
+shut down when the test script exits.
 
-Remembers the node, to prevent its port number from being reused for another
-node, and to ensure that it gets shut down when the test script exits.
+You should generally use this instead of C<PostgresNode::new(...)>.
 
-You should generally use this instead of PostgresNode::new(...).
+For backwards compatibility, it is also exported as a standalone function,
+which can only create objects of class C<PostgresNode>.
 
 =cut
 
 sub get_new_node
 {
+	my $class = 'PostgresNode';
+	$class = shift if 1 < scalar @_;
 	my $name  = shift;
 	my $found = 0;
 	my $port  = $last_port_assigned;
@@ -911,7 +917,7 @@ sub get_new_node
 	print "# Found free port $port\n";
 
 	# Lock port number found by creating a new node
-	my $node = new PostgresNode($name, $test_pghost, $port);
+	my $node = $class->new($name, $test_pghost, $port);
 
 	# Add node to list of nodes
 	push(@all_nodes, $node);
@@ -1212,36 +1218,42 @@ sub psql
 
 =pod
 
-=item $node->poll_query_until(dbname, query)
+=item $node->poll_query_until($dbname, $query [, $expected ])
 
-Run a query once a second, until it returns 't' (i.e. SQL boolean true).
-Continues polling if psql returns an error result. Times out after 180 seconds.
+Run B<$query> repeatedly, until it returns the B<$expected> result
+('t', or SQL boolean true, by default).
+Continues polling if B<psql> returns an error result.
+Times out after 180 seconds.
+Returns 1 if successful, 0 if timed out.
 
 =cut
 
 sub poll_query_until
 {
-	my ($self, $dbname, $query) = @_;
+	my ($self, $dbname, $query, $expected) = @_;
 
-	my $max_attempts = 180;
-	my $attempts     = 0;
+	$expected = 't' unless defined($expected);    # default value
+
+	my $cmd = [ 'psql', '-XAt', '-c', $query, '-d', $self->connstr($dbname) ];
 	my ($stdout, $stderr);
+	my $max_attempts = 180 * 10;
+	my $attempts     = 0;
 
 	while ($attempts < $max_attempts)
 	{
-		my $cmd =
-		  [ 'psql', '-XAt', '-c', $query, '-d', $self->connstr($dbname) ];
 		my $result = IPC::Run::run $cmd, '>', \$stdout, '2>', \$stderr;
 
 		chomp($stdout);
 		$stdout =~ s/\r//g if $TestLib::windows_os;
-		if ($stdout eq "t")
+
+		if ($stdout eq $expected)
 		{
 			return 1;
 		}
 
-		# Wait a second before retrying.
-		sleep 1;
+		# Wait 0.1 second before retrying.
+		usleep(100_000);
+
 		$attempts++;
 	}
 
@@ -1525,7 +1537,7 @@ sub query_hash
 	#
 	my %val;
 	@val{@columns} =
-	  $result ne '' ? split(qr/\|/, $result) : ('',) x scalar(@columns);
+	  $result ne '' ? split(qr/\|/, $result, -1) : ('',) x scalar(@columns);
 	return \%val;
 }
 

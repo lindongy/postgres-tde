@@ -84,9 +84,9 @@ alloc_city_table(PlannerInfo *root, int num_gene)
  *	  deallocate memory of city table
  */
 void
-free_city_table(PlannerInfo *root, City *city_table)
+free_city_table(PlannerInfo *root, City * city_table)
 {
 	pfree(city_table);
 }
 
-#endif   /* CX || PX || OX1 || OX2 */
+#endif							/* CX || PX || OX1 || OX2 */

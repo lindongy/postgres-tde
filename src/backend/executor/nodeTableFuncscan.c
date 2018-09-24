@@ -93,9 +93,11 @@ TableFuncRecheck(TableFuncScanState *node, TupleTableSlot *slot)
  *		access method functions.
  * ----------------------------------------------------------------
  */
-TupleTableSlot *
-ExecTableFuncScan(TableFuncScanState *node)
+static TupleTableSlot *
+ExecTableFuncScan(PlanState *pstate)
 {
+	TableFuncScanState *node = castNode(TableFuncScanState, pstate);
+
 	return ExecScan(&node->ss,
 					(ExecScanAccessMtd) TableFuncNext,
 					(ExecScanRecheckMtd) TableFuncRecheck);
@@ -128,6 +130,7 @@ ExecInitTableFuncScan(TableFuncScan *node, EState *estate, int eflags)
 	scanstate = makeNode(TableFuncScanState);
 	scanstate->ss.ps.plan = (Plan *) node;
 	scanstate->ss.ps.state = estate;
+	scanstate->ss.ps.ExecProcNode = ExecTableFuncScan;
 
 	/*
 	 * Miscellaneous initialization
@@ -288,7 +291,7 @@ tfuncFetchRows(TableFuncScanState *tstate, ExprContext *econtext)
 	PG_TRY();
 	{
 		routine->InitOpaque(tstate,
-					tstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->natts);
+							tstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->natts);
 
 		/*
 		 * If evaluating the document expression returns NULL, the table
@@ -398,9 +401,9 @@ tfuncInitialize(TableFuncScanState *tstate, ExprContext *econtext, Datum doc)
 				if (isnull)
 					ereport(ERROR,
 							(errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-						 errmsg("column filter expression must not be null"),
+							 errmsg("column filter expression must not be null"),
 							 errdetail("Filter for column \"%s\" is null.",
-								  NameStr(tupdesc->attrs[colno]->attname))));
+									   NameStr(tupdesc->attrs[colno]->attname))));
 				colfilter = TextDatumGetCString(value);
 			}
 			else
@@ -440,6 +443,8 @@ tfuncLoadRows(TableFuncScanState *tstate, ExprContext *econtext)
 		ListCell   *cell = list_head(tstate->coldefexprs);
 		int			colno;
 
+		CHECK_FOR_INTERRUPTS();
+
 		ExecClearTuple(tstate->ss.ss_ScanTupleSlot);
 
 		/*
@@ -460,8 +465,8 @@ tfuncLoadRows(TableFuncScanState *tstate, ExprContext *econtext)
 
 				values[colno] = routine->GetValue(tstate,
 												  colno,
-											 tupdesc->attrs[colno]->atttypid,
-											tupdesc->attrs[colno]->atttypmod,
+												  tupdesc->attrs[colno]->atttypid,
+												  tupdesc->attrs[colno]->atttypmod,
 												  &isnull);
 
 				/* No value?  Evaluate and apply the default, if any */
@@ -479,7 +484,7 @@ tfuncLoadRows(TableFuncScanState *tstate, ExprContext *econtext)
 					ereport(ERROR,
 							(errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
 							 errmsg("null is not allowed in column \"%s\"",
-								  NameStr(tupdesc->attrs[colno]->attname))));
+									NameStr(tupdesc->attrs[colno]->attname))));
 
 				nulls[colno] = isnull;
 			}

@@ -22,6 +22,7 @@ main(void)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <process.h>
+#include <locale.h>
 #else
 #include <pthread.h>
 #endif
@@ -99,7 +100,7 @@ struct sqlca_t *ECPGget_sqlca(void);
 
 #endif
 
-#line 24 "alloc.pgc"
+#line 25 "alloc.pgc"
 
 
 #line 1 "regression.h"
@@ -109,114 +110,102 @@ struct sqlca_t *ECPGget_sqlca(void);
 
 
 
-#line 25 "alloc.pgc"
+#line 26 "alloc.pgc"
 
 
 /* exec sql whenever sqlerror  sqlprint ; */
-#line 27 "alloc.pgc"
+#line 28 "alloc.pgc"
 
 /* exec sql whenever not found  sqlprint ; */
-#line 28 "alloc.pgc"
+#line 29 "alloc.pgc"
 
 
 #ifdef WIN32
-static unsigned __stdcall
-fn(void *arg)
+static unsigned __stdcall fn(void* arg)
 #else
-static void *
-fn(void *arg)
+static void* fn(void* arg)
 #endif
 {
-	int			i;
+	int i;
 
 	/* exec sql begin declare section */
-
-
-
-
-#line 39 "alloc.pgc"
-	int			value;
-
+	  
+	 
+	   
+	
 #line 40 "alloc.pgc"
-	char		name[100];
-
+ int value ;
+ 
 #line 41 "alloc.pgc"
-	char	  **r = NULL;
-
-/* exec sql end declare section */
+ char name [ 100 ] ;
+ 
 #line 42 "alloc.pgc"
+ char ** r = NULL ;
+/* exec sql end declare section */
+#line 43 "alloc.pgc"
 
 
-	value = (long) arg;
+#ifdef WIN32
+#ifdef _MSC_VER                /* requires MSVC */
+	_configthreadlocale(_ENABLE_PER_THREAD_LOCALE);
+#endif
+#endif
+
+	value = (long)arg;
 	sprintf(name, "Connection: %d", value);
 
-	{
-		ECPGconnect(__LINE__, 0, "ecpg1_regression", NULL, NULL, name, 0);
-#line 47 "alloc.pgc"
+	{ ECPGconnect(__LINE__, 0, "ecpg1_regression" , NULL, NULL , name, 0); 
+#line 54 "alloc.pgc"
 
-		if (sqlca.sqlcode < 0)
-			sqlprint();
-	}
-#line 47 "alloc.pgc"
+if (sqlca.sqlcode < 0) sqlprint();}
+#line 54 "alloc.pgc"
 
-	{
-		ECPGsetcommit(__LINE__, 1, NULL);
-#line 48 "alloc.pgc"
+	{ ECPGsetcommit(__LINE__, 1, NULL);
+#line 55 "alloc.pgc"
 
-		if (sqlca.sqlcode < 0)
-			sqlprint();
-	}
-#line 48 "alloc.pgc"
+if (sqlca.sqlcode < 0) sqlprint();}
+#line 55 "alloc.pgc"
 
 	for (i = 1; i <= REPEATS; ++i)
 	{
-		{
-			ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "select relname from pg_class where relname = 'pg_class'", ECPGt_EOIT,
-				   ECPGt_char, &(r), (long) 0, (long) 0, (1) * sizeof(char),
-				   ECPGt_NO_INDICATOR, NULL, 0L, 0L, 0L, ECPGt_EORT);
-#line 51 "alloc.pgc"
+		{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "select relname from pg_class where relname = 'pg_class'", ECPGt_EOIT, 
+	ECPGt_char,&(r),(long)0,(long)0,(1)*sizeof(char), 
+	ECPGt_NO_INDICATOR, NULL , 0L, 0L, 0L, ECPGt_EORT);
+#line 58 "alloc.pgc"
 
-			if (sqlca.sqlcode == ECPG_NOT_FOUND)
-				sqlprint();
-#line 51 "alloc.pgc"
+if (sqlca.sqlcode == ECPG_NOT_FOUND) sqlprint();
+#line 58 "alloc.pgc"
 
-			if (sqlca.sqlcode < 0)
-				sqlprint();
-		}
-#line 51 "alloc.pgc"
+if (sqlca.sqlcode < 0) sqlprint();}
+#line 58 "alloc.pgc"
 
 		free(r);
 		r = NULL;
 	}
-	{
-		ECPGdisconnect(__LINE__, name);
-#line 55 "alloc.pgc"
+	{ ECPGdisconnect(__LINE__, name);
+#line 62 "alloc.pgc"
 
-		if (sqlca.sqlcode < 0)
-			sqlprint();
-	}
-#line 55 "alloc.pgc"
+if (sqlca.sqlcode < 0) sqlprint();}
+#line 62 "alloc.pgc"
 
 
 	return 0;
 }
 
-int
-main()
+int main ()
 {
-	int			i;
+	int i;
 #ifdef WIN32
-	HANDLE		threads[THREADS];
+	HANDLE threads[THREADS];
 #else
-	pthread_t	threads[THREADS];
+	pthread_t threads[THREADS];
 #endif
 
 #ifdef WIN32
 	for (i = 0; i < THREADS; ++i)
 	{
-		unsigned	id;
-
-		threads[i] = (HANDLE) _beginthreadex(NULL, 0, fn, (void *) i, 0, &id);
+		unsigned id;
+		threads[i] = (HANDLE)_beginthreadex(NULL, 0, fn, (void*)i, 0, &id);
 	}
 
 	WaitForMultipleObjects(THREADS, threads, TRUE, INFINITE);

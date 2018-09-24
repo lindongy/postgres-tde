@@ -124,7 +124,7 @@ static int	selfpipe_owner_pid = 0;
 /* Private function prototypes */
 static void sendSelfPipeByte(void);
 static void drainSelfPipe(void);
-#endif   /* WIN32 */
+#endif							/* WIN32 */
 
 #if defined(WAIT_USE_EPOLL)
 static void WaitEventAdjustEpoll(WaitEventSet *set, WaitEvent *event, int action);
@@ -230,7 +230,7 @@ InitLatch(volatile Latch *latch)
 	latch->event = CreateEvent(NULL, TRUE, FALSE, NULL);
 	if (latch->event == NULL)
 		elog(ERROR, "CreateEvent failed: error code %lu", GetLastError());
-#endif   /* WIN32 */
+#endif							/* WIN32 */
 }
 
 /*
@@ -344,9 +344,9 @@ WaitLatch(volatile Latch *latch, int wakeEvents, long timeout,
  * Like WaitLatch, but with an extra socket argument for WL_SOCKET_*
  * conditions.
  *
- * When waiting on a socket, EOF and error conditions are reported by
- * returning the socket as readable/writable or both, depending on
- * WL_SOCKET_READABLE/WL_SOCKET_WRITEABLE being specified.
+ * When waiting on a socket, EOF and error conditions always cause the socket
+ * to be reported as readable/writable/connected, so that the caller can deal
+ * with the condition.
  *
  * NB: These days this is just a wrapper around the WaitEventSet API. When
  * using a latch very frequently, consider creating a longer living
@@ -374,11 +374,11 @@ WaitLatchOrSocket(volatile Latch *latch, int wakeEvents, pgsocket sock,
 		AddWaitEventToSet(set, WL_POSTMASTER_DEATH, PGINVALID_SOCKET,
 						  NULL, NULL);
 
-	if (wakeEvents & (WL_SOCKET_READABLE | WL_SOCKET_WRITEABLE))
+	if (wakeEvents & WL_SOCKET_MASK)
 	{
 		int			ev;
 
-		ev = wakeEvents & (WL_SOCKET_READABLE | WL_SOCKET_WRITEABLE);
+		ev = wakeEvents & WL_SOCKET_MASK;
 		AddWaitEventToSet(set, ev, sock, NULL, NULL);
 	}
 
@@ -390,8 +390,7 @@ WaitLatchOrSocket(volatile Latch *latch, int wakeEvents, pgsocket sock,
 	{
 		ret |= event.events & (WL_LATCH_SET |
 							   WL_POSTMASTER_DEATH |
-							   WL_SOCKET_READABLE |
-							   WL_SOCKET_WRITEABLE);
+							   WL_SOCKET_MASK);
 	}
 
 	FreeWaitEventSet(set);
@@ -576,7 +575,7 @@ CreateWaitEventSet(MemoryContext context, int nevents)
 		elog(ERROR, "epoll_create failed: %m");
 	if (fcntl(set->epoll_fd, F_SETFD, FD_CLOEXEC) == -1)
 		elog(ERROR, "fcntl(F_SETFD) failed on epoll descriptor: %m");
-#endif   /* EPOLL_CLOEXEC */
+#endif							/* EPOLL_CLOEXEC */
 #elif defined(WAIT_USE_WIN32)
 
 	/*
@@ -640,10 +639,13 @@ FreeWaitEventSet(WaitEventSet *set)
  * Add an event to the set. Possible events are:
  * - WL_LATCH_SET: Wait for the latch to be set
  * - WL_POSTMASTER_DEATH: Wait for postmaster to die
- * - WL_SOCKET_READABLE: Wait for socket to become readable
- *	 can be combined in one event with WL_SOCKET_WRITEABLE
- * - WL_SOCKET_WRITEABLE: Wait for socket to become writeable
- *	 can be combined with WL_SOCKET_READABLE
+ * - WL_SOCKET_READABLE: Wait for socket to become readable,
+ *	 can be combined in one event with other WL_SOCKET_* events
+ * - WL_SOCKET_WRITEABLE: Wait for socket to become writeable,
+ *	 can be combined with other WL_SOCKET_* events
+ * - WL_SOCKET_CONNECTED: Wait for socket connection to be established,
+ *	 can be combined with other WL_SOCKET_* events (on non-Windows
+ *	 platforms, this is the same as WL_SOCKET_WRITEABLE)
  *
  * Returns the offset in WaitEventSet->events (starting from 0), which can be
  * used to modify previously added wait events using ModifyWaitEvent().
@@ -652,9 +654,9 @@ FreeWaitEventSet(WaitEventSet *set)
  * i.e. it must be a process-local latch initialized with InitLatch, or a
  * shared latch associated with the current process by calling OwnLatch.
  *
- * In the WL_SOCKET_READABLE/WRITEABLE case, EOF and error conditions are
- * reported by returning the socket as readable/writable or both, depending on
- * WL_SOCKET_READABLE/WRITEABLE being specified.
+ * In the WL_SOCKET_READABLE/WRITEABLE/CONNECTED cases, EOF and error
+ * conditions cause the socket to be reported as readable/writable/connected,
+ * so that the caller can deal with the condition.
  *
  * The user_data pointer specified here will be set for the events returned
  * by WaitEventSetWait(), allowing to easily associate additional data with
@@ -685,8 +687,7 @@ AddWaitEventToSet(WaitEventSet *set, uint32 events, pgsocket fd, Latch *latch,
 	}
 
 	/* waiting for socket readiness without a socket indicates a bug */
-	if (fd == PGINVALID_SOCKET &&
-		(events & (WL_SOCKET_READABLE | WL_SOCKET_WRITEABLE)))
+	if (fd == PGINVALID_SOCKET && (events & WL_SOCKET_MASK))
 		elog(ERROR, "cannot wait on socket event without a socket");
 
 	event = &set->events[set->nevents];
@@ -885,6 +886,8 @@ WaitEventAdjustWin32(WaitEventSet *set, WaitEvent *event)
 			flags |= FD_READ;
 		if (event->events & WL_SOCKET_WRITEABLE)
 			flags |= FD_WRITE;
+		if (event->events & WL_SOCKET_CONNECTED)
+			flags |= FD_CONNECT;
 
 		if (*handle == WSA_INVALID_EVENT)
 		{
@@ -1214,7 +1217,7 @@ WaitEventSetWaitBlock(WaitEventSet *set, int cur_timeout,
 			}
 		}
 		else if (cur_event->events == WL_POSTMASTER_DEATH &&
-			 (cur_pollfd->revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL)))
+				 (cur_pollfd->revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL)))
 		{
 			/*
 			 * We expect an POLLHUP when the remote end is closed, but because
@@ -1395,7 +1398,7 @@ WaitEventSetWaitBlock(WaitEventSet *set, int cur_timeout,
 			returned_events++;
 		}
 	}
-	else if (cur_event->events & (WL_SOCKET_READABLE | WL_SOCKET_WRITEABLE))
+	else if (cur_event->events & WL_SOCKET_MASK)
 	{
 		WSANETWORKEVENTS resEvents;
 		HANDLE		handle = set->handles[cur_event->pos + 1];
@@ -1432,13 +1435,16 @@ WaitEventSetWaitBlock(WaitEventSet *set, int cur_timeout,
 			/* writeable */
 			occurred_events->events |= WL_SOCKET_WRITEABLE;
 		}
+		if ((cur_event->events & WL_SOCKET_CONNECTED) &&
+			(resEvents.lNetworkEvents & FD_CONNECT))
+		{
+			/* connected */
+			occurred_events->events |= WL_SOCKET_CONNECTED;
+		}
 		if (resEvents.lNetworkEvents & FD_CLOSE)
 		{
-			/* EOF */
-			if (cur_event->events & WL_SOCKET_READABLE)
-				occurred_events->events |= WL_SOCKET_READABLE;
-			if (cur_event->events & WL_SOCKET_WRITEABLE)
-				occurred_events->events |= WL_SOCKET_WRITEABLE;
+			/* EOF/error, so signal all caller-requested socket flags */
+			occurred_events->events |= (cur_event->events & WL_SOCKET_MASK);
 		}
 
 		if (occurred_events->events != 0)
@@ -1469,7 +1475,7 @@ latch_sigusr1_handler(void)
 	if (waiting)
 		sendSelfPipeByte();
 }
-#endif   /* !WIN32 */
+#endif							/* !WIN32 */
 
 /* Send one byte to the self-pipe, to wake up WaitLatch */
 #ifndef WIN32
@@ -1502,7 +1508,7 @@ retry:
 		return;
 	}
 }
-#endif   /* !WIN32 */
+#endif							/* !WIN32 */
 
 /*
  * Read all available data from the self-pipe
@@ -1550,4 +1556,4 @@ drainSelfPipe(void)
 		/* else buffer wasn't big enough, so read again */
 	}
 }
-#endif   /* !WIN32 */
+#endif							/* !WIN32 */

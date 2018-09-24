@@ -168,20 +168,25 @@ libpqrcv_connect(const char *conninfo, bool logical, const char *appname,
 	status = PGRES_POLLING_WRITING;
 	do
 	{
-		/* Wait for socket ready and/or other events. */
 		int			io_flag;
 		int			rc;
 
-		io_flag = (status == PGRES_POLLING_READING
-				   ? WL_SOCKET_READABLE
-				   : WL_SOCKET_WRITEABLE);
+		if (status == PGRES_POLLING_READING)
+			io_flag = WL_SOCKET_READABLE;
+#ifdef WIN32
+		/* Windows needs a different test while waiting for connection-made */
+		else if (PQstatus(conn->streamConn) == CONNECTION_STARTED)
+			io_flag = WL_SOCKET_CONNECTED;
+#endif
+		else
+			io_flag = WL_SOCKET_WRITEABLE;
 
 		rc = WaitLatchOrSocket(MyLatch,
 							   WL_POSTMASTER_DEATH |
 							   WL_LATCH_SET | io_flag,
 							   PQsocket(conn->streamConn),
 							   0,
-							   WAIT_EVENT_LIBPQWALRECEIVER);
+							   WAIT_EVENT_LIBPQWALRECEIVER_CONNECT);
 
 		/* Emergency bailout? */
 		if (rc & WL_POSTMASTER_DEATH)
@@ -425,8 +430,8 @@ libpqrcv_endstreaming(WalReceiverConn *conn, TimeLineID *next_tli)
 	if (PQputCopyEnd(conn->streamConn, NULL) <= 0 ||
 		PQflush(conn->streamConn))
 		ereport(ERROR,
-			(errmsg("could not send end-of-streaming message to primary: %s",
-					pchomp(PQerrorMessage(conn->streamConn)))));
+				(errmsg("could not send end-of-streaming message to primary: %s",
+						pchomp(PQerrorMessage(conn->streamConn)))));
 
 	*next_tli = 0;
 
@@ -459,7 +464,10 @@ libpqrcv_endstreaming(WalReceiverConn *conn, TimeLineID *next_tli)
 		PQclear(res);
 
 		/* End the copy */
-		PQendcopy(conn->streamConn);
+		if (PQendcopy(conn->streamConn))
+			ereport(ERROR,
+					(errmsg("error while shutting down streaming COPY: %s",
+							pchomp(PQerrorMessage(conn->streamConn)))));
 
 		/* CommandComplete should follow */
 		res = PQgetResult(conn->streamConn);
@@ -579,7 +587,7 @@ libpqrcv_PQexec(PGconn *streamConn, const char *query)
 								   WL_LATCH_SET,
 								   PQsocket(streamConn),
 								   0,
-								   WAIT_EVENT_LIBPQWALRECEIVER);
+								   WAIT_EVENT_LIBPQWALRECEIVER_RECEIVE);
 
 			/* Emergency bailout? */
 			if (rc & WL_POSTMASTER_DEATH)
@@ -797,7 +805,7 @@ libpqrcv_create_slot(WalReceiverConn *conn, const char *slotname,
 	}
 
 	*lsn = DatumGetLSN(DirectFunctionCall1Coll(pg_lsn_in, InvalidOid,
-									CStringGetDatum(PQgetvalue(res, 0, 1))));
+											   CStringGetDatum(PQgetvalue(res, 0, 1))));
 	if (!PQgetisnull(res, 0, 2))
 		snapshot = pstrdup(PQgetvalue(res, 0, 2));
 	else
@@ -896,7 +904,7 @@ libpqrcv_exec(WalReceiverConn *conn, const char *query,
 	if (MyDatabaseId == InvalidOid)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-			  errmsg("the query interface requires a database connection")));
+				 errmsg("the query interface requires a database connection")));
 
 	pgres = libpqrcv_PQexec(conn->streamConn, query);
 

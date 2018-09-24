@@ -683,7 +683,7 @@ PLyList_FromArray_recurse(PLyDatumToOb *elm, int *dims, int ndim, int dim,
 			PyObject   *sublist;
 
 			sublist = PLyList_FromArray_recurse(elm, dims, ndim, dim + 1,
-											 dataptr_p, bitmap_p, bitmask_p);
+												dataptr_p, bitmap_p, bitmask_p);
 			PyList_SET_ITEM(list, i, sublist);
 		}
 	}
@@ -949,7 +949,7 @@ PLyObject_ToDatum(PLyObToDatum *arg, int32 typmod, PyObject *plrv, bool inarray)
 					(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
 					 errmsg("malformed record literal: \"%s\"", str),
 					 errdetail("Missing left parenthesis."),
-					 errhint("To return a composite type in an array, return the composite type as a Python tuple, e.g. \"[('foo')]\"")));
+					 errhint("To return a composite type in an array, return the composite type as a Python tuple, e.g., \"[('foo',)]\".")));
 	}
 
 	return InputFunctionCall(&arg->typfunc,
@@ -1002,7 +1002,7 @@ PLySequence_ToArray(PLyObToDatum *arg, int32 typmod, PyObject *plrv, bool inarra
 
 		dims[ndim] = PySequence_Length(pyptr);
 		if (dims[ndim] < 0)
-			PLy_elog(ERROR, "cannot determine sequence length for function return value");
+			PLy_elog(ERROR, "could not determine sequence length for function return value");
 
 		if (dims[ndim] > MaxAllocSize)
 			PLy_elog(ERROR, "array size exceeds the maximum allowed");
@@ -1087,10 +1087,10 @@ PLySequence_ToArray_recurse(PLyObToDatum *elm, PyObject *list,
 	int			i;
 
 	if (PySequence_Length(list) != dims[dim])
-		PLy_elog(ERROR,
-				 "multidimensional arrays must have array expressions with matching dimensions. "
-				 "PL/Python function return value has sequence length %d while expected %d",
-				 (int) PySequence_Length(list), dims[dim]);
+		ereport(ERROR,
+				(errmsg("wrong length of inner sequence: has length %d, but %d was expected",
+						(int) PySequence_Length(list), dims[dim]),
+				 (errdetail("To construct a multidimensional array, the inner sequences must all have the same length."))));
 
 	if (dim < ndim - 1)
 	{
@@ -1387,7 +1387,7 @@ PLyGenericObject_ToComposite(PLyTypeInfo *info, TupleDesc desc, PyObject *object
 						(errcode(ERRCODE_UNDEFINED_COLUMN),
 						 errmsg("attribute \"%s\" does not exist in Python object", key),
 						 inarray ?
-						 errhint("To return a composite type in an array, return the composite type as a Python tuple, e.g. \"[('foo')]\"") :
+						 errhint("To return a composite type in an array, return the composite type as a Python tuple, e.g., \"[('foo',)]\".") :
 						 errhint("To return null in a column, let the returned object have an attribute named after column with value None.")));
 			}
 

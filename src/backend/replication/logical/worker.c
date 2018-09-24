@@ -52,6 +52,7 @@
 
 #include "postmaster/bgworker.h"
 #include "postmaster/postmaster.h"
+#include "postmaster/walwriter.h"
 
 #include "replication/decode.h"
 #include "replication/logical.h"
@@ -401,7 +402,8 @@ slot_modify_cstrings(TupleTableSlot *slot, LogicalRepRelMapEntry *rel,
 			errarg.attnum = remoteattnum;
 
 			getTypeInputInfo(att->atttypid, &typinput, &typioparam);
-			slot->tts_values[i] = OidInputFunctionCall(typinput, values[i],
+			slot->tts_values[i] = OidInputFunctionCall(typinput,
+													   values[remoteattnum],
 													   typioparam,
 													   att->atttypmod);
 			slot->tts_isnull[i] = false;
@@ -627,8 +629,8 @@ check_relation_updatable(LogicalRepRelMapEntry *rel)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("publisher does not send replica identity column "
-			 "expected by the logical replication target relation \"%s.%s\"",
+				 errmsg("publisher did not send replica identity column "
+						"expected by the logical replication target relation \"%s.%s\"",
 						rel->remoterel.nspname, rel->remoterel.relname)));
 	}
 
@@ -842,7 +844,7 @@ apply_handle_delete(StringInfo s)
 		/* The tuple to be deleted could not be found. */
 		ereport(DEBUG1,
 				(errmsg("logical replication could not find row for delete "
-						"in replication target %s",
+						"in replication target relation \"%s\"",
 						RelationGetRelationName(rel->localrel))));
 	}
 
@@ -908,7 +910,7 @@ apply_dispatch(StringInfo s)
 		default:
 			ereport(ERROR,
 					(errcode(ERRCODE_PROTOCOL_VIOLATION),
-			 errmsg("invalid logical replication message type %c", action)));
+					 errmsg("invalid logical replication message type \"%c\"", action)));
 	}
 }
 
@@ -1027,6 +1029,7 @@ LogicalRepApplyLoop(XLogRecPtr last_received)
 		bool		endofstream = false;
 		TimestampTz last_recv_timestamp = GetCurrentTimestamp();
 		bool		ping_sent = false;
+		long		wait_time;
 
 		CHECK_FOR_INTERRUPTS();
 
@@ -1114,10 +1117,10 @@ LogicalRepApplyLoop(XLogRecPtr last_received)
 
 				len = walrcv_receive(wrconn, &buf, &fd);
 			}
-
-			/* confirm all writes at once */
-			send_feedback(last_received, false, false);
 		}
+
+		/* confirm all writes so far */
+		send_feedback(last_received, false, false);
 
 		if (!in_remote_transaction)
 		{
@@ -1147,12 +1150,21 @@ LogicalRepApplyLoop(XLogRecPtr last_received)
 		}
 
 		/*
-		 * Wait for more data or latch.
+		 * Wait for more data or latch.  If we have unflushed transactions,
+		 * wake up after WalWriterDelay to see if they've been flushed yet (in
+		 * which case we should send a feedback message).  Otherwise, there's
+		 * no particular urgency about waking up unless we get data or a
+		 * signal.
 		 */
+		if (!dlist_is_empty(&lsn_mapping))
+			wait_time = WalWriterDelay;
+		else
+			wait_time = NAPTIME_PER_CYCLE;
+
 		rc = WaitLatchOrSocket(MyLatch,
 							   WL_SOCKET_READABLE | WL_LATCH_SET |
 							   WL_TIMEOUT | WL_POSTMASTER_DEATH,
-							   fd, NAPTIME_PER_CYCLE,
+							   fd, wait_time,
 							   WAIT_EVENT_LOGICAL_APPLY_MAIN);
 
 		/* Emergency bailout if postmaster has died */
@@ -1207,7 +1219,7 @@ LogicalRepApplyLoop(XLogRecPtr last_received)
 				if (!ping_sent)
 				{
 					timeout = TimestampTzPlusMilliseconds(last_recv_timestamp,
-												 (wal_receiver_timeout / 2));
+														  (wal_receiver_timeout / 2));
 					if (now >= timeout)
 					{
 						requestReply = true;
@@ -1290,9 +1302,9 @@ send_feedback(XLogRecPtr recvpos, bool force, bool requestReply)
 		resetStringInfo(reply_message);
 
 	pq_sendbyte(reply_message, 'r');
-	pq_sendint64(reply_message, recvpos);		/* write */
-	pq_sendint64(reply_message, flushpos);		/* flush */
-	pq_sendint64(reply_message, writepos);		/* apply */
+	pq_sendint64(reply_message, recvpos);	/* write */
+	pq_sendint64(reply_message, flushpos);	/* flush */
+	pq_sendint64(reply_message, writepos);	/* apply */
 	pq_sendint64(reply_message, now);	/* sendTime */
 	pq_sendbyte(reply_message, requestReply);	/* replyRequested */
 
@@ -1375,7 +1387,7 @@ maybe_reread_subscription(void)
 	{
 		ereport(LOG,
 				(errmsg("logical replication apply worker for subscription \"%s\" will "
-					"restart because the connection information was changed",
+						"restart because the connection information was changed",
 						MySubscription->name)));
 
 		proc_exit(0);
@@ -1406,7 +1418,7 @@ maybe_reread_subscription(void)
 	{
 		ereport(LOG,
 				(errmsg("logical replication apply worker for subscription \"%s\" will "
-					 "restart because the replication slot name was changed",
+						"restart because the replication slot name was changed",
 						MySubscription->name)));
 
 		proc_exit(0);
@@ -1420,7 +1432,7 @@ maybe_reread_subscription(void)
 	{
 		ereport(LOG,
 				(errmsg("logical replication apply worker for subscription \"%s\" will "
-				  "restart because subscription's publications were changed",
+						"restart because subscription's publications were changed",
 						MySubscription->name)));
 
 		proc_exit(0);
@@ -1528,7 +1540,7 @@ ApplyWorkerMain(Datum main_arg)
 	{
 		ereport(LOG,
 				(errmsg("logical replication apply worker for subscription \"%s\" will not "
-				"start because the subscription was disabled during startup",
+						"start because the subscription was disabled during startup",
 						MySubscription->name)));
 
 		proc_exit(0);
@@ -1542,7 +1554,7 @@ ApplyWorkerMain(Datum main_arg)
 	if (am_tablesync_worker())
 		ereport(LOG,
 				(errmsg("logical replication table synchronization worker for subscription \"%s\", table \"%s\" has started",
-			MySubscription->name, get_rel_name(MyLogicalRepWorker->relid))));
+						MySubscription->name, get_rel_name(MyLogicalRepWorker->relid))));
 	else
 		ereport(LOG,
 				(errmsg("logical replication apply worker for subscription \"%s\" has started",

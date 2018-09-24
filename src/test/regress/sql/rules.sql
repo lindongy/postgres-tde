@@ -903,6 +903,11 @@ create table fooview (x int, y text) partition by list (x);
 create rule "_RETURN" as on select to fooview do instead
   select 1 as x, 'aaa'::text as y;
 
+-- nor can one convert a partition to view
+create table fooview_part partition of fooview for values in (1);
+create rule "_RETURN" as on select to fooview_part do instead
+  select 1 as x, 'aaa'::text as y;
+
 --
 -- check for planner problems with complex inherited UPDATES
 --
@@ -931,9 +936,9 @@ update id_ordered set name = 'update 4' where id = 4;
 update id_ordered set name = 'update 5' where id = 5;
 select * from id_ordered;
 
-set client_min_messages to warning; -- suppress cascade notices
+\set VERBOSITY terse \\ -- suppress cascade details
 drop table id cascade;
-reset client_min_messages;
+\set VERBOSITY default
 
 --
 -- check corner case where an entirely-dummy subplan is created by

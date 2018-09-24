@@ -147,9 +147,9 @@ static void set_status_by_pages(int nsubxids, TransactionId *subxids,
  */
 void
 TransactionIdSetTreeStatus(TransactionId xid, int nsubxids,
-					TransactionId *subxids, XidStatus status, XLogRecPtr lsn)
+						   TransactionId *subxids, XidStatus status, XLogRecPtr lsn)
 {
-	int			pageno = TransactionIdToPage(xid);		/* get page of parent */
+	int			pageno = TransactionIdToPage(xid);	/* get page of parent */
 	int			i;
 
 	Assert(status == TRANSACTION_STATUS_COMMITTED ||
@@ -677,10 +677,6 @@ TruncateCLOG(TransactionId oldestXact, Oid oldestxid_datoid)
 	 * pages.
 	 */
 	AdvanceOldestClogXid(oldestXact);
-
-	/* vac_truncate_clog already advanced oldestXid */
-	Assert(TransactionIdPrecedesOrEquals(oldestXact,
-										 ShmemVariableCache->oldestXid));
 
 	/*
 	 * Write XLOG record and flush XLOG to disk. We record the oldest xid

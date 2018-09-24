@@ -32,6 +32,8 @@
 #include "utils/datum.h"
 #include "utils/rel.h"
 
+static void outChar(StringInfo str, char c);
+
 
 /*
  * Macros to simplify output of different kinds of fields.  Use these
@@ -62,7 +64,8 @@
 
 /* Write a char field (ie, one ascii character) */
 #define WRITE_CHAR_FIELD(fldname) \
-	appendStringInfo(str, " :" CppAsString(fldname) " %c", node->fldname)
+	(appendStringInfo(str, " :" CppAsString(fldname) " "), \
+	 outChar(str, node->fldname))
 
 /* Write an enumerated-type field as an integer code */
 #define WRITE_ENUM_FIELD(fldname, enumtype) \
@@ -138,6 +141,21 @@ outToken(StringInfo str, const char *s)
 			appendStringInfoChar(str, '\\');
 		appendStringInfoChar(str, *s++);
 	}
+}
+
+/*
+ * Convert one char.  Goes through outToken() so that special characters are
+ * escaped.
+ */
+static void
+outChar(StringInfo str, char c)
+{
+	char		in[2];
+
+	in[0] = c;
+	in[1] = '\0';
+
+	outToken(str, in);
 }
 
 static void
@@ -461,6 +479,7 @@ _outGather(StringInfo str, const Gather *node)
 	_outPlanInfo(str, (const Plan *) node);
 
 	WRITE_INT_FIELD(num_workers);
+	WRITE_INT_FIELD(rescan_param);
 	WRITE_BOOL_FIELD(single_copy);
 	WRITE_BOOL_FIELD(invisible);
 }
@@ -475,6 +494,7 @@ _outGatherMerge(StringInfo str, const GatherMerge *node)
 	_outPlanInfo(str, (const Plan *) node);
 
 	WRITE_INT_FIELD(num_workers);
+	WRITE_INT_FIELD(rescan_param);
 	WRITE_INT_FIELD(numCols);
 
 	appendStringInfoString(str, " :sortColIdx");
@@ -1590,6 +1610,15 @@ _outCurrentOfExpr(StringInfo str, const CurrentOfExpr *node)
 	WRITE_UINT_FIELD(cvarno);
 	WRITE_STRING_FIELD(cursor_name);
 	WRITE_INT_FIELD(cursor_param);
+}
+
+static void
+_outNextValueExpr(StringInfo str, const NextValueExpr *node)
+{
+	WRITE_NODE_TYPE("NEXTVALUEEXPR");
+
+	WRITE_OID_FIELD(seqid);
+	WRITE_OID_FIELD(typeId);
 }
 
 static void
@@ -3555,7 +3584,7 @@ _outPartitionRangeDatum(StringInfo str, const PartitionRangeDatum *node)
 {
 	WRITE_NODE_TYPE("PARTITIONRANGEDATUM");
 
-	WRITE_BOOL_FIELD(infinite);
+	WRITE_ENUM_FIELD(kind, PartitionRangeDatumKind);
 	WRITE_NODE_FIELD(value);
 	WRITE_LOCATION_FIELD(location);
 }
@@ -3853,6 +3882,9 @@ outNode(StringInfo str, const void *obj)
 				break;
 			case T_CurrentOfExpr:
 				_outCurrentOfExpr(str, obj);
+				break;
+			case T_NextValueExpr:
+				_outNextValueExpr(str, obj);
 				break;
 			case T_InferenceElem:
 				_outInferenceElem(str, obj);

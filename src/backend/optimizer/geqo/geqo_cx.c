@@ -46,7 +46,7 @@
  */
 int
 cx(PlannerInfo *root, Gene *tour1, Gene *tour2, Gene *offspring,
-   int num_gene, City *city_table)
+   int num_gene, City * city_table)
 {
 	int			i,
 				start_pos,
@@ -121,4 +121,4 @@ cx(PlannerInfo *root, Gene *tour1, Gene *tour2, Gene *offspring,
 	return num_diffs;
 }
 
-#endif   /* defined(CX) */
+#endif							/* defined(CX) */

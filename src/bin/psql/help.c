@@ -84,8 +84,8 @@ usage(unsigned short int pager)
 	fprintf(output, _("  -f, --file=FILENAME      execute commands from file, then exit\n"));
 	fprintf(output, _("  -l, --list               list available databases, then exit\n"));
 	fprintf(output, _("  -v, --set=, --variable=NAME=VALUE\n"
-			   "                           set psql variable NAME to VALUE\n"
-				 "                           (e.g., -v ON_ERROR_STOP=1)\n"));
+					  "                           set psql variable NAME to VALUE\n"
+					  "                           (e.g., -v ON_ERROR_STOP=1)\n"));
 	fprintf(output, _("  -V, --version            output version information, then exit\n"));
 	fprintf(output, _("  -X, --no-psqlrc          do not read startup file (~/.psqlrc)\n"));
 	fprintf(output, _("  -1 (\"one\"), --single-transaction\n"
@@ -167,7 +167,7 @@ slashUsage(unsigned short int pager)
 	 * Use "psql --help=commands | wc" to count correctly.  It's okay to count
 	 * the USE_READLINE line even in builds without that.
 	 */
-	output = PageOutput(122, pager ? &(pset.popt.topt) : NULL);
+	output = PageOutput(124, pager ? &(pset.popt.topt) : NULL);
 
 	fprintf(output, _("General\n"));
 	fprintf(output, _("  \\copyright             show PostgreSQL usage and distribution terms\n"));
@@ -271,14 +271,16 @@ slashUsage(unsigned short int pager)
 	fprintf(output, _("  \\H                     toggle HTML output mode (currently %s)\n"),
 			ON(pset.popt.topt.format == PRINT_HTML));
 	fprintf(output, _("  \\pset [NAME [VALUE]]   set table output option\n"
-					  "                         (NAME := {format|border|expanded|fieldsep|fieldsep_zero|footer|null|\n"
-					  "                         numericlocale|recordsep|recordsep_zero|tuples_only|title|tableattr|pager|\n"
-					  "                         unicode_border_linestyle|unicode_column_linestyle|unicode_header_linestyle})\n"));
+					  "                         (NAME := {border|columns|expanded|fieldsep|fieldsep_zero|\n"
+					  "                         footer|format|linestyle|null|numericlocale|pager|\n"
+					  "                         pager_min_lines|recordsep|recordsep_zero|tableattr|title|\n"
+					  "                         tuples_only|unicode_border_linestyle|\n"
+					  "                         unicode_column_linestyle|unicode_header_linestyle})\n"));
 	fprintf(output, _("  \\t [on|off]            show only rows (currently %s)\n"),
 			ON(pset.popt.topt.tuples_only));
 	fprintf(output, _("  \\T [STRING]            set HTML <table> tag attributes, or unset if none\n"));
 	fprintf(output, _("  \\x [on|off|auto]       toggle expanded output (currently %s)\n"),
-		pset.popt.topt.expanded == 2 ? "auto" : ON(pset.popt.topt.expanded));
+			pset.popt.topt.expanded == 2 ? "auto" : ON(pset.popt.topt.expanded));
 	fprintf(output, "\n");
 
 	fprintf(output, _("Connection\n"));
@@ -334,7 +336,7 @@ helpVariables(unsigned short int pager)
 	 * Windows builds currently print one more line than non-Windows builds.
 	 * Using the larger number is fine.
 	 */
-	output = PageOutput(88, pager ? &(pset.popt.topt) : NULL);
+	output = PageOutput(93, pager ? &(pset.popt.topt) : NULL);
 
 	fprintf(output, _("List of specially treated variables\n\n"));
 
@@ -344,7 +346,7 @@ helpVariables(unsigned short int pager)
 
 	fprintf(output, _("  AUTOCOMMIT         if set, successful SQL commands are automatically committed\n"));
 	fprintf(output, _("  COMP_KEYWORD_CASE  determines the case used to complete SQL key words\n"
-	"                     [lower, upper, preserve-lower, preserve-upper]\n"));
+					  "                     [lower, upper, preserve-lower, preserve-upper]\n"));
 	fprintf(output, _("  DBNAME             the currently connected database name\n"));
 	fprintf(output, _("  ECHO               controls what input is written to standard output\n"
 					  "                     [all, errors, none, queries]\n"));
@@ -366,11 +368,16 @@ helpVariables(unsigned short int pager)
 	fprintf(output, _("  PROMPT2            specifies the prompt used when a statement continues from a previous line\n"));
 	fprintf(output, _("  PROMPT3            specifies the prompt used during COPY ... FROM STDIN\n"));
 	fprintf(output, _("  QUIET              run quietly (same as -q option)\n"));
+	fprintf(output, _("  SERVER_VERSION_NAME  server's version (short string)\n"));
+	fprintf(output, _("  SERVER_VERSION_NUM   server's version (numeric format)\n"));
 	fprintf(output, _("  SHOW_CONTEXT       controls display of message context fields [never, errors, always]\n"));
 	fprintf(output, _("  SINGLELINE         end of line terminates SQL command mode (same as -S option)\n"));
 	fprintf(output, _("  SINGLESTEP         single-step mode (same as -s option)\n"));
 	fprintf(output, _("  USER               the currently connected database user\n"));
 	fprintf(output, _("  VERBOSITY          controls verbosity of error reports [default, verbose, terse]\n"));
+	fprintf(output, _("  VERSION            psql's version (verbose string)\n"));
+	fprintf(output, _("  VERSION_NAME       psql's version (short string)\n"));
+	fprintf(output, _("  VERSION_NUM        psql's version (numeric format)\n"));
 
 	fprintf(output, _("\nDisplay settings:\n"));
 	fprintf(output, _("Usage:\n"));
@@ -515,7 +522,7 @@ helpSQL(const char *topic, unsigned short int pager)
 					while (topic[j] != ' ' && j++ <= len)
 						wordlen++;
 				}
-				if (wordlen >= len)		/* Don't try again if the same word */
+				if (wordlen >= len) /* Don't try again if the same word */
 				{
 					if (!output)
 						output = PageOutput(nl_count, pager ? &(pset.popt.topt) : NULL);
@@ -583,19 +590,19 @@ print_copyright(void)
 		 "(formerly known as Postgres, then as Postgres95)\n\n"
 		 "Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group\n\n"
 		 "Portions Copyright (c) 1994, The Regents of the University of California\n\n"
-	"Permission to use, copy, modify, and distribute this software and its\n"
+		 "Permission to use, copy, modify, and distribute this software and its\n"
 		 "documentation for any purpose, without fee, and without a written agreement\n"
-	 "is hereby granted, provided that the above copyright notice and this\n"
-	   "paragraph and the following two paragraphs appear in all copies.\n\n"
+		 "is hereby granted, provided that the above copyright notice and this\n"
+		 "paragraph and the following two paragraphs appear in all copies.\n\n"
 		 "IN NO EVENT SHALL THE UNIVERSITY OF CALIFORNIA BE LIABLE TO ANY PARTY FOR\n"
 		 "DIRECT, INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, INCLUDING\n"
 		 "LOST PROFITS, ARISING OUT OF THE USE OF THIS SOFTWARE AND ITS\n"
 		 "DOCUMENTATION, EVEN IF THE UNIVERSITY OF CALIFORNIA HAS BEEN ADVISED OF THE\n"
 		 "POSSIBILITY OF SUCH DAMAGE.\n\n"
-	  "THE UNIVERSITY OF CALIFORNIA SPECIFICALLY DISCLAIMS ANY WARRANTIES,\n"
+		 "THE UNIVERSITY OF CALIFORNIA SPECIFICALLY DISCLAIMS ANY WARRANTIES,\n"
 		 "INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY\n"
 		 "AND FITNESS FOR A PARTICULAR PURPOSE.  THE SOFTWARE PROVIDED HEREUNDER IS\n"
 		 "ON AN \"AS IS\" BASIS, AND THE UNIVERSITY OF CALIFORNIA HAS NO OBLIGATIONS TO\n"
-	"PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.\n"
+		 "PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.\n"
 		);
 }

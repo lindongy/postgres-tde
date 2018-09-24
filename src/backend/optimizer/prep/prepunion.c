@@ -356,7 +356,7 @@ recurse_set_operations(Node *setOp, PlannerInfo *root,
 				*pNumGroups = subpath->rows;
 			else
 				*pNumGroups = estimate_num_groups(subroot,
-								get_tlist_exprs(subquery->targetList, false),
+												  get_tlist_exprs(subquery->targetList, false),
 												  subpath->rows,
 												  NULL);
 		}
@@ -724,14 +724,14 @@ generate_nonunion_path(SetOperationStmt *op, PlannerInfo *root,
 	 */
 	use_hash = choose_hashed_setop(root, groupList, path,
 								   dNumGroups, dNumOutputRows,
-					   (op->op == SETOP_INTERSECT) ? "INTERSECT" : "EXCEPT");
+								   (op->op == SETOP_INTERSECT) ? "INTERSECT" : "EXCEPT");
 
 	if (!use_hash)
 		path = (Path *) create_sort_path(root,
 										 result_rel,
 										 path,
 										 make_pathkeys_for_sortclauses(root,
-																   groupList,
+																	   groupList,
 																	   tlist),
 										 -1.0);
 
@@ -887,7 +887,7 @@ make_union_unique(SetOperationStmt *op, Path *path, List *tlist,
 										 result_rel,
 										 path,
 										 make_pathkeys_for_sortclauses(root,
-																   groupList,
+																	   groupList,
 																	   tlist),
 										 -1.0);
 		/* We have to manually jam the right tlist into the path; ick */
@@ -1360,8 +1360,12 @@ expand_inherited_tables(PlannerInfo *root)
  * table, but with inh = false, to represent the parent table in its role
  * as a simple member of the inheritance set.
  *
- * A childless table is never considered to be an inheritance set; therefore
- * a parent RTE must always have at least two associated AppendRelInfos.
+ * A childless table is never considered to be an inheritance set. For
+ * regular inheritance, a parent RTE must always have at least two associated
+ * AppendRelInfos: one corresponding to the parent table as a simple member of
+ * inheritance set and one or more corresponding to the actual children.
+ * Since a partitioned table is not scanned, it might have only one associated
+ * AppendRelInfo.
  */
 static void
 expand_inherited_rtentry(PlannerInfo *root, RangeTblEntry *rte, Index rti)
@@ -1374,7 +1378,7 @@ expand_inherited_rtentry(PlannerInfo *root, RangeTblEntry *rte, Index rti)
 	List	   *inhOIDs;
 	List	   *appinfos;
 	ListCell   *l;
-	bool		need_append;
+	bool		has_child;
 	PartitionedChildRelInfo *pcinfo;
 	List	   *partitioned_child_rels = NIL;
 
@@ -1448,7 +1452,7 @@ expand_inherited_rtentry(PlannerInfo *root, RangeTblEntry *rte, Index rti)
 
 	/* Scan the inheritance set and expand it */
 	appinfos = NIL;
-	need_append = false;
+	has_child = false;
 	foreach(l, inhOIDs)
 	{
 		Oid			childOID = lfirst_oid(l);
@@ -1502,7 +1506,10 @@ expand_inherited_rtentry(PlannerInfo *root, RangeTblEntry *rte, Index rti)
 		 */
 		if (childrte->relkind != RELKIND_PARTITIONED_TABLE)
 		{
-			need_append = true;
+			/* Remember if we saw a real child. */
+			if (childOID != parentOID)
+				has_child = true;
+
 			appinfo = makeNode(AppendRelInfo);
 			appinfo->parent_relid = rti;
 			appinfo->child_relid = childRTindex;
@@ -1527,11 +1534,11 @@ expand_inherited_rtentry(PlannerInfo *root, RangeTblEntry *rte, Index rti)
 			if (childOID != parentOID)
 			{
 				childrte->selectedCols = translate_col_privs(rte->selectedCols,
-												   appinfo->translated_vars);
+															 appinfo->translated_vars);
 				childrte->insertedCols = translate_col_privs(rte->insertedCols,
-												   appinfo->translated_vars);
+															 appinfo->translated_vars);
 				childrte->updatedCols = translate_col_privs(rte->updatedCols,
-												   appinfo->translated_vars);
+															appinfo->translated_vars);
 			}
 		}
 		else
@@ -1582,7 +1589,7 @@ expand_inherited_rtentry(PlannerInfo *root, RangeTblEntry *rte, Index rti)
 	 * the parent table is harmless, so we don't bother to get rid of it;
 	 * ditto for the useless PlanRowMark node.
 	 */
-	if (!need_append)
+	if (!has_child)
 	{
 		/* Clear flag before returning */
 		rte->inh = false;
@@ -1740,7 +1747,7 @@ translate_col_privs(const Bitmapset *parent_privs,
 		if (bms_is_member(attno - FirstLowInvalidHeapAttributeNumber,
 						  parent_privs))
 			child_privs = bms_add_member(child_privs,
-								 attno - FirstLowInvalidHeapAttributeNumber);
+										 attno - FirstLowInvalidHeapAttributeNumber);
 	}
 
 	/* Check if parent has whole-row reference */
@@ -1760,7 +1767,7 @@ translate_col_privs(const Bitmapset *parent_privs,
 			bms_is_member(attno - FirstLowInvalidHeapAttributeNumber,
 						  parent_privs))
 			child_privs = bms_add_member(child_privs,
-						 var->varattno - FirstLowInvalidHeapAttributeNumber);
+										 var->varattno - FirstLowInvalidHeapAttributeNumber);
 	}
 
 	return child_privs;
@@ -1927,7 +1934,7 @@ adjust_appendrel_attrs_mutator(Node *node,
 		JoinExpr   *j;
 
 		j = (JoinExpr *) expression_tree_mutator(node,
-											  adjust_appendrel_attrs_mutator,
+												 adjust_appendrel_attrs_mutator,
 												 (void *) context);
 		/* now fix JoinExpr's rtindex (probably never happens) */
 		if (j->rtindex == appinfo->parent_relid)
@@ -1940,7 +1947,7 @@ adjust_appendrel_attrs_mutator(Node *node,
 		PlaceHolderVar *phv;
 
 		phv = (PlaceHolderVar *) expression_tree_mutator(node,
-											  adjust_appendrel_attrs_mutator,
+														 adjust_appendrel_attrs_mutator,
 														 (void *) context);
 		/* now fix PlaceHolderVar's relid sets */
 		if (phv->phlevelsup == 0)

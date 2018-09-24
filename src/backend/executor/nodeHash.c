@@ -56,8 +56,8 @@ static void *dense_alloc(HashJoinTable hashtable, Size size);
  *		stub for pro forma compliance
  * ----------------------------------------------------------------
  */
-TupleTableSlot *
-ExecHash(HashState *node)
+static TupleTableSlot *
+ExecHash(PlanState *pstate)
 {
 	elog(ERROR, "Hash node does not support ExecProcNode call convention");
 	return NULL;
@@ -172,6 +172,7 @@ ExecInitHash(Hash *node, EState *estate, int eflags)
 	hashstate = makeNode(HashState);
 	hashstate->ps.plan = (Plan *) node;
 	hashstate->ps.state = estate;
+	hashstate->ps.ExecProcNode = ExecHash;
 	hashstate->hashtable = NULL;
 	hashstate->hashkeys = NIL;	/* will be set by parent HashJoin */
 
@@ -657,7 +658,7 @@ ExecHashIncreaseNumBatches(HashJoinTable hashtable)
 		hashtable->log2_nbuckets = hashtable->log2_nbuckets_optimal;
 
 		hashtable->buckets = repalloc(hashtable->buckets,
-								sizeof(HashJoinTuple) * hashtable->nbuckets);
+									  sizeof(HashJoinTuple) * hashtable->nbuckets);
 	}
 
 	/*
@@ -783,7 +784,7 @@ ExecHashIncreaseNumBuckets(HashJoinTable hashtable)
 	 */
 	hashtable->buckets =
 		(HashJoinTuple *) repalloc(hashtable->buckets,
-								hashtable->nbuckets * sizeof(HashJoinTuple));
+								   hashtable->nbuckets * sizeof(HashJoinTuple));
 
 	memset(hashtable->buckets, 0, hashtable->nbuckets * sizeof(HashJoinTuple));
 
@@ -810,6 +811,9 @@ ExecHashIncreaseNumBuckets(HashJoinTable hashtable)
 			idx += MAXALIGN(HJTUPLE_OVERHEAD +
 							HJTUPLE_MINTUPLE(hashTuple)->t_len);
 		}
+
+		/* allow this loop to be cancellable */
+		CHECK_FOR_INTERRUPTS();
 	}
 }
 
@@ -1176,7 +1180,7 @@ ExecScanHashTableForUnmatched(HashJoinState *hjstate, ExprContext *econtext)
 				/* insert hashtable's tuple into exec slot */
 				inntuple = ExecStoreMinimalTuple(HJTUPLE_MINTUPLE(hashTuple),
 												 hjstate->hj_HashTupleSlot,
-												 false);		/* do not pfree */
+												 false);	/* do not pfree */
 				econtext->ecxt_innertuple = inntuple;
 
 				/*
@@ -1192,6 +1196,9 @@ ExecScanHashTableForUnmatched(HashJoinState *hjstate, ExprContext *econtext)
 
 			hashTuple = hashTuple->next;
 		}
+
+		/* allow this loop to be cancellable */
+		CHECK_FOR_INTERRUPTS();
 	}
 
 	/*
@@ -1650,7 +1657,7 @@ dense_alloc(HashJoinTable hashtable, Size size)
 	{
 		/* allocate new chunk and put it at the beginning of the list */
 		newChunk = (HashMemoryChunk) MemoryContextAlloc(hashtable->batchCxt,
-								 offsetof(HashMemoryChunkData, data) + size);
+														offsetof(HashMemoryChunkData, data) + size);
 		newChunk->maxlen = size;
 		newChunk->used = 0;
 		newChunk->ntuples = 0;
@@ -1685,7 +1692,7 @@ dense_alloc(HashJoinTable hashtable, Size size)
 	{
 		/* allocate new chunk and put it at the beginning of the list */
 		newChunk = (HashMemoryChunk) MemoryContextAlloc(hashtable->batchCxt,
-					  offsetof(HashMemoryChunkData, data) + HASH_CHUNK_SIZE);
+														offsetof(HashMemoryChunkData, data) + HASH_CHUNK_SIZE);
 
 		newChunk->maxlen = HASH_CHUNK_SIZE;
 		newChunk->used = size;
