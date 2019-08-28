@@ -1,0 +1,575 @@
+#include <stdlib.h>
+#include <string.h>
+
+EXEC SQL INCLUDE ../regression;
+
+exec sql whenever sqlerror sqlprint;
+
+int main(void)
+{
+exec sql begin declare section;
+	int	id[8], i;
+	varchar	t[8][50];
+exec sql end declare section;
+	int	quit_loop;
+
+	ECPGdebug(1, stderr);
+
+	exec sql connect to REGRESSDB1;
+
+	exec sql create table t1 (id serial primary key, t text);
+	exec sql insert into t1 (t) values
+			('a'), ('b'), ('c'), ('d'), ('e'), ('f'), ('g'), ('h'),
+			('i'), ('j'), ('k'), ('l'), ('m'), ('n'), ('o'), ('p'),
+			('q'), ('r'), ('s'), ('t'), ('u'), ('v'), ('w'), ('x'),
+			('y'), ('z');
+	exec sql commit;
+
+	exec sql declare scroll_cur scroll readahead 8 cursor for select id, t from t1 order by id;
+	exec sql declare scroll_cur4 scroll readahead 4 cursor for select id, t from t1 order by id;
+
+	/*
+	 * Test FETCH ABSOLUTE N with an interval of 4 using positive positions.
+	 * Readahead is 8 so caching is in effect.
+	 */
+
+	printf("test scroll_cur for move absolute n (every 4th tuple forward, positive positions)\n");
+
+	exec sql open scroll_cur;
+	if (sqlca.sqlcode < 0)
+		printf("open failed with SQLSTATE %5s\n", sqlca.sqlstate);
+
+	for (i = 1; i < 33; i += 4)
+	{
+		exec sql fetch absolute :i from scroll_cur into :id, :t;
+
+		if (sqlca.sqlerrd[2] == 1)
+			printf("\trow %d: id: %d\tt: %s\n", i, id[0], t[0].arr);
+		else
+			printf("\trow %d does not exist\n", i);
+	}
+
+	printf("\ntest scroll_cur for move absolute n (every 4th tuple backward, positive positions)\n");
+
+	for (i = 33; i >= 0; i -= 4)
+	{
+		exec sql fetch absolute :i from scroll_cur into :id, :t;
+
+		if (sqlca.sqlerrd[2] == 1)
+			printf("\trow %d: id: %d\tt: %s\n", i, id[0], t[0].arr);
+		else
+			printf("\trow %d does not exist\n", i);
+	}
+
+	exec sql rollback;
+
+	/*
+	 * Test FETCH ABSOLUTE N with an interval of 4 using negative positions.
+	 * Readahead is 8 so caching is in effect.
+	 */
+
+	printf("\ntest scroll_cur for move absolute n (every 4th tuple backward, negative positions)\n");
+
+	exec sql open scroll_cur;
+	if (sqlca.sqlcode < 0)
+		printf("open failed with SQLSTATE %5s\n", sqlca.sqlstate);
+
+	for (i = -1; i > -33; i -= 4)
+	{
+		exec sql fetch absolute :i from scroll_cur into :id, :t;
+
+		if (sqlca.sqlerrd[2] == 1)
+			printf("\trow %d: id: %d\tt: %s\n", i, id[0], t[0].arr);
+		else
+			printf("\trow %d does not exist\n", i);
+	}
+
+	printf("\ntest scroll_cur for move absolute n (every 4th tuple forward, negative positions)\n");
+
+	for (i = -33; i <= 0; i += 4)
+	{
+		exec sql fetch absolute :i from scroll_cur into :id, :t;
+
+		if (sqlca.sqlerrd[2] == 1)
+			printf("\trow %d: id: %d\tt: %s\n", i, id[0], t[0].arr);
+		else
+			printf("\trow %d does not exist\n", i);
+	}
+
+	exec sql rollback;
+
+	/*
+	 * Test FETCH RELATIVE +/- 4 using positive positions
+	 * readahead is 8, so caching is in effect
+	 */
+
+	printf("\ntest scroll_cur for fetch relative 4 (positive positions)\n");
+
+	exec sql open scroll_cur;
+	if (sqlca.sqlcode < 0)
+		printf("open failed with SQLSTATE %5s\n", sqlca.sqlstate);
+
+	quit_loop = 0;
+	while (!quit_loop)
+	{
+		for (i = 0; i < 8; i++)
+			id[i] = 0, t[i].arr[0] = '\0';
+		exec sql fetch relative 4 in scroll_cur into :id, :t;
+		if (sqlca.sqlcode < 0)
+			printf("fetch relative 4 in scroll_cur failed with SQLSTATE %5s\n", sqlca.sqlstate);
+		else
+			printf("fetch relative 4 in scroll_cur succeeded, sqlerrd[2] %ld\n", sqlca.sqlerrd[2]);
+		for (i = 0; i < sqlca.sqlerrd[2]; i++)
+			printf("\tid: %d\tt: %s\n", id[i], t[i].arr);
+		quit_loop = (sqlca.sqlerrd[2] == 0);
+	}
+
+	printf("\ntest scroll_cur for fetch relative -4 (positive positions)\n");
+
+	quit_loop = 0;
+	while (!quit_loop)
+	{
+		for (i = 0; i < 8; i++)
+			id[i] = 0, t[i].arr[0] = '\0';
+		exec sql fetch relative -4 in scroll_cur into :id, :t;
+		if (sqlca.sqlcode < 0)
+			printf("fetch relative -4 in scroll_cur failed with SQLSTATE %5s\n", sqlca.sqlstate);
+		else
+			printf("fetch relative -4 in scroll_cur succeeded, sqlerrd[2] %ld\n", sqlca.sqlerrd[2]);
+		for (i = 0; i < sqlca.sqlerrd[2]; i++)
+			printf("\tid: %d\tt: %s\n", id[i], t[i].arr);
+		quit_loop = (sqlca.sqlerrd[2] == 0);
+	}
+
+	exec sql rollback;
+
+	/*
+	 * Test FETCH RELATIVE +/- 4 using negative positions
+	 * readahead is 8, so caching is in effect
+	 */
+
+	printf("\ntest scroll_cur for fetch relative -4 (negative positions)\n");
+
+	exec sql open scroll_cur;
+	if (sqlca.sqlcode < 0)
+		printf("open failed with SQLSTATE %5s\n", sqlca.sqlstate);
+
+	exec sql move absolute -1 in scroll_cur;
+	if (sqlca.sqlcode < 0)
+		printf("move absolute -1 in scroll_cur failed with SQLSTATE %5s\n", sqlca.sqlstate);
+	exec sql move forward 1 in scroll_cur;
+	if (sqlca.sqlcode < 0)
+		printf("move forward 1 in scroll_cur failed with SQLSTATE %5s\n", sqlca.sqlstate);
+
+	quit_loop = 0;
+	while (!quit_loop)
+	{
+		for (i = 0; i < 8; i++)
+			id[i] = 0, t[i].arr[0] = '\0';
+		exec sql fetch relative -4 in scroll_cur into :id, :t;
+		if (sqlca.sqlcode < 0)
+			printf("fetch relative -4 in scroll_cur failed with SQLSTATE %5s\n", sqlca.sqlstate);
+		else
+			printf("fetch relative -4 in scroll_cur succeeded, sqlerrd[2] %ld\n", sqlca.sqlerrd[2]);
+		for (i = 0; i < sqlca.sqlerrd[2]; i++)
+			printf("\tid: %d\tt: %s\n", id[i], t[i].arr);
+		quit_loop = (sqlca.sqlerrd[2] == 0);
+	}
+
+	printf("\ntest scroll_cur for fetch relative 4 (negative positions)\n");
+
+	quit_loop = 0;
+	while (!quit_loop)
+	{
+		for (i = 0; i < 8; i++)
+			id[i] = 0, t[i].arr[0] = '\0';
+		exec sql fetch relative 4 in scroll_cur into :id, :t;
+		if (sqlca.sqlcode < 0)
+			printf("fetch relative 4 in scroll_cur failed with SQLSTATE %5s\n", sqlca.sqlstate);
+		else
+			printf("fetch relative 4 in scroll_cur succeeded, sqlerrd[2] %ld\n", sqlca.sqlerrd[2]);
+		for (i = 0; i < sqlca.sqlerrd[2]; i++)
+			printf("\tid: %d\tt: %s\n", id[i], t[i].arr);
+		quit_loop = (sqlca.sqlerrd[2] == 0);
+	}
+
+	exec sql rollback;
+
+	/*
+	 * Test FETCH FORWARD +/- 4 using positive positions
+	 * readahead is 8, so caching is in effect
+	 */
+
+	printf("\ntest scroll_cur for fetch forward 4 (positive positions)\n");
+
+	exec sql open scroll_cur;
+	if (sqlca.sqlcode < 0)
+		printf("open failed with SQLSTATE %5s\n", sqlca.sqlstate);
+
+	quit_loop = 0;
+	while (!quit_loop)
+	{
+		for (i = 0; i < 8; i++)
+			id[i] = 0, t[i].arr[0] = '\0';
+		exec sql fetch forward 4 in scroll_cur into :id, :t;
+		if (sqlca.sqlcode < 0)
+			printf("fetch forward 4 in scroll_cur failed with SQLSTATE %5s\n", sqlca.sqlstate);
+		else
+			printf("fetch forward 4 in scroll_cur succeeded, sqlerrd[2] %ld\n", sqlca.sqlerrd[2]);
+		for (i = 0; i < sqlca.sqlerrd[2]; i++)
+			printf("\tid: %d\tt: %s\n", id[i], t[i].arr);
+		quit_loop = (sqlca.sqlerrd[2] == 0);
+	}
+
+	printf("\ntest scroll_cur for fetch forward -4 (positive positions)\n");
+
+	quit_loop = 0;
+	while (!quit_loop)
+	{
+		for (i = 0; i < 8; i++)
+			id[i] = 0, t[i].arr[0] = '\0';
+		exec sql fetch forward -4 in scroll_cur into :id, :t;
+		if (sqlca.sqlcode < 0)
+			printf("fetch forward -4 in scroll_cur failed with SQLSTATE %5s\n", sqlca.sqlstate);
+		else
+			printf("fetch forward -4 in scroll_cur succeeded, sqlerrd[2] %ld\n", sqlca.sqlerrd[2]);
+		for (i = 0; i < sqlca.sqlerrd[2]; i++)
+			printf("\tid: %d\tt: %s\n", id[i], t[i].arr);
+		quit_loop = (sqlca.sqlerrd[2] == 0);
+	}
+
+	exec sql rollback;
+
+	/*
+	 * Test FETCH FORWARD +/- 4 using negative positions
+	 * readahead is 8, so caching is in effect
+	 */
+
+	printf("\ntest scroll_cur for fetch forward -4 (negative positions)\n");
+
+	exec sql open scroll_cur;
+	if (sqlca.sqlcode < 0)
+		printf("open failed with SQLSTATE %5s\n", sqlca.sqlstate);
+
+	exec sql move absolute -1 in scroll_cur;
+	if (sqlca.sqlcode < 0)
+		printf("move absolute -1 in scroll_cur failed with SQLSTATE %5s\n", sqlca.sqlstate);
+	exec sql move forward 1 in scroll_cur;
+	if (sqlca.sqlcode < 0)
+		printf("move forward 1 in scroll_cur failed with SQLSTATE %5s\n", sqlca.sqlstate);
+
+	quit_loop = 0;
+	while (!quit_loop)
+	{
+		for (i = 0; i < 8; i++)
+			id[i] = 0, t[i].arr[0] = '\0';
+		exec sql fetch forward -4 in scroll_cur into :id, :t;
+		if (sqlca.sqlcode < 0)
+			printf("fetch forward -4 in scroll_cur failed with SQLSTATE %5s\n", sqlca.sqlstate);
+		else
+			printf("fetch forward -4 in scroll_cur succeeded, sqlerrd[2] %ld\n", sqlca.sqlerrd[2]);
+		for (i = 0; i < sqlca.sqlerrd[2]; i++)
+			printf("\tid: %d\tt: %s\n", id[i], t[i].arr);
+		quit_loop = (sqlca.sqlerrd[2] == 0);
+	}
+
+	printf("\ntest scroll_cur for fetch forward 4 (negative positions)\n");
+
+	quit_loop = 0;
+	while (!quit_loop)
+	{
+		for (i = 0; i < 8; i++)
+			id[i] = 0, t[i].arr[0] = '\0';
+		exec sql fetch forward 4 in scroll_cur into :id, :t;
+		if (sqlca.sqlcode < 0)
+			printf("fetch forward 4 in scroll_cur failed with SQLSTATE %5s\n", sqlca.sqlstate);
+		else
+			printf("fetch forward 4 in scroll_cur succeeded, sqlerrd[2] %ld\n", sqlca.sqlerrd[2]);
+		for (i = 0; i < sqlca.sqlerrd[2]; i++)
+			printf("\tid: %d\tt: %s\n", id[i], t[i].arr);
+		quit_loop = (sqlca.sqlerrd[2] == 0);
+	}
+
+	exec sql rollback;
+
+	/*
+	 * Test FETCH ABSOLUTE N with an interval of 5 using positive positions.
+	 * Readahead is 4 so cache misses occur.
+	 * ecpglib will switch to plain ecpg_execute after 3 cache misses
+	 */
+
+	printf("\ntest scroll_cur4 for move absolute n (every 5th tuple forward, positive positions)\n");
+
+	exec sql open scroll_cur4;
+	if (sqlca.sqlcode < 0)
+		printf("open failed with SQLSTATE %5s\n", sqlca.sqlstate);
+
+	for (i = 1; i < 35; i += 5)
+	{
+		exec sql fetch absolute :i from scroll_cur4 into :id, :t;
+
+		if (sqlca.sqlerrd[2] == 1)
+			printf("\trow %d: id: %d\tt: %s\n", i, id[0], t[0].arr);
+		else
+			printf("\trow %d does not exist\n", i);
+	}
+
+	/*
+	 * Let's see caching recovers by fetching 2x the readahead size.
+	 * The cursor must be at the end now, with the cursor's pos,
+	 * backend_pos, atstart and atend correctly set.
+	 */
+
+	printf("\ntest fetch backward 8 from scroll_cur4 after the cursor switched to ecpg_execute()\n");
+
+	exec sql fetch backward 8 from scroll_cur4 into :id, :t;
+	for (i = 0; i < sqlca.sqlerrd[2]; i++)
+		printf("\tid: %d t: %s\n", id[i], t[i].arr);
+
+	printf("\ntest scroll_cur4 for move absolute n (every 5th tuple backward, positive positions)\n");
+
+	for (i = 36; i >= 0; i -= 5)
+	{
+		exec sql fetch absolute :i from scroll_cur4 into :id, :t;
+
+		if (sqlca.sqlerrd[2] == 1)
+			printf("\trow %d: id: %d\tt: %s\n", i, id[0], t[0].arr);
+		else
+			printf("\trow %d does not exist\n", i);
+	}
+
+	/*
+	 * Let's see caching recovers by fetching 2x the readahead size.
+	 * The cursor must be at the start+1 (pos == 1) now,
+	 * with the cursor's pos, backend_pos, atstart and atend
+	 * correctly set.
+	 */
+
+	printf("\ntest fetch forward 8 from scroll_cur4 after the cursor switched to ecpg_execute()\n");
+
+	exec sql fetch forward 8 from scroll_cur4 into :id, :t;
+	for (i = 0; i < sqlca.sqlerrd[2]; i++)
+		printf("\tid: %d t: %s\n", id[i], t[i].arr);
+
+	exec sql rollback;
+
+	/*
+	 * Test FETCH ABSOLUTE N with an interval of 5 using negative positions.
+	 * Readahead is 4 so cache misses occur.
+	 * ecpglib will switch to plain ecpg_execute after 3 cache misses
+	 */
+
+	printf("\ntest scroll_cur4 for move absolute n (every 5th tuple backward, negative positions)\n");
+
+	exec sql open scroll_cur4;
+	if (sqlca.sqlcode < 0)
+		printf("open failed with SQLSTATE %5s\n", sqlca.sqlstate);
+
+	for (i = -1; i > -35; i -= 5)
+	{
+		exec sql fetch absolute :i from scroll_cur4 into :id, :t;
+
+		if (sqlca.sqlerrd[2] == 1)
+			printf("\trow %d: id: %d\tt: %s\n", i, id[0], t[0].arr);
+		else
+			printf("\trow %d does not exist\n", i);
+	}
+
+	/*
+	 * Let's see caching recovers by fetching 2x the readahead size.
+	 * The cursor must be at the start (pos == -27) now,
+	 * with the cursor's pos, backend_pos, atstart and atend
+	 * correctly set.
+	 */
+
+	printf("\ntest fetch forward 8 from scroll_cur4 after the cursor switched to ecpg_execute()\n");
+
+	exec sql fetch forward 8 from scroll_cur4 into :id, :t;
+	for (i = 0; i < sqlca.sqlerrd[2]; i++)
+		printf("\tid: %d t: %s\n", id[i], t[i].arr);
+
+	printf("\ntest scroll_cur4 for move absolute n (every 5th tuple forward, negative positions)\n");
+
+	for (i = -36; i <= 0; i += 5)
+	{
+		exec sql fetch absolute :i from scroll_cur4 into :id, :t;
+
+		if (sqlca.sqlerrd[2] == 1)
+			printf("\trow %d: id: %d\tt: %s\n", i, id[0], t[0].arr);
+		else
+			printf("\trow %d does not exist\n", i);
+	}
+
+	/*
+	 * Let's see caching recovers by fetching 2x the readahead size.
+	 * The cursor must be at the end-1 (pos == -1) now,
+	 * with the cursor's pos, backend_pos, atstart and atend
+	 * correctly set.
+	 */
+
+	printf("\ntest fetch backward 8 from scroll_cur4 after the cursor switched to ecpg_execute()\n");
+
+	exec sql fetch backward 8 from scroll_cur4 into :id, :t;
+	for (i = 0; i < sqlca.sqlerrd[2]; i++)
+		printf("\tid: %d t: %s\n", id[i], t[i].arr);
+
+	exec sql rollback;
+
+	/*
+	 * Test FETCH RELATIVE +/- 5 using positive positions.
+	 * Readahead is 4 so cache misses occur.
+	 * ecpglib will switch to plain ecpg_execute after 3 cache misses
+	 */
+
+	printf("\ntest scroll_cur4 for fetch relative 5 (positive positions)\n");
+
+	exec sql open scroll_cur4;
+	if (sqlca.sqlcode < 0)
+		printf("open failed with SQLSTATE %5s\n", sqlca.sqlstate);
+
+	quit_loop = 0;
+	while (!quit_loop)
+	{
+		exec sql fetch relative 5 from scroll_cur4 into :id, :t;
+
+		if (sqlca.sqlerrd[2] == 1)
+			printf("\tid: %d\tt: %s\n", id[0], t[0].arr);
+		else
+			printf("\tfetch returned empty\n");
+		quit_loop = (sqlca.sqlerrd[2] == 0);
+	}
+
+	/*
+	 * Let's see caching recovers by fetching 2x the readahead size.
+	 * The cursor must be at the end now,
+	 * with the cursor's pos, backend_pos, atstart and atend
+	 * correctly set.
+	 */
+
+	printf("\ntest fetch backward 8 from scroll_cur4 after the cursor switched to ecpg_execute()\n");
+
+	exec sql fetch backward 8 from scroll_cur4 into :id, :t;
+	for (i = 0; i < sqlca.sqlerrd[2]; i++)
+		printf("\tid: %d t: %s\n", id[i], t[i].arr);
+
+	/* Exaggerate the number of tuples, move to the end. */
+	exec sql move forward 100 in scroll_cur4;
+	if (sqlca.sqlcode < 0)
+		printf("move forward 100 in scroll_cur4 failed with SQLSTATE %5s\n", sqlca.sqlstate);
+
+	printf("\ntest scroll_cur4 for fetch relative -5 (positive positions)\n");
+
+	quit_loop = 0;
+	while (!quit_loop)
+	{
+		exec sql fetch relative -5 from scroll_cur4 into :id, :t;
+
+		if (sqlca.sqlerrd[2] == 1)
+			printf("\tid: %d\tt: %s\n", id[0], t[0].arr);
+		else
+			printf("\tfetch returned empty\n");
+		quit_loop = (sqlca.sqlerrd[2] == 0);
+	}
+
+	/*
+	 * Let's see caching recovers by fetching 2x the readahead size.
+	 * The cursor must be at the start now,
+	 * with the cursor's pos, backend_pos, atstart and atend
+	 * correctly set.
+	 */
+
+	printf("\ntest fetch forward 8 from scroll_cur4 after the cursor switched to ecpg_execute()\n");
+
+	exec sql fetch forward 8 from scroll_cur4 into :id, :t;
+	for (i = 0; i < sqlca.sqlerrd[2]; i++)
+		printf("\tid: %d t: %s\n", id[i], t[i].arr);
+
+	exec sql rollback;
+
+	/*
+	 * Test FETCH RELATIVE +/- 5 using negative positions.
+	 * Readahead is 4 so cache misses occur.
+	 * ecpglib will switch to plain ecpg_execute after 3 cache misses
+	 */
+
+	printf("\ntest scroll_cur4 for move relative -5 (negative positions)\n");
+
+	exec sql open scroll_cur4;
+	if (sqlca.sqlcode < 0)
+		printf("open failed with SQLSTATE %5s\n", sqlca.sqlstate);
+
+	exec sql move absolute -1 in scroll_cur4;
+	if (sqlca.sqlcode < 0)
+		printf("move absolute -1 in scroll_cur4 failed with SQLSTATE %5s\n", sqlca.sqlstate);
+	exec sql move forward 1 in scroll_cur4;
+	if (sqlca.sqlcode < 0)
+		printf("move forward 1 in scroll_cur4 failed with SQLSTATE %5s\n", sqlca.sqlstate);
+
+	quit_loop = 0;
+	while (!quit_loop)
+	{
+		exec sql fetch relative -5 from scroll_cur4 into :id, :t;
+
+		if (sqlca.sqlerrd[2] == 1)
+			printf("\tid: %d\tt: %s\n", id[0], t[0].arr);
+		else
+			printf("\tfetch returned empty\n");
+		quit_loop = (sqlca.sqlerrd[2] == 0);
+	}
+
+	/*
+	 * Let's see caching recovers by fetching 2x the readahead size.
+	 * The cursor must be at the start now,
+	 * with the cursor's pos, backend_pos, atstart and atend
+	 * correctly set.
+	 */
+
+	printf("\ntest fetch forward 8 from scroll_cur4 after the cursor switched to ecpg_execute()\n");
+
+	exec sql fetch forward 8 from scroll_cur4 into :id, :t;
+	for (i = 0; i < sqlca.sqlerrd[2]; i++)
+		printf("\tid: %d t: %s\n", id[i], t[i].arr);
+
+	/* Exaggerate the number of tuples, move to the start. */
+	exec sql move backward 100 in scroll_cur4;
+	if (sqlca.sqlcode < 0)
+		printf("move backward 100 in scroll_cur4 failed with SQLSTATE %5s\n", sqlca.sqlstate);
+
+	printf("\ntest scroll_cur for move relative 5 (negative positions)\n");
+
+	quit_loop = 0;
+	while (!quit_loop)
+	{
+		exec sql fetch relative 5 from scroll_cur4 into :id, :t;
+
+		if (sqlca.sqlerrd[2] == 1)
+			printf("\tid: %d\tt: %s\n", id[0], t[0].arr);
+		else
+			printf("\tfetch returned empty\n");
+		quit_loop = (sqlca.sqlerrd[2] == 0);
+	}
+
+	/*
+	 * Let's see caching recovers by fetching 2x the readahead size.
+	 * The cursor must be at the end now,
+	 * with the cursor's pos, backend_pos, atstart and atend
+	 * correctly set.
+	 */
+
+	printf("\ntest fetch backward 8 from scroll_cur4 after the cursor switched to ecpg_execute()\n");
+
+	exec sql fetch backward 8 from scroll_cur4 into :id, :t;
+	for (i = 0; i < sqlca.sqlerrd[2]; i++)
+		printf("\tid: %d t: %s\n", id[i], t[i].arr);
+
+	exec sql rollback;
+
+	/* Drop the test table */
+
+	exec sql drop table t1;
+	exec sql commit;
+
+	exec sql disconnect all;
+
+	return 0;
+}

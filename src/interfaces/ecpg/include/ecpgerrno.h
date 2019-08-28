@@ -37,6 +37,7 @@
 #define ECPG_NOT_CONN			-221
 
 #define ECPG_INVALID_STMT		-230
+#define ECPG_INVALID_CURSOR		-231
 
 /* dynamic SQL related */
 #define ECPG_UNKNOWN_DESCRIPTOR		-240

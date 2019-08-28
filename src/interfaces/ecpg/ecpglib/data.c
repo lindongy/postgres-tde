@@ -122,8 +122,35 @@ check_special_value(char *ptr, double *retval, char **endptr)
 	return false;
 }
 
+/*
+ * ecpg_get_data
+ *   Store one field data from PQgetvalue(results, act_tuple, act_field)
+ *   into a target variable. If the field is NULL, store the indication or
+ *   emit an error about the fact that there is no NULL indicator given.
+ * Parameters:
+ *   results:     result set
+ *   act_tuple:   row index in the result set
+ *   act_field:   column index in the result set
+ *   var_index:   array index in the target variable
+ *   lineno:      line number in the ECPG source file for debugging
+ *   type:        type of target variable
+ *   ind_type:    type of NULL indicator variable
+ *   var:         target variable
+ *   ind:         NULL indicator variable
+ *   varcharsize: size of the variable if it's varchar
+ *   offset:      size of the target variable
+ *                (used for indexing in an array)
+ *   ind_offset:  size of the NULL indicator variable
+ *                (used for indexing in an array)
+ *   isarray:     array type
+ *   compat:      native PostgreSQL or Informix compatibility mode
+ *   force_indicator:
+ *                if Informix compatibility mode is set and no NULL indicator
+ *                is given, provide a way to indicate NULL value in the
+ *                target variable itself
+ */
 bool
-ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int lineno,
+ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int var_index, int lineno,
 			  enum ECPGttype type, enum ECPGttype ind_type,
 			  char *var, char *ind, long varcharsize, long offset,
 			  long ind_offset, enum ARRAY_TYPE isarray, enum COMPAT_MODE compat, bool force_indicator)
@@ -177,20 +204,20 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int lineno,
 	{
 		case ECPGt_short:
 		case ECPGt_unsigned_short:
-			*((short *) (ind + ind_offset * act_tuple)) = value_for_indicator;
+			*((short *) (ind + ind_offset * var_index)) = value_for_indicator;
 			break;
 		case ECPGt_int:
 		case ECPGt_unsigned_int:
-			*((int *) (ind + ind_offset * act_tuple)) = value_for_indicator;
+			*((int *) (ind + ind_offset * var_index)) = value_for_indicator;
 			break;
 		case ECPGt_long:
 		case ECPGt_unsigned_long:
-			*((long *) (ind + ind_offset * act_tuple)) = value_for_indicator;
+			*((long *) (ind + ind_offset * var_index)) = value_for_indicator;
 			break;
 #ifdef HAVE_LONG_LONG_INT
 		case ECPGt_long_long:
 		case ECPGt_unsigned_long_long:
-			*((long long int *) (ind + ind_offset * act_tuple)) = value_for_indicator;
+			*((long long int *) (ind + ind_offset * var_index)) = value_for_indicator;
 			break;
 #endif							/* HAVE_LONG_LONG_INT */
 		case ECPGt_NO_INDICATOR:
@@ -202,7 +229,7 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int lineno,
 					 * Informix has an additional way to specify NULLs note
 					 * that this uses special values to denote NULL
 					 */
-					ECPGset_noind_null(type, var + offset * act_tuple);
+					ECPGset_noind_null(type, var + offset * var_index);
 				}
 				else
 				{
@@ -253,10 +280,10 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int lineno,
 		if (binary)
 		{
 			if (varcharsize == 0 || varcharsize * offset >= size)
-				memcpy(var + offset * act_tuple, pval, size);
+				memcpy(var + offset * var_index, pval, size);
 			else
 			{
-				memcpy(var + offset * act_tuple, pval, varcharsize * offset);
+				memcpy(var + offset * var_index, pval, varcharsize * offset);
 
 				if (varcharsize * offset < size)
 				{
@@ -265,20 +292,20 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int lineno,
 					{
 						case ECPGt_short:
 						case ECPGt_unsigned_short:
-							*((short *) (ind + ind_offset * act_tuple)) = size;
+							*((short *) (ind + ind_offset * var_index)) = size;
 							break;
 						case ECPGt_int:
 						case ECPGt_unsigned_int:
-							*((int *) (ind + ind_offset * act_tuple)) = size;
+							*((int *) (ind + ind_offset * var_index)) = size;
 							break;
 						case ECPGt_long:
 						case ECPGt_unsigned_long:
-							*((long *) (ind + ind_offset * act_tuple)) = size;
+							*((long *) (ind + ind_offset * var_index)) = size;
 							break;
 #ifdef HAVE_LONG_LONG_INT
 						case ECPGt_long_long:
 						case ECPGt_unsigned_long_long:
-							*((long long int *) (ind + ind_offset * act_tuple)) = size;
+							*((long long int *) (ind + ind_offset * var_index)) = size;
 							break;
 #endif							/* HAVE_LONG_LONG_INT */
 						default:
@@ -319,13 +346,13 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int lineno,
 					switch (type)
 					{
 						case ECPGt_short:
-							*((short *) (var + offset * act_tuple)) = (short) res;
+							*((short *) (var + offset * var_index)) = (short) res;
 							break;
 						case ECPGt_int:
-							*((int *) (var + offset * act_tuple)) = (int) res;
+							*((int *) (var + offset * var_index)) = (int) res;
 							break;
 						case ECPGt_long:
-							*((long *) (var + offset * act_tuple)) = (long) res;
+							*((long *) (var + offset * var_index)) = (long) res;
 							break;
 						default:
 							/* Cannot happen */
@@ -348,13 +375,13 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int lineno,
 					switch (type)
 					{
 						case ECPGt_unsigned_short:
-							*((unsigned short *) (var + offset * act_tuple)) = (unsigned short) ures;
+							*((unsigned short *) (var + offset * var_index)) = (unsigned short) ures;
 							break;
 						case ECPGt_unsigned_int:
-							*((unsigned int *) (var + offset * act_tuple)) = (unsigned int) ures;
+							*((unsigned int *) (var + offset * var_index)) = (unsigned int) ures;
 							break;
 						case ECPGt_unsigned_long:
-							*((unsigned long *) (var + offset * act_tuple)) = (unsigned long) ures;
+							*((unsigned long *) (var + offset * var_index)) = (unsigned long) ures;
 							break;
 						default:
 							/* Cannot happen */
@@ -365,7 +392,7 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int lineno,
 #ifdef HAVE_LONG_LONG_INT
 #ifdef HAVE_STRTOLL
 				case ECPGt_long_long:
-					*((long long int *) (var + offset * act_tuple)) = strtoll(pval, &scan_length, 10);
+					*((long long int *) (var + offset * var_index)) = strtoll(pval, &scan_length, 10);
 					if (garbage_left(isarray, &scan_length, compat))
 					{
 						ecpg_raise(lineno, ECPG_INT_FORMAT, ECPG_SQLSTATE_DATATYPE_MISMATCH, pval);
@@ -377,7 +404,7 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int lineno,
 #endif							/* HAVE_STRTOLL */
 #ifdef HAVE_STRTOULL
 				case ECPGt_unsigned_long_long:
-					*((unsigned long long int *) (var + offset * act_tuple)) = strtoull(pval, &scan_length, 10);
+					*((unsigned long long int *) (var + offset * var_index)) = strtoull(pval, &scan_length, 10);
 					if (garbage_left(isarray, &scan_length, compat))
 					{
 						ecpg_raise(lineno, ECPG_UINT_FORMAT, ECPG_SQLSTATE_DATATYPE_MISMATCH, pval);
@@ -412,10 +439,10 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int lineno,
 					switch (type)
 					{
 						case ECPGt_float:
-							*((float *) (var + offset * act_tuple)) = dres;
+							*((float *) (var + offset * var_index)) = dres;
 							break;
 						case ECPGt_double:
-							*((double *) (var + offset * act_tuple)) = dres;
+							*((double *) (var + offset * var_index)) = dres;
 							break;
 						default:
 							/* Cannot happen */
@@ -427,12 +454,28 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int lineno,
 					if (pval[0] == 'f' && pval[1] == '\0')
 					{
 						*((bool *) (var + offset * act_tuple)) = false;
+						if (offset == sizeof(char))
+							*((char *) (var + offset * var_index)) = false;
+						else if (offset == sizeof(int))
+							*((int *) (var + offset * var_index)) = false;
+						else
+							ecpg_raise(lineno, ECPG_CONVERT_BOOL,
+									   ECPG_SQLSTATE_DATATYPE_MISMATCH,
+									   NULL);
 						pval++;
 						break;
 					}
 					else if (pval[0] == 't' && pval[1] == '\0')
 					{
 						*((bool *) (var + offset * act_tuple)) = true;
+						if (offset == sizeof(char))
+							*((char *) (var + offset * var_index)) = true;
+						else if (offset == sizeof(int))
+							*((int *) (var + offset * var_index)) = true;
+						else
+							ecpg_raise(lineno, ECPG_CONVERT_BOOL,
+									   ECPG_SQLSTATE_DATATYPE_MISMATCH,
+									   NULL);
 						pval++;
 						break;
 					}
@@ -451,7 +494,7 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int lineno,
 				case ECPGt_unsigned_char:
 				case ECPGt_string:
 					{
-						char	   *str = (char *) (var + offset * act_tuple);
+						char	   *str = (char *) (var + offset * var_index);
 
 						/*
 						 * If varcharsize is unknown and the offset is that of
@@ -487,20 +530,20 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int lineno,
 								{
 									case ECPGt_short:
 									case ECPGt_unsigned_short:
-										*((short *) (ind + ind_offset * act_tuple)) = size;
+										*((short *) (ind + ind_offset * var_index)) = size;
 										break;
 									case ECPGt_int:
 									case ECPGt_unsigned_int:
-										*((int *) (ind + ind_offset * act_tuple)) = size;
+										*((int *) (ind + ind_offset * var_index)) = size;
 										break;
 									case ECPGt_long:
 									case ECPGt_unsigned_long:
-										*((long *) (ind + ind_offset * act_tuple)) = size;
+										*((long *) (ind + ind_offset * var_index)) = size;
 										break;
 #ifdef HAVE_LONG_LONG_INT
 									case ECPGt_long_long:
 									case ECPGt_unsigned_long_long:
-										*((long long int *) (ind + ind_offset * act_tuple)) = size;
+										*((long long int *) (ind + ind_offset * var_index)) = size;
 										break;
 #endif							/* HAVE_LONG_LONG_INT */
 									default:
@@ -516,7 +559,7 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int lineno,
 				case ECPGt_varchar:
 					{
 						struct ECPGgeneric_varchar *variable =
-						(struct ECPGgeneric_varchar *) (var + offset * act_tuple);
+						(struct ECPGgeneric_varchar *) (var + offset * var_index);
 
 						variable->len = size;
 						if (varcharsize == 0)
@@ -532,20 +575,20 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int lineno,
 								{
 									case ECPGt_short:
 									case ECPGt_unsigned_short:
-										*((short *) (ind + ind_offset * act_tuple)) = variable->len;
+										*((short *) (ind + ind_offset * var_index)) = variable->len;
 										break;
 									case ECPGt_int:
 									case ECPGt_unsigned_int:
-										*((int *) (ind + ind_offset * act_tuple)) = variable->len;
+										*((int *) (ind + ind_offset * var_index)) = variable->len;
 										break;
 									case ECPGt_long:
 									case ECPGt_unsigned_long:
-										*((long *) (ind + ind_offset * act_tuple)) = variable->len;
+										*((long *) (ind + ind_offset * var_index)) = variable->len;
 										break;
 #ifdef HAVE_LONG_LONG_INT
 									case ECPGt_long_long:
 									case ECPGt_unsigned_long_long:
-										*((long long int *) (ind + ind_offset * act_tuple)) = variable->len;
+										*((long long int *) (ind + ind_offset * var_index)) = variable->len;
 										break;
 #endif							/* HAVE_LONG_LONG_INT */
 									default:
@@ -610,9 +653,9 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int lineno,
 					pval = scan_length;
 
 					if (type == ECPGt_numeric)
-						PGTYPESnumeric_copy(nres, (numeric *) (var + offset * act_tuple));
+						PGTYPESnumeric_copy(nres, (numeric *) (var + offset * var_index));
 					else
-						PGTYPESnumeric_to_decimal(nres, (decimal *) (var + offset * act_tuple));
+						PGTYPESnumeric_to_decimal(nres, (decimal *) (var + offset * var_index));
 
 					PGTYPESnumeric_free(nres);
 					break;
@@ -667,7 +710,7 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int lineno,
 					}
 					pval = scan_length;
 
-					PGTYPESinterval_copy(ires, (interval *) (var + offset * act_tuple));
+					PGTYPESinterval_copy(ires, (interval *) (var + offset * var_index));
 					free(ires);
 					break;
 
@@ -715,7 +758,7 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int lineno,
 						}
 					}
 
-					*((date *) (var + offset * act_tuple)) = ddres;
+					*((date *) (var + offset * var_index)) = ddres;
 					pval = scan_length;
 					break;
 
@@ -763,7 +806,7 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int lineno,
 						}
 					}
 
-					*((timestamp *) (var + offset * act_tuple)) = tres;
+					*((timestamp *) (var + offset * var_index)) = tres;
 					pval = scan_length;
 					break;
 
@@ -780,6 +823,7 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int lineno,
 
 				/* set array to next entry */
 				++act_tuple;
+				++var_index;
 
 				/* set pval to the next entry */
 

@@ -1,0 +1,122 @@
+/*
+ * Test MOVE ABSOLUTE N with alternating positive/negative
+ * positions and FETCH FORWARD/BACKWARD another record according
+ * to the current value.
+ *
+ * This code makes the result set size known by reaching the end.
+ * in both directions.
+ *
+ * After reaching the end, the cache_start_pos can be flipped
+ * from positive to negative to match the cursor position
+ * issued by the application.
+ *
+ * To watch this effect, execute:
+ *
+ * egrep -n "(cache populated|tuple already in cache)" \
+ *	results/sql-cursor-ra-swdir.stderr
+ *
+ */
+#include <stdlib.h>
+#include <string.h>
+
+EXEC SQL INCLUDE ../regression;
+
+exec sql whenever sqlerror sqlprint;
+
+exec sql declare mycur readahead 4 cursor for select id, t from t1 order by id;
+
+exec sql begin declare section;
+int	id[2];
+varchar	t[2][50];
+exec sql end declare section;
+
+static void fetch2(int absolute)
+{
+	exec sql begin declare section;
+	int	absolute1 = absolute;
+	exec sql end declare section;
+
+	int	i, rows = 1;
+	int	direction = (absolute < 0 ? -1 : 1);
+
+	exec sql fetch absolute :absolute1 from mycur into :id[0], :t[0];
+	if (direction > 0)
+	{
+		exec sql fetch forward 1 from mycur into :id[1], :t[1];
+	}
+	else
+	{
+		exec sql fetch backward 1 from mycur into :id[1], :t[1];
+	}
+
+	rows += sqlca.sqlerrd[2];
+
+	for (i = 0; i < rows; i++)
+		printf("absolute: %d id: %d t '%s'\n", absolute + i*direction, id[i], t[i].arr);
+}
+
+int main(void)
+{
+	exec sql begin declare section;
+	int	i, j;
+	exec sql end declare section;
+
+	ECPGdebug(1, stderr);
+
+	exec sql connect to REGRESSDB1;
+
+	exec sql create table t1 (id serial primary key, t text);
+	exec sql insert into t1 (t) values
+			('a'), ('b'), ('c'), ('d'), ('e'), ('f'), ('g');
+	exec sql commit;
+
+	exec sql open mycur;
+
+	printf("Discover total number of tuples and test flipping of cache_start_pos...\n");
+
+	/*
+	 * This part verifies that the returned rows are correct
+	 * in each direction and allows discovering the total
+	 * size of the result set via FETCH ABSOLUTE -1.
+	 * The midde of the loop, i.e. positions
+	 *	-2, -3, -4, -5 and
+	 *	 6,  5,  4,  3
+	 * will be served entirely from
+	 * the same cache.
+	 */
+	for (i = 1, j = -1; i <= 7; i++, j--)
+	{
+		fetch2(i);
+		fetch2(j);
+	}
+
+	printf("Re-test flipping of cache_start_pos\n");
+
+	/*
+	 * Re-test flipping with different positions that also
+	 * involve the end of the result set:
+	 *	-->      5,  6,  7, (end)
+	 *	    -4, -3, -2, -1  <--
+	 * After the first fetch, this loop can be served
+	 * almost entirely from the same cache except the last
+	 * request: fetch2(-3) does:
+	 *	FETCH ABSOLUTE -3 (still in the cache)
+	 *	FETCH BACKWARD 1 (does a new FETCH)
+	 */
+	for (i = 5, j = -1; i <= 7; i++, j--)
+	{
+		fetch2(i);
+		fetch2(j);
+	}
+
+	exec sql close mycur;
+
+	/* Drop the test table */
+
+	exec sql drop table t1;
+	exec sql commit;
+
+	exec sql disconnect all;
+
+	return 0;
+}

@@ -135,7 +135,7 @@ if (sqlca.sqlcode < 0) exit (1);}
 
 
 	strcpy(msg, "commit");
-	{ ECPGtrans(__LINE__, NULL, "commit");
+	{ ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);
 #line 42 "describe.pgc"
 
 if (sqlca.sqlcode < 0) exit (1);}
@@ -448,7 +448,7 @@ if (sqlca.sqlcode < 0) exit (1);}
 
 
 	strcpy(msg, "commit");
-	{ ECPGtrans(__LINE__, NULL, "commit");
+	{ ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);
 #line 193 "describe.pgc"
 
 if (sqlca.sqlcode < 0) exit (1);}

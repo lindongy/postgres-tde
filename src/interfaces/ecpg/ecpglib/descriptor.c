@@ -503,7 +503,7 @@ ECPGget_desc(int lineno, const char *desc_name, int index,...)
 
 		/* desperate try to guess something sensible */
 		stmt.connection = ecpg_get_connection(NULL);
-		ecpg_store_result(ECPGresult, index, &stmt, &data_var);
+		ecpg_store_result(ECPGresult, 0, PQntuples(ECPGresult), LOOP_FORWARD, index, &stmt, &data_var, 0);
 
 #ifdef HAVE_USELOCALE
 		if (stmt.oldlocale != (locale_t) 0)

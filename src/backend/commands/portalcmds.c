@@ -40,7 +40,8 @@
  */
 void
 PerformCursorOpen(DeclareCursorStmt *cstmt, ParamListInfo params,
-				  const char *queryString, bool isTopLevel)
+				  const char *queryString, bool isTopLevel,
+				  bool *scrollable)
 {
 	Query	   *query = castNode(Query, cstmt->query);
 	List	   *rewritten;
@@ -139,6 +140,8 @@ PerformCursorOpen(DeclareCursorStmt *cstmt, ParamListInfo params,
 		else
 			portal->cursorOptions |= CURSOR_OPT_NO_SCROLL;
 	}
+
+	*scrollable = !!(portal->cursorOptions & CURSOR_OPT_SCROLL);
 
 	/*
 	 * Start execution, inserting parameters if any.

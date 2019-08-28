@@ -236,7 +236,7 @@ if (sqlca.sqlcode < 0) exit (1);}
 
 
 	strcpy(msg, "commit");
-	{ ECPGtrans(__LINE__, NULL, "commit");
+	{ ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);
 #line 102 "sqlda.pgc"
 
 if (sqlca.sqlcode < 0) exit (1);}
@@ -261,7 +261,7 @@ if (sqlca.sqlcode < 0) exit (1);}
 
 
 	strcpy(msg, "open");
-	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "declare mycur1 cursor for $1", 
+	{ ECPGopen(__LINE__, 0, 1, NULL, 0, 0, ECPGcs_unspecified, 1, 1, 0, "mycur1", ECPGst_normal, "declare mycur1 cursor for $1", 
 	ECPGt_char_variable,(ECPGprepared_statement(NULL, "st_id1", __LINE__)),(long)1,(long)1,(1)*sizeof(char), 
 	ECPGt_NO_INDICATOR, NULL , 0L, 0L, 0L, ECPGt_EOIT, ECPGt_EORT);
 #line 115 "sqlda.pgc"
@@ -278,7 +278,7 @@ if (sqlca.sqlcode < 0) exit (1);}
 	while (1)
 	{
 		strcpy(msg, "fetch");
-		{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "fetch 1 from mycur1", ECPGt_EOIT, 
+		{ ECPGfetch(__LINE__, 0, 1, NULL, 0, ECPGc_forward, "1", 0, "mycur1", ECPGst_normal, "fetch 1 from mycur1", ECPGt_EOIT, 
 	ECPGt_sqlda, &outp_sqlda, 0L, 0L, 0L, 
 	ECPGt_NO_INDICATOR, NULL , 0L, 0L, 0L, ECPGt_EORT);
 #line 123 "sqlda.pgc"
@@ -299,7 +299,7 @@ if (sqlca.sqlcode < 0) exit (1);}
 
 
 	strcpy(msg, "close");
-	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "close mycur1", ECPGt_EOIT, ECPGt_EORT);
+	{ ECPGclose(__LINE__, 0, 1, NULL, 0, "mycur1", ECPGst_normal, "close mycur1", ECPGt_EOIT, ECPGt_EORT);
 #line 132 "sqlda.pgc"
 
 if (sqlca.sqlcode < 0) exit (1);}
@@ -334,7 +334,7 @@ if (sqlca.sqlcode < 0) exit (1);}
 
 
 	strcpy(msg, "open");
-	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "declare mycur2 cursor for $1", 
+	{ ECPGopen(__LINE__, 0, 1, NULL, 0, 0, ECPGcs_unspecified, 1, 1, 0, "mycur2", ECPGst_normal, "declare mycur2 cursor for $1", 
 	ECPGt_char_variable,(ECPGprepared_statement(NULL, "st_id2", __LINE__)),(long)1,(long)1,(1)*sizeof(char), 
 	ECPGt_NO_INDICATOR, NULL , 0L, 0L, 0L, ECPGt_EOIT, ECPGt_EORT);
 #line 150 "sqlda.pgc"
@@ -344,7 +344,7 @@ if (sqlca.sqlcode < 0) exit (1);}
 
 
 	strcpy(msg, "fetch");
-	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "fetch all from mycur2", ECPGt_EOIT, 
+	{ ECPGfetch(__LINE__, 0, 1, NULL, 0, ECPGc_forward, "all", 0, "mycur2", ECPGst_normal, "fetch all from mycur2", ECPGt_EOIT, 
 	ECPGt_sqlda, &outp_sqlda, 0L, 0L, 0L, 
 	ECPGt_NO_INDICATOR, NULL , 0L, 0L, 0L, ECPGt_EORT);
 #line 153 "sqlda.pgc"
@@ -367,7 +367,7 @@ if (sqlca.sqlcode < 0) exit (1);}
 	}
 
 	strcpy(msg, "close");
-	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "close mycur2", ECPGt_EOIT, ECPGt_EORT);
+	{ ECPGclose(__LINE__, 0, 1, NULL, 0, "mycur2", ECPGst_normal, "close mycur2", ECPGt_EOIT, ECPGt_EORT);
 #line 169 "sqlda.pgc"
 
 if (sqlca.sqlcode < 0) exit (1);}
@@ -485,7 +485,7 @@ if (sqlca.sqlcode < 0) exit (1);}
 	dump_sqlda(outp_sqlda);
 
 	strcpy(msg, "commit");
-	{ ECPGtrans(__LINE__, "con2", "commit");
+	{ ECPGtrans(__LINE__, "con2", "commit", 0, 0, 0, NULL);
 #line 239 "sqlda.pgc"
 
 if (sqlca.sqlcode < 0) exit (1);}
@@ -522,7 +522,7 @@ if (sqlca.sqlcode < 0) exit (1);}
 
 
 	strcpy(msg, "commit");
-	{ ECPGtrans(__LINE__, NULL, "commit");
+	{ ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);
 #line 256 "sqlda.pgc"
 
 if (sqlca.sqlcode < 0) exit (1);}

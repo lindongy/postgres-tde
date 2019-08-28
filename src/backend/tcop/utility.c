@@ -513,8 +513,14 @@ standard_ProcessUtility(PlannedStmt *pstmt,
 			 * Portal (cursor) manipulation
 			 */
 		case T_DeclareCursorStmt:
-			PerformCursorOpen((DeclareCursorStmt *) parsetree, params,
-							  queryString, isTopLevel);
+			{
+				bool	scrollable;
+
+				PerformCursorOpen((DeclareCursorStmt *) parsetree, params,
+								  queryString, isTopLevel, &scrollable);
+				if (completionTag)
+					sprintf(completionTag, "DECLARE CURSOR %u", scrollable);
+			}
 			break;
 
 		case T_ClosePortalStmt:

@@ -203,7 +203,7 @@ get_var1(MYTYPE **myvar0, MYNULLTYPE **mynullvar0)
 static void
 open_cur1(void)
 {
-	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "declare mycur cursor for select * from a1", ECPGt_EOIT, 
+	{ ECPGopen(__LINE__, 0, 1, NULL, 0, 0, ECPGcs_unspecified, 1, 1, 0, "mycur", ECPGst_normal, "declare mycur cursor for select * from a1", ECPGt_EOIT, 
 	ECPGt_int,&((*( MYTYPE  *)(ECPGget_var( 0)) ).id),(long)1,(long)1,sizeof( struct mytype ), 
 	ECPGt_int,&((*( MYNULLTYPE  *)(ECPGget_var( 1)) ).id),(long)1,(long)1,sizeof( struct mynulltype ), 
 	ECPGt_char,&((*( MYTYPE  *)(ECPGget_var( 0)) ).t),(long)64,(long)1,sizeof( struct mytype ), 
@@ -227,7 +227,7 @@ if (sqlca.sqlcode < 0) exit (1);}
 static void
 get_record1(void)
 {
-	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "fetch mycur", ECPGt_EOIT, 
+	{ ECPGfetch(__LINE__, 0, 1, NULL, 0, ECPGc_forward, "1", 0, "mycur", ECPGst_normal, "fetch mycur", ECPGt_EOIT, 
 	ECPGt_int,&((*( MYTYPE  *)(ECPGget_var( 0)) ).id),(long)1,(long)1,sizeof( struct mytype ), 
 	ECPGt_int,&((*( MYNULLTYPE  *)(ECPGget_var( 1)) ).id),(long)1,(long)1,sizeof( struct mynulltype ), 
 	ECPGt_char,&((*( MYTYPE  *)(ECPGget_var( 0)) ).t),(long)64,(long)1,sizeof( struct mytype ), 
@@ -251,7 +251,7 @@ if (sqlca.sqlcode < 0) exit (1);}
 static void
 close_cur1(void)
 {
-	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "close mycur", ECPGt_EOIT, ECPGt_EORT);
+	{ ECPGclose(__LINE__, 0, 1, NULL, 0, "mycur", ECPGst_normal, "close mycur", ECPGt_EOIT, ECPGt_EORT);
 #line 58 "outofscope.pgc"
 
 if (sqlca.sqlcode < 0) exit (1);}
@@ -317,7 +317,7 @@ if (sqlca.sqlcode < 0) exit (1);}
 
 
 	strcpy(msg, "commit");
-	{ ECPGtrans(__LINE__, NULL, "commit");
+	{ ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);
 #line 89 "outofscope.pgc"
 
 if (sqlca.sqlcode < 0) exit (1);}
@@ -361,7 +361,7 @@ if (sqlca.sqlcode < 0) exit (1);}
 
 
 	strcpy(msg, "commit");
-	{ ECPGtrans(__LINE__, NULL, "commit");
+	{ ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);
 #line 121 "outofscope.pgc"
 
 if (sqlca.sqlcode < 0) exit (1);}

@@ -47,7 +47,7 @@ if (sqlca.sqlcode < 0) sqlprint();}
 #line 18 "createtableas.pgc"
 
 
-	{ ECPGsetcommit(__LINE__, "on", NULL);
+	{ ECPGsetcommit(__LINE__, 1, NULL);
 #line 20 "createtableas.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint();}

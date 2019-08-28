@@ -73,13 +73,13 @@ int main()
   { ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "drop table test_thread", ECPGt_EOIT, ECPGt_EORT);}
 #line 48 "thread.pgc"
  /* DROP might fail */
-  { ECPGtrans(__LINE__, NULL, "commit");}
+  { ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);}
 #line 49 "thread.pgc"
 
   { ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "create table test_thread ( tstamp timestamp not null default cast ( timeofday ( ) as timestamp ) , thread text not null , iteration integer not null , primary key ( thread , iteration ) )", ECPGt_EOIT, ECPGt_EORT);}
 #line 54 "thread.pgc"
 
-  { ECPGtrans(__LINE__, NULL, "commit");}
+  { ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);}
 #line 55 "thread.pgc"
 
   { ECPGdisconnect(__LINE__, "CURRENT");}
@@ -122,7 +122,7 @@ int main()
 	ECPGt_NO_INDICATOR, NULL , 0L, 0L, 0L, ECPGt_EORT);}
 #line 87 "thread.pgc"
 
-  { ECPGtrans(__LINE__, NULL, "commit");}
+  { ECPGtrans(__LINE__, NULL, "commit", 0, 0, 0, NULL);}
 #line 88 "thread.pgc"
 
   { ECPGdisconnect(__LINE__, "CURRENT");}
@@ -179,7 +179,7 @@ if (sqlca.sqlcode < 0) sqlprint();}
       printf("%s: ERROR: cannot connect to database!\n", l_connection);
       return( NULL );
     }
-  { ECPGtrans(__LINE__, l_connection, "begin");
+  { ECPGtrans(__LINE__, l_connection, "begin", 0, 1, 0, NULL);
 #line 126 "thread.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint();}
@@ -204,7 +204,7 @@ if (sqlca.sqlcode < 0) sqlprint();}
     }
 
   /* all done */
-  { ECPGtrans(__LINE__, l_connection, "commit");
+  { ECPGtrans(__LINE__, l_connection, "commit", 0, 0, 0, NULL);
 #line 137 "thread.pgc"
 
 if (sqlca.sqlcode < 0) sqlprint();}
