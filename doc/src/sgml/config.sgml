@@ -365,10 +365,10 @@ include 'filename'
       </indexterm>
       <listitem>
        <para>
-         Specifies the configuration file for
-         <xref linkend="auth-username-maps"> user name mapping
+         Specifies the configuration file for user name mapping
          (customarily called <filename>pg_ident.conf</>).
          This parameter can only be set at server start.
+         See also <xref linkend="auth-username-maps">.
        </para>
       </listitem>
      </varlistentry>
@@ -677,8 +677,8 @@ include 'filename'
        <para>
         Specifies the number of seconds before sending a keepalive packet on
         an otherwise idle connection.  A value of 0 uses the system default.
-        This parameter is supported only on systems that support the
-        <symbol>TCP_KEEPIDLE</> or <symbol>TCP_KEEPALIVE</> symbols, and on
+        This parameter is supported only on systems that support
+        <symbol>TCP_KEEPIDLE</> or an equivalent socket option, and on
         Windows; on other systems, it must be zero.
         In sessions connected via a Unix-domain socket, this parameter is
         ignored and always reads as zero.
@@ -701,9 +701,9 @@ include 'filename'
        <para>
         Specifies the number of seconds between sending keepalives on an
         otherwise idle connection.  A value of 0 uses the system default.
-        This parameter is supported only on systems that support the
-        <symbol>TCP_KEEPINTVL</> symbol, and on Windows; on other systems, it
-        must be zero.
+        This parameter is supported only on systems that support
+        <symbol>TCP_KEEPINTVL</> or an equivalent socket option, and on
+        Windows; on other systems, it must be zero.
         In sessions connected via a Unix-domain socket, this parameter is
         ignored and always reads as zero.
        </para>
@@ -724,9 +724,10 @@ include 'filename'
       <listitem>
        <para>
         Specifies the number of keepalive packets to send on an otherwise idle
-        connection.  A value of 0 uses the system default.  This parameter is
-        supported only on systems that support the <symbol>TCP_KEEPCNT</>
-        symbol; on other systems, it must be zero.
+        connection.  A value of 0 uses the system default.
+        This parameter is supported only on systems that support
+        <symbol>TCP_KEEPCNT</> or an equivalent socket option;
+        on other systems, it must be zero.
         In sessions connected via a Unix-domain socket, this parameter is
         ignored and always reads as zero.
        </para>
@@ -2901,7 +2902,8 @@ include 'filename'
         used. When setting this parameter you should consider both
         <productname>PostgreSQL</productname>'s shared buffers and the
         portion of the kernel's disk cache that will be used for
-        <productname>PostgreSQL</productname> data files.  Also, take
+        <productname>PostgreSQL</productname> data files, though some
+        data might exist in both places. Also, take
         into account the expected number of concurrent queries on different
         tables, since they will have to share the available
         space.  This parameter has no effect on the size of shared
@@ -4144,6 +4146,7 @@ FROM pg_stat_activity;
         longer than <xref linkend="guc-deadlock-timeout"> to acquire a
         lock.  This is useful in determining if lock waits are causing
         poor performance.  The default is <literal>off</>.
+        Only superusers can change this setting.
        </para>
       </listitem>
      </varlistentry>
@@ -4889,6 +4892,13 @@ COPY postgres_log FROM '/full/path/to/logfile.csv' WITH csv;
        </para>
 
        <para>
+        For more information on schema handling, see
+        <xref linkend="ddl-schemas">.  In particular, the default
+        configuration is suitable only when the database has a single user or
+        a few mutually-trusting users.
+       </para>
+
+       <para>
         The current effective value of the search path can be examined
         via the <acronym>SQL</acronym> function
         <function>current_schemas</>
@@ -4897,10 +4907,6 @@ COPY postgres_log FROM '/full/path/to/logfile.csv' WITH csv;
         examining the value of <varname>search_path</varname>, since
         <function>current_schemas</> shows how the items
         appearing in <varname>search_path</varname> were resolved.
-       </para>
-
-       <para>
-        For more information on schema handling, see <xref linkend="ddl-schemas">.
        </para>
       </listitem>
      </varlistentry>

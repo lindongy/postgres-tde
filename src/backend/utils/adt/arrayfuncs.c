@@ -976,8 +976,8 @@ array_out(PG_FUNCTION_ARGS)
 	int			bitmask;
 	bool	   *needquotes,
 				needdims = false;
+	size_t		overall_length;
 	int			nitems,
-				overall_length,
 				i,
 				j,
 				k,
@@ -1050,7 +1050,7 @@ array_out(PG_FUNCTION_ARGS)
 	 */
 	values = (char **) palloc(nitems * sizeof(char *));
 	needquotes = (bool *) palloc(nitems * sizeof(bool));
-	overall_length = 1;			/* don't forget to count \0 at end. */
+	overall_length = 0;
 
 	p = ARR_DATA_PTR(v);
 	bitmap = ARR_NULLBITMAP(v);
@@ -1105,7 +1105,7 @@ array_out(PG_FUNCTION_ARGS)
 		/* Count the pair of double quotes, if needed */
 		if (needquote)
 			overall_length += 2;
-		/* and the comma */
+		/* and the comma (or other typdelim delimiter) */
 		overall_length += 1;
 
 		/* advance bitmap pointer if any */
@@ -1121,14 +1121,19 @@ array_out(PG_FUNCTION_ARGS)
 	}
 
 	/*
-	 * count total number of curly braces in output string
+	 * The very last array element doesn't have a typdelim delimiter after it,
+	 * but that's OK; that space is needed for the trailing '\0'.
+	 *
+	 * Now count total number of curly brace pairs in output string.
 	 */
 	for (i = j = 0, k = 1; i < ndim; i++)
-		k *= dims[i], j += k;
+	{
+		j += k, k *= dims[i];
+	}
+	overall_length += 2 * j;
 
+	/* Format explicit dimensions if required */
 	dims_str[0] = '\0';
-
-	/* add explicit dimensions if required */
 	if (needdims)
 	{
 		char	   *ptr = dims_str;
@@ -1140,9 +1145,11 @@ array_out(PG_FUNCTION_ARGS)
 		}
 		*ptr++ = *ASSGN;
 		*ptr = '\0';
+		overall_length += ptr - dims_str;
 	}
 
-	retval = (char *) palloc(strlen(dims_str) + overall_length + 2 * j);
+	/* Now construct the output string */
+	retval = (char *) palloc(overall_length);
 	p = retval;
 
 #define APPENDSTR(str)	(strcpy(p, (str)), p += strlen(p))
@@ -1180,20 +1187,25 @@ array_out(PG_FUNCTION_ARGS)
 
 		for (i = ndim - 1; i >= 0; i--)
 		{
-			indx[i] = (indx[i] + 1) % dims[i];
-			if (indx[i])
+			if (++(indx[i]) < dims[i])
 			{
 				APPENDCHAR(typdelim);
 				break;
 			}
 			else
+			{
+				indx[i] = 0;
 				APPENDCHAR('}');
+			}
 		}
 		j = i;
 	} while (j != -1);
 
 #undef APPENDSTR
 #undef APPENDCHAR
+
+	/* Assert that we calculated the string length accurately */
+	Assert(overall_length == (p - retval + 1));
 
 	pfree(values);
 	pfree(needquotes);
@@ -4915,17 +4927,11 @@ array_fill_internal(ArrayType *dims, ArrayType *lbs,
 	/*
 	 * Params checks
 	 */
-	if (ARR_NDIM(dims) != 1)
+	if (ARR_NDIM(dims) > 1)
 		ereport(ERROR,
 				(errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
 				 errmsg("wrong number of array subscripts"),
 				 errdetail("Dimension array must be one dimensional.")));
-
-	if (ARR_LBOUND(dims)[0] != 1)
-		ereport(ERROR,
-				(errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
-				 errmsg("wrong range of array subscripts"),
-				 errdetail("Lower bound of dimension array must be one.")));
 
 	if (array_contains_nulls(dims))
 		ereport(ERROR,
@@ -4933,7 +4939,7 @@ array_fill_internal(ArrayType *dims, ArrayType *lbs,
 				 errmsg("dimension values cannot be null")));
 
 	dimv = (int *) ARR_DATA_PTR(dims);
-	ndims = ARR_DIMS(dims)[0];
+	ndims = (ARR_NDIM(dims) > 0) ? ARR_DIMS(dims)[0] : 0;
 
 	if (ndims < 0)				/* we do allow zero-dimension arrays */
 		ereport(ERROR,
@@ -4947,24 +4953,18 @@ array_fill_internal(ArrayType *dims, ArrayType *lbs,
 
 	if (lbs != NULL)
 	{
-		if (ARR_NDIM(lbs) != 1)
+		if (ARR_NDIM(lbs) > 1)
 			ereport(ERROR,
 					(errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
 					 errmsg("wrong number of array subscripts"),
 					 errdetail("Dimension array must be one dimensional.")));
-
-		if (ARR_LBOUND(lbs)[0] != 1)
-			ereport(ERROR,
-					(errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
-					 errmsg("wrong range of array subscripts"),
-				  errdetail("Lower bound of dimension array must be one.")));
 
 		if (array_contains_nulls(lbs))
 			ereport(ERROR,
 					(errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
 					 errmsg("dimension values cannot be null")));
 
-		if (ARR_DIMS(lbs)[0] != ndims)
+		if (ndims != ((ARR_NDIM(lbs) > 0) ? ARR_DIMS(lbs)[0] : 0))
 			ereport(ERROR,
 					(errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
 					 errmsg("wrong number of array subscripts"),
@@ -4982,11 +4982,11 @@ array_fill_internal(ArrayType *dims, ArrayType *lbs,
 		lbsv = deflbs;
 	}
 
-	/* fast track for empty array */
-	if (ndims == 0)
-		return construct_empty_array(elmtype);
-
 	nitems = ArrayGetNItems(ndims, dimv);
+
+	/* fast track for empty array */
+	if (nitems <= 0)
+		return construct_empty_array(elmtype);
 
 	/*
 	 * We arrange to look up info about element type only once per series of

@@ -46,7 +46,7 @@ array_boundary(enum ARRAY_TYPE isarray, char c)
 
 /* returns true if some garbage is found at the end of the scanned string */
 static bool
-garbage_left(enum ARRAY_TYPE isarray, char *scan_length, enum COMPAT_MODE compat)
+garbage_left(enum ARRAY_TYPE isarray, char **scan_length, enum COMPAT_MODE compat)
 {
 	/*
 	 * INFORMIX allows for selecting a numeric into an int, the result is
@@ -54,13 +54,18 @@ garbage_left(enum ARRAY_TYPE isarray, char *scan_length, enum COMPAT_MODE compat
 	 */
 	if (isarray == ECPG_ARRAY_NONE)
 	{
-		if (INFORMIX_MODE(compat) && *scan_length == '.')
-			return false;
+		if (INFORMIX_MODE(compat) && **scan_length == '.')
+		{
+			/* skip invalid characters */
+			do {
+				(*scan_length)++;
+			} while (isdigit((unsigned char) **scan_length));
+		}
 
-		if (*scan_length != ' ' && *scan_length != '\0')
+		if (**scan_length != ' ' && **scan_length != '\0')
 			return true;
 	}
-	else if (ECPG_IS_ARRAY(isarray) && !array_delimiter(isarray, *scan_length) && !array_boundary(isarray, *scan_length))
+	else if (ECPG_IS_ARRAY(isarray) && !array_delimiter(isarray, **scan_length) && !array_boundary(isarray, **scan_length))
 		return true;
 
 	return false;
@@ -331,7 +336,7 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int var_ind
 				case ECPGt_int:
 				case ECPGt_long:
 					res = strtol(pval, &scan_length, 10);
-					if (garbage_left(isarray, scan_length, compat))
+					if (garbage_left(isarray, &scan_length, compat))
 					{
 						ecpg_raise(lineno, ECPG_INT_FORMAT,
 								   ECPG_SQLSTATE_DATATYPE_MISMATCH, pval);
@@ -360,7 +365,7 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int var_ind
 				case ECPGt_unsigned_int:
 				case ECPGt_unsigned_long:
 					ures = strtoul(pval, &scan_length, 10);
-					if (garbage_left(isarray, scan_length, compat))
+					if (garbage_left(isarray, &scan_length, compat))
 					{
 						ecpg_raise(lineno, ECPG_UINT_FORMAT,
 								   ECPG_SQLSTATE_DATATYPE_MISMATCH, pval);
@@ -388,8 +393,8 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int var_ind
 #ifdef HAVE_LONG_LONG_INT
 #ifdef HAVE_STRTOLL
 				case ECPGt_long_long:
-					*((long long int *) (var + offset * var_index)) = strtoll(pval, &scan_length, 10);
-					if (garbage_left(isarray, scan_length, compat))
+					*((long long int *) (var + offset * act_tuple)) = strtoll(pval, &scan_length, 10);
+					if (garbage_left(isarray, &scan_length, compat))
 					{
 						ecpg_raise(lineno, ECPG_INT_FORMAT, ECPG_SQLSTATE_DATATYPE_MISMATCH, pval);
 						return (false);
@@ -400,9 +405,8 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int var_ind
 #endif   /* HAVE_STRTOLL */
 #ifdef HAVE_STRTOULL
 				case ECPGt_unsigned_long_long:
-					*((unsigned long long int *) (var + offset * var_index)) = strtoull(pval, &scan_length, 10);
-					if ((isarray && *scan_length != ',' && *scan_length != '}')
-						|| (!isarray && !(INFORMIX_MODE(compat) && *scan_length == '.') && *scan_length != '\0' && *scan_length != ' '))		/* Garbage left */
+					*((unsigned long long int *) (var + offset * act_tuple)) = strtoull(pval, &scan_length, 10);
+					if (garbage_left(isarray, &scan_length, compat))
 					{
 						ecpg_raise(lineno, ECPG_UINT_FORMAT, ECPG_SQLSTATE_DATATYPE_MISMATCH, pval);
 						return (false);
@@ -424,7 +428,8 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int var_ind
 					if (isarray && *scan_length == '"')
 						scan_length++;
 
-					if (garbage_left(isarray, scan_length, compat))
+					/* no special INFORMIX treatment for floats */
+					if (garbage_left(isarray, &scan_length, ECPG_COMPAT_PGSQL))
 					{
 						ecpg_raise(lineno, ECPG_FLOAT_FORMAT,
 								   ECPG_SQLSTATE_DATATYPE_MISMATCH, pval);
@@ -622,7 +627,7 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int var_ind
 					}
 					else
 					{
-						if (!isarray && garbage_left(isarray, scan_length, compat))
+						if (!isarray && garbage_left(isarray, &scan_length, compat))
 						{
 							free(nres);
 							ecpg_raise(lineno, ECPG_NUMERIC_FORMAT,
@@ -680,7 +685,7 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int var_ind
 						if (*scan_length == '"')
 							scan_length++;
 
-						if (!isarray && garbage_left(isarray, scan_length, compat))
+						if (!isarray && garbage_left(isarray, &scan_length, compat))
 						{
 							free(ires);
 							ecpg_raise(lineno, ECPG_INTERVAL_FORMAT,
@@ -730,7 +735,7 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int var_ind
 						if (*scan_length == '"')
 							scan_length++;
 
-						if (!isarray && garbage_left(isarray, scan_length, compat))
+						if (!isarray && garbage_left(isarray, &scan_length, compat))
 						{
 							ecpg_raise(lineno, ECPG_DATE_FORMAT,
 									   ECPG_SQLSTATE_DATATYPE_MISMATCH, pval);
@@ -778,7 +783,7 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int var_ind
 						if (*scan_length == '"')
 							scan_length++;
 
-						if (!isarray && garbage_left(isarray, scan_length, compat))
+						if (!isarray && garbage_left(isarray, &scan_length, compat))
 						{
 							ecpg_raise(lineno, ECPG_TIMESTAMP_FORMAT,
 									   ECPG_SQLSTATE_DATATYPE_MISMATCH, pval);

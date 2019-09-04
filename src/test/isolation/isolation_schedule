@@ -1,3 +1,7 @@
+test: read-write-unique
+test: read-write-unique-2
+test: read-write-unique-3
+test: read-write-unique-4
 test: simple-write-skew
 test: receipt-report
 test: temporal-range-integrity
@@ -21,7 +25,12 @@ test: delete-abort-savept-2
 test: aborted-keyrevoke
 test: multixact-no-deadlock
 test: multixact-no-forget
+test: lock-committed-update
+test: lock-committed-keyupdate
+test: update-locked-tuple
 test: propagate-lock-delete
 test: tuplelock-conflict
+test: freeze-the-dead
 test: drop-index-concurrently-1
+test: alter-table-4
 test: timeouts

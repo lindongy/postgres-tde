@@ -66,7 +66,7 @@
 #ifdef USE_SSL
 #include <openssl/ssl.h>
 #include <openssl/dh.h>
-#if SSLEAY_VERSION_NUMBER >= 0x0907000L
+#if OPENSSL_VERSION_NUMBER >= 0x0907000L
 #include <openssl/conf.h>
 #endif
 #endif   /* USE_SSL */
@@ -80,13 +80,14 @@
 
 static DH  *load_dh_file(int keylength);
 static DH  *load_dh_buffer(const char *, size_t);
+static DH  *generate_dh_parameters(int prime_len, int generator);
 static DH  *tmp_dh_cb(SSL *s, int is_export, int keylength);
 static int	verify_cb(int, X509_STORE_CTX *);
 static void info_cb(const SSL *ssl, int type, int args);
 static void initialize_SSL(void);
 static int	open_server_SSL(Port *);
 static void close_SSL(Port *);
-static const char *SSLerrmessage(void);
+static const char *SSLerrmessage(unsigned long ecode);
 #endif
 
 char	   *ssl_cert_file;
@@ -102,6 +103,9 @@ char	   *ssl_crl_file;
 int			ssl_renegotiation_limit;
 
 #ifdef USE_SSL
+/* are we in the middle of a renegotiation? */
+static bool in_ssl_renegotiation = false;
+
 static SSL_CTX *SSL_context = NULL;
 static bool ssl_loaded_verify_locations = false;
 #endif
@@ -245,11 +249,14 @@ secure_read(Port *port, void *ptr, size_t len)
 	if (port->ssl)
 	{
 		int			err;
+		unsigned long ecode;
 
 rloop:
 		errno = 0;
+		ERR_clear_error();
 		n = SSL_read(port->ssl, ptr, len);
 		err = SSL_get_error(port->ssl, n);
+		ecode = (err != SSL_ERROR_NONE || n < 0) ? ERR_get_error() : 0;
 		switch (err)
 		{
 			case SSL_ERROR_NONE:
@@ -281,17 +288,20 @@ rloop:
 			case SSL_ERROR_SSL:
 				ereport(COMMERROR,
 						(errcode(ERRCODE_PROTOCOL_VIOLATION),
-						 errmsg("SSL error: %s", SSLerrmessage())));
-				/* fall through */
-			case SSL_ERROR_ZERO_RETURN:
+						 errmsg("SSL error: %s", SSLerrmessage(ecode))));
 				errno = ECONNRESET;
 				n = -1;
+				break;
+			case SSL_ERROR_ZERO_RETURN:
+				/* connection was cleanly shut down by peer */
+				n = 0;
 				break;
 			default:
 				ereport(COMMERROR,
 						(errcode(ERRCODE_PROTOCOL_VIOLATION),
 						 errmsg("unrecognized SSL error code: %d",
 								err)));
+				errno = ECONNRESET;
 				n = -1;
 				break;
 		}
@@ -321,36 +331,65 @@ secure_write(Port *port, void *ptr, size_t len)
 	if (port->ssl)
 	{
 		int			err;
+		unsigned long ecode;
 
-		if (ssl_renegotiation_limit && port->count > ssl_renegotiation_limit * 1024L)
+		/*
+		 * If SSL renegotiations are enabled and we're getting close to the
+		 * limit, start one now; but avoid it if there's one already in
+		 * progress.  Request the renegotiation 1kB before the limit has
+		 * actually expired.
+		 */
+		if (ssl_renegotiation_limit && !in_ssl_renegotiation &&
+			port->count > (ssl_renegotiation_limit - 1) * 1024L)
 		{
+			in_ssl_renegotiation = true;
+
+			/*
+			 * The way we determine that a renegotiation has completed is by
+			 * observing OpenSSL's internal renegotiation counter.  Make sure
+			 * we start out at zero, and assume that the renegotiation is
+			 * complete when the counter advances.
+			 *
+			 * OpenSSL provides SSL_renegotiation_pending(), but this doesn't
+			 * seem to work in testing.
+			 */
+			SSL_clear_num_renegotiations(port->ssl);
+
 			SSL_set_session_id_context(port->ssl, (void *) &SSL_context,
 									   sizeof(SSL_context));
 			if (SSL_renegotiate(port->ssl) <= 0)
 				ereport(COMMERROR,
 						(errcode(ERRCODE_PROTOCOL_VIOLATION),
-						 errmsg("SSL renegotiation failure")));
-			if (SSL_do_handshake(port->ssl) <= 0)
-				ereport(COMMERROR,
-						(errcode(ERRCODE_PROTOCOL_VIOLATION),
-						 errmsg("SSL renegotiation failure")));
-			if (port->ssl->state != SSL_ST_OK)
-				ereport(COMMERROR,
-						(errcode(ERRCODE_PROTOCOL_VIOLATION),
-						 errmsg("SSL failed to send renegotiation request")));
-			port->ssl->state |= SSL_ST_ACCEPT;
-			SSL_do_handshake(port->ssl);
-			if (port->ssl->state != SSL_ST_OK)
-				ereport(COMMERROR,
-						(errcode(ERRCODE_PROTOCOL_VIOLATION),
-						 errmsg("SSL renegotiation failure")));
-			port->count = 0;
+						 errmsg("SSL failure during renegotiation start")));
+			else
+			{
+				int			retries;
+
+				/*
+				 * A handshake can fail, so be prepared to retry it, but only
+				 * a few times.
+				 */
+				for (retries = 0;; retries++)
+				{
+					if (SSL_do_handshake(port->ssl) > 0)
+						break;	/* done */
+					ereport(COMMERROR,
+							(errcode(ERRCODE_PROTOCOL_VIOLATION),
+							 errmsg("SSL handshake failure on renegotiation, retrying")));
+					if (retries >= 20)
+						ereport(FATAL,
+								(errcode(ERRCODE_PROTOCOL_VIOLATION),
+								 errmsg("could not complete SSL handshake on renegotiation, too many failures")));
+				}
+			}
 		}
 
 wloop:
 		errno = 0;
+		ERR_clear_error();
 		n = SSL_write(port->ssl, ptr, len);
 		err = SSL_get_error(port->ssl, n);
+		ecode = (err != SSL_ERROR_NONE || n < 0) ? ERR_get_error() : 0;
 		switch (err)
 		{
 			case SSL_ERROR_NONE:
@@ -376,9 +415,15 @@ wloop:
 			case SSL_ERROR_SSL:
 				ereport(COMMERROR,
 						(errcode(ERRCODE_PROTOCOL_VIOLATION),
-						 errmsg("SSL error: %s", SSLerrmessage())));
-				/* fall through */
+						 errmsg("SSL error: %s", SSLerrmessage(ecode))));
+				errno = ECONNRESET;
+				n = -1;
+				break;
 			case SSL_ERROR_ZERO_RETURN:
+				/*
+				 * the SSL connnection was closed, leave it to the caller
+				 * to ereport it
+				 */
 				errno = ECONNRESET;
 				n = -1;
 				break;
@@ -387,8 +432,31 @@ wloop:
 						(errcode(ERRCODE_PROTOCOL_VIOLATION),
 						 errmsg("unrecognized SSL error code: %d",
 								err)));
+				errno = ECONNRESET;
 				n = -1;
 				break;
+		}
+
+		if (n >= 0)
+		{
+			/* is renegotiation complete? */
+			if (in_ssl_renegotiation &&
+				SSL_num_renegotiations(port->ssl) >= 1)
+			{
+				in_ssl_renegotiation = false;
+				port->count = 0;
+			}
+
+			/*
+			 * if renegotiation is still ongoing, and we've gone beyond the
+			 * limit, kill the connection now -- continuing to use it can be
+			 * considered a security problem.
+			 */
+			if (in_ssl_renegotiation &&
+				port->count > ssl_renegotiation_limit * 1024L)
+				ereport(FATAL,
+						(errcode(ERRCODE_PROTOCOL_VIOLATION),
+						 errmsg("SSL failed to renegotiate connection before limit expired")));
 		}
 	}
 	else
@@ -417,8 +485,7 @@ wloop:
  * to retry; do we need to adopt their logic for that?
  */
 
-static bool my_bio_initialized = false;
-static BIO_METHOD my_bio_methods;
+static BIO_METHOD *my_bio_methods = NULL;
 
 static int
 my_sock_read(BIO *h, char *buf, int size)
@@ -429,7 +496,7 @@ my_sock_read(BIO *h, char *buf, int size)
 
 	if (buf != NULL)
 	{
-		res = recv(h->num, buf, size, 0);
+		res = recv(BIO_get_fd(h, NULL), buf, size, 0);
 		BIO_clear_retry_flags(h);
 		if (res <= 0)
 		{
@@ -451,7 +518,7 @@ my_sock_write(BIO *h, const char *buf, int size)
 {
 	int			res = 0;
 
-	res = send(h->num, buf, size, 0);
+	res = send(BIO_get_fd(h, NULL), buf, size, 0);
 	BIO_clear_retry_flags(h);
 	if (res <= 0)
 	{
@@ -467,14 +534,41 @@ my_sock_write(BIO *h, const char *buf, int size)
 static BIO_METHOD *
 my_BIO_s_socket(void)
 {
-	if (!my_bio_initialized)
+	if (!my_bio_methods)
 	{
-		memcpy(&my_bio_methods, BIO_s_socket(), sizeof(BIO_METHOD));
-		my_bio_methods.bread = my_sock_read;
-		my_bio_methods.bwrite = my_sock_write;
-		my_bio_initialized = true;
+		BIO_METHOD *biom = (BIO_METHOD *) BIO_s_socket();
+#ifdef HAVE_BIO_METH_NEW
+		int			my_bio_index;
+
+		my_bio_index = BIO_get_new_index();
+		if (my_bio_index == -1)
+			return NULL;
+		my_bio_methods = BIO_meth_new(my_bio_index, "PostgreSQL backend socket");
+		if (!my_bio_methods)
+			return NULL;
+		if (!BIO_meth_set_write(my_bio_methods, my_sock_write) ||
+			!BIO_meth_set_read(my_bio_methods, my_sock_read) ||
+			!BIO_meth_set_gets(my_bio_methods, BIO_meth_get_gets(biom)) ||
+			!BIO_meth_set_puts(my_bio_methods, BIO_meth_get_puts(biom)) ||
+			!BIO_meth_set_ctrl(my_bio_methods, BIO_meth_get_ctrl(biom)) ||
+			!BIO_meth_set_create(my_bio_methods, BIO_meth_get_create(biom)) ||
+			!BIO_meth_set_destroy(my_bio_methods, BIO_meth_get_destroy(biom)) ||
+			!BIO_meth_set_callback_ctrl(my_bio_methods, BIO_meth_get_callback_ctrl(biom)))
+		{
+			BIO_meth_free(my_bio_methods);
+			my_bio_methods = NULL;
+			return NULL;
+		}
+#else
+		my_bio_methods = malloc(sizeof(BIO_METHOD));
+		if (!my_bio_methods)
+			return NULL;
+		memcpy(my_bio_methods, biom, sizeof(BIO_METHOD));
+		my_bio_methods->bread = my_sock_read;
+		my_bio_methods->bwrite = my_sock_write;
+#endif
 	}
-	return &my_bio_methods;
+	return my_bio_methods;
 }
 
 /* This should exactly match openssl's SSL_set_fd except for using my BIO */
@@ -482,9 +576,16 @@ static int
 my_SSL_set_fd(SSL *s, int fd)
 {
 	int			ret = 0;
-	BIO		   *bio = NULL;
+	BIO		   *bio;
+	BIO_METHOD *bio_method;
 
-	bio = BIO_new(my_BIO_s_socket());
+	bio_method = my_BIO_s_socket();
+	if (bio_method == NULL)
+	{
+		SSLerr(SSL_F_SSL_SET_FD, ERR_R_BUF_LIB);
+		goto err;
+	}
+	bio = BIO_new(bio_method);
 
 	if (bio == NULL)
 	{
@@ -536,7 +637,8 @@ load_dh_file(int keylength)
 	{
 		if (DH_check(dh, &codes) == 0)
 		{
-			elog(LOG, "DH_check error (%s): %s", fnbuf, SSLerrmessage());
+			elog(LOG, "DH_check error (%s): %s", fnbuf,
+				 SSLerrmessage(ERR_get_error()));
 			return NULL;
 		}
 		if (codes & DH_CHECK_P_NOT_PRIME)
@@ -576,10 +678,35 @@ load_dh_buffer(const char *buffer, size_t len)
 	if (dh == NULL)
 		ereport(DEBUG2,
 				(errmsg_internal("DH load buffer: %s",
-								 SSLerrmessage())));
+								 SSLerrmessage(ERR_get_error()))));
 	BIO_free(bio);
 
 	return dh;
+}
+
+/*
+ *	Generate DH parameters.
+ *
+ *	Last resort if we can't load precomputed nor hardcoded
+ *	parameters.
+ */
+static DH  *
+generate_dh_parameters(int prime_len, int generator)
+{
+#if (OPENSSL_VERSION_NUMBER >= 0x0090800fL)
+	DH		   *dh;
+
+	if ((dh = DH_new()) == NULL)
+		return NULL;
+
+	if (DH_generate_parameters_ex(dh, prime_len, generator, NULL))
+		return dh;
+
+	DH_free(dh);
+	return NULL;
+#else
+	return DH_generate_parameters(prime_len, generator, NULL, NULL);
+#endif
 }
 
 /*
@@ -651,7 +778,7 @@ tmp_dh_cb(SSL *s, int is_export, int keylength)
 		ereport(DEBUG2,
 				(errmsg_internal("DH: generating parameters (%d bits)",
 								 keylength)));
-		r = DH_generate_parameters(keylength, DH_GENERATOR_2, NULL, NULL);
+		r = generate_dh_parameters(keylength, DH_GENERATOR_2);
 	}
 
 	return r;
@@ -730,11 +857,15 @@ initialize_SSL(void)
 
 	if (!SSL_context)
 	{
+#ifdef HAVE_OPENSSL_INIT_SSL
+		OPENSSL_init_ssl(OPENSSL_INIT_LOAD_CONFIG, NULL);
+#else
 #if SSLEAY_VERSION_NUMBER >= 0x0907000L
 		OPENSSL_config(NULL);
 #endif
 		SSL_library_init();
 		SSL_load_error_strings();
+#endif
 
 		/*
 		 * We use SSLv23_method() because it can negotiate use of the highest
@@ -746,7 +877,7 @@ initialize_SSL(void)
 		if (!SSL_context)
 			ereport(FATAL,
 					(errmsg("could not create SSL context: %s",
-							SSLerrmessage())));
+							SSLerrmessage(ERR_get_error()))));
 
 		/*
 		 * Disable OpenSSL's moving-write-buffer sanity check, because it
@@ -762,7 +893,7 @@ initialize_SSL(void)
 			ereport(FATAL,
 					(errcode(ERRCODE_CONFIG_FILE_ERROR),
 				  errmsg("could not load server certificate file \"%s\": %s",
-						 ssl_cert_file, SSLerrmessage())));
+						 ssl_cert_file, SSLerrmessage(ERR_get_error()))));
 
 		if (stat(ssl_key_file, &buf) != 0)
 			ereport(FATAL,
@@ -792,17 +923,25 @@ initialize_SSL(void)
 										SSL_FILETYPE_PEM) != 1)
 			ereport(FATAL,
 					(errmsg("could not load private key file \"%s\": %s",
-							ssl_key_file, SSLerrmessage())));
+							ssl_key_file, SSLerrmessage(ERR_get_error()))));
 
 		if (SSL_CTX_check_private_key(SSL_context) != 1)
 			ereport(FATAL,
 					(errmsg("check of private key failed: %s",
-							SSLerrmessage())));
+							SSLerrmessage(ERR_get_error()))));
 	}
 
 	/* set up ephemeral DH keys, and disallow SSL v2 while at it */
 	SSL_CTX_set_tmp_dh_callback(SSL_context, tmp_dh_cb);
 	SSL_CTX_set_options(SSL_context, SSL_OP_SINGLE_DH_USE | SSL_OP_NO_SSLv2);
+
+	/* disallow SSL session tickets */
+#ifdef SSL_OP_NO_TICKET			/* added in openssl 0.9.8f */
+	SSL_CTX_set_options(SSL_context, SSL_OP_NO_TICKET);
+#endif
+
+	/* disallow SSL session caching, too */
+	SSL_CTX_set_session_cache_mode(SSL_context, SSL_SESS_CACHE_OFF);
 
 	/* set up the allowed cipher list */
 	if (SSL_CTX_set_cipher_list(SSL_context, SSLCipherSuites) != 1)
@@ -817,7 +956,7 @@ initialize_SSL(void)
 			(root_cert_list = SSL_load_client_CA_file(ssl_ca_file)) == NULL)
 			ereport(FATAL,
 					(errmsg("could not load root certificate file \"%s\": %s",
-							ssl_ca_file, SSLerrmessage())));
+							ssl_ca_file, SSLerrmessage(ERR_get_error()))));
 	}
 
 	/*----------
@@ -848,7 +987,7 @@ initialize_SSL(void)
 			else
 				ereport(FATAL,
 						(errmsg("could not load SSL certificate revocation list file \"%s\": %s",
-								ssl_crl_file, SSLerrmessage())));
+								ssl_crl_file, SSLerrmessage(ERR_get_error()))));
 		}
 	}
 
@@ -884,6 +1023,7 @@ open_server_SSL(Port *port)
 {
 	int			r;
 	int			err;
+	unsigned long ecode;
 
 	Assert(!port->ssl);
 	Assert(!port->peer);
@@ -893,7 +1033,7 @@ open_server_SSL(Port *port)
 		ereport(COMMERROR,
 				(errcode(ERRCODE_PROTOCOL_VIOLATION),
 				 errmsg("could not initialize SSL connection: %s",
-						SSLerrmessage())));
+						SSLerrmessage(ERR_get_error()))));
 		return -1;
 	}
 	if (!my_SSL_set_fd(port->ssl, port->sock))
@@ -901,15 +1041,35 @@ open_server_SSL(Port *port)
 		ereport(COMMERROR,
 				(errcode(ERRCODE_PROTOCOL_VIOLATION),
 				 errmsg("could not set SSL socket: %s",
-						SSLerrmessage())));
+						SSLerrmessage(ERR_get_error()))));
 		return -1;
 	}
 
 aloop:
+	/*
+	 * Prepare to call SSL_get_error() by clearing thread's OpenSSL error
+	 * queue.  In general, the current thread's error queue must be empty
+	 * before the TLS/SSL I/O operation is attempted, or SSL_get_error()
+	 * will not work reliably.  An extension may have failed to clear the
+	 * per-thread error queue following another call to an OpenSSL I/O
+	 * routine.
+	 */
+	ERR_clear_error();
 	r = SSL_accept(port->ssl);
 	if (r <= 0)
 	{
 		err = SSL_get_error(port->ssl, r);
+
+		/*
+		 * Other clients of OpenSSL in the backend may fail to call
+		 * ERR_get_error(), but we always do, so as to not cause problems
+		 * for OpenSSL clients that don't call ERR_clear_error()
+		 * defensively.  Be sure that this happens by calling now.
+		 * SSL_get_error() relies on the OpenSSL per-thread error queue
+		 * being intact, so this is the earliest possible point
+		 * ERR_get_error() may be called.
+		 */
+		ecode = ERR_get_error();
 		switch (err)
 		{
 			case SSL_ERROR_WANT_READ:
@@ -935,7 +1095,7 @@ aloop:
 				ereport(COMMERROR,
 						(errcode(ERRCODE_PROTOCOL_VIOLATION),
 						 errmsg("could not accept SSL connection: %s",
-								SSLerrmessage())));
+								SSLerrmessage(ecode))));
 				break;
 			case SSL_ERROR_ZERO_RETURN:
 				ereport(COMMERROR,
@@ -1036,24 +1196,24 @@ close_SSL(Port *port)
 /*
  * Obtain reason string for last SSL error
  *
+ * ERR_get_error() is used by caller to get errcode to pass here.
+ *
  * Some caution is needed here since ERR_reason_error_string will
  * return NULL if it doesn't recognize the error code.  We don't
  * want to return NULL ever.
  */
 static const char *
-SSLerrmessage(void)
+SSLerrmessage(unsigned long ecode)
 {
-	unsigned long errcode;
 	const char *errreason;
 	static char errbuf[32];
 
-	errcode = ERR_get_error();
-	if (errcode == 0)
+	if (ecode == 0)
 		return _("no SSL error reported");
-	errreason = ERR_reason_error_string(errcode);
+	errreason = ERR_reason_error_string(ecode);
 	if (errreason != NULL)
 		return errreason;
-	snprintf(errbuf, sizeof(errbuf), _("SSL error code %lu"), errcode);
+	snprintf(errbuf, sizeof(errbuf), _("SSL error code %lu"), ecode);
 	return errbuf;
 }
 

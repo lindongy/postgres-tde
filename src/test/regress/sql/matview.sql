@@ -113,18 +113,6 @@ SELECT relispopulated FROM pg_class WHERE oid = 'mv_test3'::regclass;
 
 DROP VIEW v_test1 CASCADE;
 
--- test that vacuum does not make empty matview look unpopulated
-CREATE TABLE hoge (i int);
-INSERT INTO hoge VALUES (generate_series(1,100000));
-CREATE MATERIALIZED VIEW hogeview AS SELECT * FROM hoge WHERE i % 2 = 0;
-CREATE INDEX hogeviewidx ON hogeview (i);
-DELETE FROM hoge;
-REFRESH MATERIALIZED VIEW hogeview;
-SELECT * FROM hogeview WHERE i < 10;
-VACUUM ANALYZE hogeview;
-SELECT * FROM hogeview WHERE i < 10;
-DROP TABLE hoge CASCADE;
-
 -- allow subquery to reference unpopulated matview if WITH NO DATA is specified
 CREATE MATERIALIZED VIEW mv1 AS SELECT 1 AS col1 WITH NO DATA;
 CREATE MATERIALIZED VIEW mv2 AS SELECT * FROM mv1
@@ -132,15 +120,32 @@ CREATE MATERIALIZED VIEW mv2 AS SELECT * FROM mv1
 DROP MATERIALIZED VIEW mv1 CASCADE;
 
 -- make sure that column names are handled correctly
-CREATE TABLE v (i int, j int);
-CREATE MATERIALIZED VIEW mv_v (ii) AS SELECT i, j AS jj FROM v;
-ALTER TABLE v RENAME COLUMN i TO x;
-INSERT INTO v values (1, 2);
-CREATE UNIQUE INDEX mv_v_ii ON mv_v (ii);
-REFRESH MATERIALIZED VIEW mv_v;
-SELECT * FROM v;
-SELECT * FROM mv_v;
-DROP TABLE v CASCADE;
+CREATE TABLE mvtest_v (i int, j int);
+CREATE MATERIALIZED VIEW mvtest_mv_v (ii, jj, kk) AS SELECT i, j FROM mvtest_v; -- error
+CREATE MATERIALIZED VIEW mvtest_mv_v (ii, jj) AS SELECT i, j FROM mvtest_v; -- ok
+CREATE MATERIALIZED VIEW mvtest_mv_v_2 (ii) AS SELECT i, j FROM mvtest_v; -- ok
+CREATE MATERIALIZED VIEW mvtest_mv_v_3 (ii, jj, kk) AS SELECT i, j FROM mvtest_v WITH NO DATA; -- error
+CREATE MATERIALIZED VIEW mvtest_mv_v_3 (ii, jj) AS SELECT i, j FROM mvtest_v WITH NO DATA; -- ok
+CREATE MATERIALIZED VIEW mvtest_mv_v_4 (ii) AS SELECT i, j FROM mvtest_v WITH NO DATA; -- ok
+ALTER TABLE mvtest_v RENAME COLUMN i TO x;
+INSERT INTO mvtest_v values (1, 2);
+CREATE UNIQUE INDEX mvtest_mv_v_ii ON mvtest_mv_v (ii);
+REFRESH MATERIALIZED VIEW mvtest_mv_v;
+REFRESH MATERIALIZED VIEW mvtest_mv_v_2;
+REFRESH MATERIALIZED VIEW mvtest_mv_v_3;
+REFRESH MATERIALIZED VIEW mvtest_mv_v_4;
+SELECT * FROM mvtest_v;
+SELECT * FROM mvtest_mv_v;
+SELECT * FROM mvtest_mv_v_2;
+SELECT * FROM mvtest_mv_v_3;
+SELECT * FROM mvtest_mv_v_4;
+DROP TABLE mvtest_v CASCADE;
+
+-- make sure that create WITH NO DATA does not plan the query (bug #13907)
+create materialized view mvtest_error as select 1/0 as x;  -- fail
+create materialized view mvtest_error as select 1/0 as x with no data;
+refresh materialized view mvtest_error;  -- fail here
+drop materialized view mvtest_error;
 
 -- make sure that matview rows can be referenced as source rows (bug #9398)
 CREATE TABLE v AS SELECT generate_series(1,10) AS a;
@@ -149,3 +154,17 @@ DELETE FROM v WHERE EXISTS ( SELECT * FROM mv_v WHERE mv_v.a = v.a );
 SELECT * FROM v;
 SELECT * FROM mv_v;
 DROP TABLE v CASCADE;
+
+-- make sure that create WITH NO DATA works via SPI
+BEGIN;
+CREATE FUNCTION mvtest_func()
+  RETURNS void AS $$
+BEGIN
+  CREATE MATERIALIZED VIEW mvtest1 AS SELECT 1 AS x;
+  CREATE MATERIALIZED VIEW mvtest2 AS SELECT 1 AS x WITH NO DATA;
+END;
+$$ LANGUAGE plpgsql;
+SELECT mvtest_func();
+SELECT * FROM mvtest1;
+SELECT * FROM mvtest2;
+ROLLBACK;

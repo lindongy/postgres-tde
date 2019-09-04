@@ -829,7 +829,7 @@ END;
   </para>
 
   <para>
-   Here is example outputs:
+   Here is example output:
 <screen>
 1345828501 5601 1542744 483552416 61 2573
 1345828503 7884 1979812 565806736 60 1479
@@ -839,8 +839,8 @@ END;
 </screen></para>
 
   <para>
-   Notice that while the plain (unaggregated) log file contains index
-   of the custom script files, the aggregated log does not. Therefore if
+   Notice that while the plain (unaggregated) log file contains a reference
+   to the custom script files, the aggregated log does not. Therefore if
    you need per script data, you need to aggregate the data on your own.
   </para>
 
@@ -948,6 +948,17 @@ statement latencies in milliseconds:
    essential.  It might even be useful to run several <application>pgbench</>
    instances concurrently, on several client machines, against the same
    database server.
+  </para>
+ </refsect2>
+ <refsect2>
+  <title>Security</title>
+
+  <para>
+    If untrusted users have access to a database that has not adopted a
+    <link linkend="ddl-schemas-patterns">secure schema usage pattern</link>,
+    do not run <application>pgbench</application> in that
+    database.  <application>pgbench</application> uses unqualified names and
+    does not manipulate the search path.
   </para>
  </refsect2>
  </refsect1>

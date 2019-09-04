@@ -629,10 +629,10 @@ sort_inner_and_outer(PlannerInfo *root,
 			outerkeys = all_pathkeys;	/* no work at first one... */
 
 		/* Sort the mergeclauses into the corresponding ordering */
-		cur_mergeclauses = find_mergeclauses_for_pathkeys(root,
-														  outerkeys,
-														  true,
-														  mergeclause_list);
+		cur_mergeclauses =
+			find_mergeclauses_for_outer_pathkeys(root,
+												 outerkeys,
+												 mergeclause_list);
 
 		/* Should have used them all... */
 		Assert(list_length(cur_mergeclauses) == list_length(mergeclause_list));
@@ -898,10 +898,10 @@ match_unsorted_outer(PlannerInfo *root,
 			continue;
 
 		/* Look for useful mergeclauses (if any) */
-		mergeclauses = find_mergeclauses_for_pathkeys(root,
-													  outerpath->pathkeys,
-													  true,
-													  mergeclause_list);
+		mergeclauses =
+			find_mergeclauses_for_outer_pathkeys(root,
+												 outerpath->pathkeys,
+												 mergeclause_list);
 
 		/*
 		 * Done with this outer path if no chance for a mergejoin.
@@ -1023,10 +1023,9 @@ match_unsorted_outer(PlannerInfo *root,
 				if (sortkeycnt < num_sortkeys)
 				{
 					newclauses =
-						find_mergeclauses_for_pathkeys(root,
-													   trialsortkeys,
-													   false,
-													   mergeclauses);
+						trim_mergeclauses_for_inner_pathkeys(root,
+															 mergeclauses,
+															 trialsortkeys);
 					Assert(newclauses != NIL);
 				}
 				else
@@ -1067,10 +1066,9 @@ match_unsorted_outer(PlannerInfo *root,
 						if (sortkeycnt < num_sortkeys)
 						{
 							newclauses =
-								find_mergeclauses_for_pathkeys(root,
-															   trialsortkeys,
-															   false,
-															   mergeclauses);
+								trim_mergeclauses_for_inner_pathkeys(root,
+																mergeclauses,
+															  trialsortkeys);
 							Assert(newclauses != NIL);
 						}
 						else
@@ -1147,7 +1145,7 @@ hash_inner_and_outer(PlannerInfo *root,
 		 * If processing an outer join, only use its own join clauses for
 		 * hashing.  For inner joins we need not be so picky.
 		 */
-		if (isouterjoin && restrictinfo->is_pushed_down)
+		if (isouterjoin && RINFO_IS_PUSHED_DOWN(restrictinfo, joinrel->relids))
 			continue;
 
 		if (!restrictinfo->can_join ||
@@ -1347,7 +1345,7 @@ select_mergejoin_clauses(PlannerInfo *root,
 		 * we don't set have_nonmergeable_joinclause here because pushed-down
 		 * clauses will become otherquals not joinquals.)
 		 */
-		if (isouterjoin && restrictinfo->is_pushed_down)
+		if (isouterjoin && RINFO_IS_PUSHED_DOWN(restrictinfo, joinrel->relids))
 			continue;
 
 		/* Check that clause is a mergeable operator clause */
@@ -1377,7 +1375,7 @@ select_mergejoin_clauses(PlannerInfo *root,
 		/*
 		 * Insist that each side have a non-redundant eclass.  This
 		 * restriction is needed because various bits of the planner expect
-		 * that each clause in a merge be associatable with some pathkey in a
+		 * that each clause in a merge be associable with some pathkey in a
 		 * canonical pathkey list, but redundant eclasses can't appear in
 		 * canonical sort orderings.  (XXX it might be worth relaxing this,
 		 * but not enough time to address it for 8.3.)

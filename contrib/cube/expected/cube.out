@@ -54,108 +54,6 @@ SELECT '-1.0'::cube AS cube;
  (-1)
 (1 row)
 
-SELECT '1e27'::cube AS cube;
-  cube   
----------
- (1e+27)
-(1 row)
-
-SELECT '-1e27'::cube AS cube;
-   cube   
-----------
- (-1e+27)
-(1 row)
-
-SELECT '1.0e27'::cube AS cube;
-  cube   
----------
- (1e+27)
-(1 row)
-
-SELECT '-1.0e27'::cube AS cube;
-   cube   
-----------
- (-1e+27)
-(1 row)
-
-SELECT '1e+27'::cube AS cube;
-  cube   
----------
- (1e+27)
-(1 row)
-
-SELECT '-1e+27'::cube AS cube;
-   cube   
-----------
- (-1e+27)
-(1 row)
-
-SELECT '1.0e+27'::cube AS cube;
-  cube   
----------
- (1e+27)
-(1 row)
-
-SELECT '-1.0e+27'::cube AS cube;
-   cube   
-----------
- (-1e+27)
-(1 row)
-
-SELECT '1e-7'::cube AS cube;
-  cube   
----------
- (1e-07)
-(1 row)
-
-SELECT '-1e-7'::cube AS cube;
-   cube   
-----------
- (-1e-07)
-(1 row)
-
-SELECT '1.0e-7'::cube AS cube;
-  cube   
----------
- (1e-07)
-(1 row)
-
-SELECT '-1.0e-7'::cube AS cube;
-   cube   
-----------
- (-1e-07)
-(1 row)
-
-SELECT '1e-700'::cube AS cube;
- cube 
-------
- (0)
-(1 row)
-
-SELECT '-1e-700'::cube AS cube;
- cube 
-------
- (0)
-(1 row)
-
-SELECT '1234567890123456'::cube AS cube;
-          cube          
-------------------------
- (1.23456789012346e+15)
-(1 row)
-
-SELECT '+1234567890123456'::cube AS cube;
-          cube          
-------------------------
- (1.23456789012346e+15)
-(1 row)
-
-SELECT '-1234567890123456'::cube AS cube;
-          cube           
--------------------------
- (-1.23456789012346e+15)
-(1 row)
-
 SELECT '.1234567890123456'::cube AS cube;
         cube         
 ---------------------
@@ -475,9 +373,21 @@ SELECT cube_subset(cube('(1,3,5),(6,7,8)'), ARRAY[3,2,1,1]);
 
 SELECT cube_subset(cube('(1,3,5),(6,7,8)'), ARRAY[4,0]);
 ERROR:  Index out of bounds
+-- test for limits: this should pass
+SELECT cube_subset(cube('(6,7,8),(6,7,8)'), array(SELECT 1 as a FROM generate_series(1,100)));
+                                                                                                                                                 cube_subset                                                                                                                                                  
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ (6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6)
+(1 row)
+
+-- and this should fail
+SELECT cube_subset(cube('(6,7,8),(6,7,8)'), array(SELECT 1 as a FROM generate_series(1,101)));
+ERROR:  array is too long
+DETAIL:  A cube cannot have more than 100 dimensions.
 --
 -- Testing limit of CUBE_MAX_DIM dimensions check in cube_in.
 --
+-- create too big cube from literal
 select '(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)'::cube;
 ERROR:  bad cube representation
 LINE 1: select '(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0...
@@ -487,6 +397,34 @@ select '(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 ERROR:  bad cube representation
 LINE 1: select '(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0...
                ^
+DETAIL:  A cube cannot have more than 100 dimensions.
+-- from an array
+select cube(array(SELECT 0 as a FROM generate_series(1,101)));
+ERROR:  array is too long
+DETAIL:  A cube cannot have more than 100 dimensions.
+select cube(array(SELECT 0 as a FROM generate_series(1,101)),array(SELECT 0 as a FROM generate_series(1,101)));
+ERROR:  can't extend cube
+DETAIL:  A cube cannot have more than 100 dimensions.
+-- extend cube beyond limit
+-- this should work
+select cube(array(SELECT 0 as a FROM generate_series(1,100)));
+                                                                                                                                                     cube                                                                                                                                                     
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+(1 row)
+
+select cube(array(SELECT 0 as a FROM generate_series(1,100)),array(SELECT 0 as a FROM generate_series(1,100)));
+                                                                                                                                                     cube                                                                                                                                                     
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+(1 row)
+
+-- this should fail
+select cube(cube(array(SELECT 0 as a FROM generate_series(1,100))), 0);
+ERROR:  can't extend cube
+DETAIL:  A cube cannot have more than 100 dimensions.
+select cube(cube(array(SELECT 0 as a FROM generate_series(1,100)),array(SELECT 0 as a FROM generate_series(1,100))), 0, 0);
+ERROR:  can't extend cube
 DETAIL:  A cube cannot have more than 100 dimensions.
 --
 -- testing the  operators
@@ -912,7 +850,7 @@ SELECT cube_dim('(0,0,0)'::cube);
         3
 (1 row)
 
--- Test of cube_ll_coord function (retrieves LL coodinate values)
+-- Test of cube_ll_coord function (retrieves LL coordinate values)
 --
 SELECT cube_ll_coord('(-1,1),(2,-2)'::cube, 1);
  cube_ll_coord 
@@ -932,7 +870,7 @@ SELECT cube_ll_coord('(-1,1),(2,-2)'::cube, 3);
              0
 (1 row)
 
--- Test of cube_ur_coord function (retrieves UR coodinate values)
+-- Test of cube_ur_coord function (retrieves UR coordinate values)
 --
 SELECT cube_ur_coord('(-1,1),(2,-2)'::cube, 1);
  cube_ur_coord 

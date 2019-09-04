@@ -1993,7 +1993,6 @@ ECPGfetch(const int lineno, const int compat, const int force_indicator,
 	struct statement   *stmt;
 	int64		amount1;
 	bool		fetchall;
-	bool		ret;
 	va_list		args;
 
 	if (!find_cursor(con, lineno, curname, false, &cur, NULL))
@@ -2096,7 +2095,7 @@ ECPGfetch(const int lineno, const int compat, const int force_indicator,
 
 	ecpg_do_epilogue(stmt);
 
-	return ret;
+	return true;
 }
 
 /*

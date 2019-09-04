@@ -291,6 +291,32 @@
 
    <para>
     <indexterm>
+     <primary>IS DISTINCT FROM</primary>
+    </indexterm>
+    <indexterm>
+     <primary>IS NOT DISTINCT FROM</primary>
+    </indexterm>
+    Ordinary comparison operators yield null (signifying <quote>unknown</>),
+    not true or false, when either input is null.  For example,
+    <literal>7 = NULL</> yields null, as does <literal>7 &lt;&gt; NULL</>.  When
+    this behavior is not suitable, use the
+    <literal>IS <optional> NOT </> DISTINCT FROM</literal> constructs:
+<synopsis>
+<replaceable>a</replaceable> IS DISTINCT FROM <replaceable>b</replaceable>
+<replaceable>a</replaceable> IS NOT DISTINCT FROM <replaceable>b</replaceable>
+</synopsis>
+    For non-null inputs, <literal>IS DISTINCT FROM</literal> is
+    the same as the <literal>&lt;&gt;</> operator.  However, if both
+    inputs are null it returns false, and if only one input is
+    null it returns true.  Similarly, <literal>IS NOT DISTINCT
+    FROM</literal> is identical to <literal>=</literal> for non-null
+    inputs, but it returns true when both inputs are null, and false when only
+    one input is null. Thus, these constructs effectively act as though null
+    were a normal data value, rather than <quote>unknown</>.
+   </para>
+
+   <para>
+    <indexterm>
      <primary>IS NULL</primary>
     </indexterm>
     <indexterm>
@@ -320,8 +346,7 @@
     <literal><replaceable>expression</replaceable> = NULL</literal>
     because <literal>NULL</> is not <quote>equal to</quote>
     <literal>NULL</>.  (The null value represents an unknown value,
-    and it is not known whether two unknown values are equal.) This
-    behavior conforms to the SQL standard.
+    and it is not known whether two unknown values are equal.)
    </para>
 
   <tip>
@@ -338,7 +363,6 @@
    </para>
   </tip>
 
-  <note>
    <para>
     If the <replaceable>expression</replaceable> is row-valued, then
     <literal>IS NULL</> is true when the row expression itself is null
@@ -346,39 +370,13 @@
     <literal>IS NOT NULL</> is true when the row expression itself is non-null
     and all the row's fields are non-null.  Because of this behavior,
     <literal>IS NULL</> and <literal>IS NOT NULL</> do not always return
-    inverse results for row-valued expressions, i.e., a row-valued
-    expression that contains both NULL and non-null values will return false
-    for both tests.
-    This definition conforms to the SQL standard, and is a change from the
-    inconsistent behavior exhibited by <productname>PostgreSQL</productname>
-    versions prior to 8.2.
-   </para>
-  </note>
-
-   <para>
-    <indexterm>
-     <primary>IS DISTINCT FROM</primary>
-    </indexterm>
-    <indexterm>
-     <primary>IS NOT DISTINCT FROM</primary>
-    </indexterm>
-    Ordinary comparison operators yield null (signifying <quote>unknown</>),
-    not true or false, when either input is null.  For example,
-    <literal>7 = NULL</> yields null, as does <literal>7 &lt;&gt; NULL</>.  When
-    this behavior is not suitable, use the
-    <literal>IS <optional> NOT </> DISTINCT FROM</literal> constructs:
-<synopsis>
-<replaceable>expression</replaceable> IS DISTINCT FROM <replaceable>expression</replaceable>
-<replaceable>expression</replaceable> IS NOT DISTINCT FROM <replaceable>expression</replaceable>
-</synopsis>
-    For non-null inputs, <literal>IS DISTINCT FROM</literal> is
-    the same as the <literal>&lt;&gt;</> operator.  However, if both
-    inputs are null it returns false, and if only one input is
-    null it returns true.  Similarly, <literal>IS NOT DISTINCT
-    FROM</literal> is identical to <literal>=</literal> for non-null
-    inputs, but it returns true when both inputs are null, and false when only
-    one input is null. Thus, these constructs effectively act as though null
-    were a normal data value, rather than <quote>unknown</>.
+    inverse results for row-valued expressions; in particular, a row-valued
+    expression that contains both null and non-null fields will return false
+    for both tests.  In some cases, it may be preferable to
+    write <replaceable>row</replaceable> <literal>IS DISTINCT FROM NULL</>
+    or <replaceable>row</replaceable> <literal>IS NOT DISTINCT FROM NULL</>,
+    which will simply check whether the overall row value is null without any
+    additional tests on the row fields.
    </para>
 
    <para>
@@ -659,7 +657,7 @@
         <literal><function>ceil(<type>dp</type> or <type>numeric</type>)</function></literal>
        </entry>
        <entry>(same as input)</entry>
-       <entry>smallest integer not less than argument</entry>
+       <entry>nearest integer greater than or equal to argument</entry>
        <entry><literal>ceil(-42.8)</literal></entry>
        <entry><literal>-42</literal></entry>
       </row>
@@ -672,7 +670,7 @@
         <literal><function>ceiling(<type>dp</type> or <type>numeric</type>)</function></literal>
        </entry>
        <entry>(same as input)</entry>
-       <entry>smallest integer not less than argument (alias for <function>ceil</function>)</entry>
+       <entry>nearest integer greater than or equal to argument (same as <function>ceil</function>)</entry>
        <entry><literal>ceiling(-95.3)</literal></entry>
        <entry><literal>-95</literal></entry>
       </row>
@@ -725,7 +723,7 @@
         <literal><function>floor(<type>dp</type> or <type>numeric</type>)</function></literal>
        </entry>
        <entry>(same as input)</entry>
-       <entry>largest integer not greater than argument</entry>
+       <entry>nearest integer less than or equal to argument</entry>
        <entry><literal>floor(-42.8)</literal></entry>
        <entry><literal>-43</literal></entry>
       </row>
@@ -1308,11 +1306,12 @@
        </entry>
        <entry><type>text</type></entry>
        <entry>
-        Remove the longest string containing only the
+        Remove the longest string containing only characters from
         <parameter>characters</parameter> (a space by default) from the
-        start/end/both ends of the <parameter>string</parameter>
+        start, end, or both ends (<literal>both</> is the default)
+        of <parameter>string</parameter>
        </entry>
-       <entry><literal>trim(both 'x' from 'xTomxx')</literal></entry>
+       <entry><literal>trim(both 'xyz' from 'yxTomxx')</literal></entry>
        <entry><literal>Tom</literal></entry>
       </row>
 
@@ -1384,7 +1383,7 @@
         in <parameter>characters</parameter> (a space by default)
         from the start and end of <parameter>string</parameter>
        </entry>
-       <entry><literal>btrim('xyxtrimyyx', 'xy')</literal></entry>
+       <entry><literal>btrim('xyxtrimyyx', 'xyz')</literal></entry>
        <entry><literal>trim</literal></entry>
       </row>
 
@@ -1533,7 +1532,7 @@
         octal sequences (<literal>\</><replaceable>nnn</>) and
         doubles backslashes.
        </entry>
-       <entry><literal>encode(E'123\\000\\001', 'base64')</literal></entry>
+       <entry><literal>encode('123\000\001', 'base64')</literal></entry>
        <entry><literal>MTIzAAE=</literal></entry>
       </row>
 
@@ -1653,8 +1652,8 @@
         <parameter>characters</parameter> (a space by default) from the start of
         <parameter>string</parameter>
        </entry>
-       <entry><literal>ltrim('zzzytrim', 'xyz')</literal></entry>
-       <entry><literal>trim</literal></entry>
+       <entry><literal>ltrim('zzzytest', 'xyz')</literal></entry>
+       <entry><literal>test</literal></entry>
       </row>
 
       <row>
@@ -1817,7 +1816,7 @@
         the delimiter.  See <xref linkend="functions-posix-regexp"> for more
         information.
        </entry>
-       <entry><literal>regexp_split_to_array('hello world', E'\\s+')</literal></entry>
+       <entry><literal>regexp_split_to_array('hello world', '\s+')</literal></entry>
        <entry><literal>{hello,world}</literal></entry>
       </row>
 
@@ -1834,7 +1833,7 @@
         the delimiter.  See <xref linkend="functions-posix-regexp"> for more
         information.
        </entry>
-       <entry><literal>regexp_split_to_table('hello world', E'\\s+')</literal></entry>
+       <entry><literal>regexp_split_to_table('hello world', '\s+')</literal></entry>
        <entry><literal>hello</literal><para><literal>world</literal></para> (2 rows)</entry>
       </row>
 
@@ -1936,8 +1935,8 @@
         <parameter>characters</parameter> (a space by default) from the end of
         <parameter>string</parameter>
        </entry>
-       <entry><literal>rtrim('trimxxxx', 'x')</literal></entry>
-       <entry><literal>trim</literal></entry>
+       <entry><literal>rtrim('testxxzx', 'xyz')</literal></entry>
+       <entry><literal>test</literal></entry>
       </row>
 
       <row>
@@ -3002,8 +3001,8 @@ SELECT format('Testing %s, %s, %s, %%', 'one', 'two', 'three');
 SELECT format('INSERT INTO %I VALUES(%L)', 'Foo bar', E'O\'Reilly');
 <lineannotation>Result: </lineannotation><computeroutput>INSERT INTO "Foo bar" VALUES('O''Reilly')</computeroutput>
 
-SELECT format('INSERT INTO %I VALUES(%L)', 'locations', E'C:\\Program Files');
-<lineannotation>Result: </lineannotation><computeroutput>INSERT INTO locations VALUES(E'C:\\Program Files')</computeroutput>
+SELECT format('INSERT INTO %I VALUES(%L)', 'locations', 'C:\Program Files');
+<lineannotation>Result: </lineannotation><computeroutput>INSERT INTO locations VALUES('C:\Program Files')</computeroutput>
 </screen>
     </para>
 
@@ -3130,7 +3129,7 @@ SELECT format('Testing %3$s, %2$s, %s', 'one', 'two', 'three');
          <secondary>concatenation</secondary>
         </indexterm>
        </entry>
-       <entry><literal>E'\\\\Post'::bytea || E'\\047gres\\000'::bytea</literal></entry>
+       <entry><literal>'\\Post'::bytea || '\047gres\000'::bytea</literal></entry>
        <entry><literal>\\Post'gres\000</literal></entry>
       </row>
 
@@ -3143,7 +3142,7 @@ SELECT format('Testing %3$s, %2$s, %s', 'one', 'two', 'three');
        </entry>
        <entry><type>int</type></entry>
        <entry>Number of bytes in binary string</entry>
-       <entry><literal>octet_length(E'jo\\000se'::bytea)</literal></entry>
+       <entry><literal>octet_length('jo\000se'::bytea)</literal></entry>
        <entry><literal>5</literal></entry>
       </row>
 
@@ -3158,7 +3157,7 @@ SELECT format('Testing %3$s, %2$s, %s', 'one', 'two', 'three');
        <entry>
         Replace substring
        </entry>
-       <entry><literal>overlay(E'Th\\000omas'::bytea placing E'\\002\\003'::bytea from 2 for 3)</literal></entry>
+       <entry><literal>overlay('Th\000omas'::bytea placing '\002\003'::bytea from 2 for 3)</literal></entry>
        <entry><literal>T\\002\\003mas</literal></entry>
       </row>
 
@@ -3171,7 +3170,7 @@ SELECT format('Testing %3$s, %2$s, %s', 'one', 'two', 'three');
        </entry>
        <entry><type>int</type></entry>
        <entry>Location of specified substring</entry>
-      <entry><literal>position(E'\\000om'::bytea in E'Th\\000omas'::bytea)</literal></entry>
+      <entry><literal>position('\000om'::bytea in 'Th\000omas'::bytea)</literal></entry>
        <entry><literal>3</literal></entry>
       </row>
 
@@ -3186,7 +3185,7 @@ SELECT format('Testing %3$s, %2$s, %s', 'one', 'two', 'three');
        <entry>
         Extract substring
        </entry>
-       <entry><literal>substring(E'Th\\000omas'::bytea from 2 for 3)</literal></entry>
+       <entry><literal>substring('Th\000omas'::bytea from 2 for 3)</literal></entry>
        <entry><literal>h\000o</literal></entry>
       </row>
 
@@ -3201,11 +3200,11 @@ SELECT format('Testing %3$s, %2$s, %s', 'one', 'two', 'three');
        </entry>
        <entry><type>bytea</type></entry>
        <entry>
-        Remove the longest string containing only the bytes in
+        Remove the longest string containing only bytes appearing in
         <parameter>bytes</parameter> from the start
         and end of <parameter>string</parameter>
        </entry>
-       <entry><literal>trim(E'\\000'::bytea from E'\\000Tom\\000'::bytea)</literal></entry>
+       <entry><literal>trim('\000\001'::bytea from '\000Tom\001'::bytea)</literal></entry>
        <entry><literal>Tom</literal></entry>
       </row>
      </tbody>
@@ -3244,11 +3243,11 @@ SELECT format('Testing %3$s, %2$s, %s', 'one', 'two', 'three');
        </entry>
        <entry><type>bytea</type></entry>
        <entry>
-        Remove the longest string consisting only of bytes
-        in <parameter>bytes</parameter> from the start and end of
+        Remove the longest string containing only bytes appearing in
+        <parameter>bytes</parameter> from the start and end of
         <parameter>string</parameter>
       </entry>
-      <entry><literal>btrim(E'\\000trim\\000'::bytea, E'\\000'::bytea)</literal></entry>
+      <entry><literal>btrim('\000trim\001'::bytea, '\000\001'::bytea)</literal></entry>
       <entry><literal>trim</literal></entry>
      </row>
 
@@ -3265,7 +3264,7 @@ SELECT format('Testing %3$s, %2$s, %s', 'one', 'two', 'three');
        Decode binary data from textual representation in <parameter>string</>.
        Options for <parameter>format</> are same as in <function>encode</>.
       </entry>
-      <entry><literal>decode(E'123\\000456', 'escape')</literal></entry>
+      <entry><literal>decode('123\000456', 'escape')</literal></entry>
       <entry><literal>123\000456</literal></entry>
      </row>
 
@@ -3285,7 +3284,7 @@ SELECT format('Testing %3$s, %2$s, %s', 'one', 'two', 'three');
        octal sequences (<literal>\</><replaceable>nnn</>) and
        doubles backslashes.
       </entry>
-      <entry><literal>encode(E'123\\000456'::bytea, 'escape')</literal></entry>
+      <entry><literal>encode('123\000456'::bytea, 'escape')</literal></entry>
       <entry><literal>123\000456</literal></entry>
      </row>
 
@@ -3300,7 +3299,7 @@ SELECT format('Testing %3$s, %2$s, %s', 'one', 'two', 'three');
        <entry>
         Extract bit from string
        </entry>
-       <entry><literal>get_bit(E'Th\\000omas'::bytea, 45)</literal></entry>
+       <entry><literal>get_bit('Th\000omas'::bytea, 45)</literal></entry>
        <entry><literal>1</literal></entry>
       </row>
 
@@ -3315,7 +3314,7 @@ SELECT format('Testing %3$s, %2$s, %s', 'one', 'two', 'three');
        <entry>
         Extract byte from string
        </entry>
-       <entry><literal>get_byte(E'Th\\000omas'::bytea, 4)</literal></entry>
+       <entry><literal>get_byte('Th\000omas'::bytea, 4)</literal></entry>
        <entry><literal>109</literal></entry>
       </row>
 
@@ -3339,7 +3338,7 @@ SELECT format('Testing %3$s, %2$s, %s', 'one', 'two', 'three');
         <see>binary strings, length</see>
        </indexterm>
       </entry>
-      <entry><literal>length(E'jo\\000se'::bytea)</literal></entry>
+      <entry><literal>length('jo\000se'::bytea)</literal></entry>
       <entry><literal>5</literal></entry>
      </row>
 
@@ -3355,7 +3354,7 @@ SELECT format('Testing %3$s, %2$s, %s', 'one', 'two', 'three');
        Calculates the MD5 hash of <parameter>string</parameter>,
        returning the result in hexadecimal
       </entry>
-      <entry><literal>md5(E'Th\\000omas'::bytea)</literal></entry>
+      <entry><literal>md5('Th\000omas'::bytea)</literal></entry>
       <entry><literal>8ab2d3c9689aaf18 b4958c334c82d8b1</literal></entry>
      </row>
 
@@ -3371,7 +3370,7 @@ SELECT format('Testing %3$s, %2$s, %s', 'one', 'two', 'three');
        <entry>
         Set bit in string
        </entry>
-       <entry><literal>set_bit(E'Th\\000omas'::bytea, 45, 0)</literal></entry>
+       <entry><literal>set_bit('Th\000omas'::bytea, 45, 0)</literal></entry>
        <entry><literal>Th\000omAs</literal></entry>
       </row>
 
@@ -3387,7 +3386,7 @@ SELECT format('Testing %3$s, %2$s, %s', 'one', 'two', 'three');
        <entry>
         Set byte in string
        </entry>
-       <entry><literal>set_byte(E'Th\\000omas'::bytea, 4, 64)</literal></entry>
+       <entry><literal>set_byte('Th\000omas'::bytea, 4, 64)</literal></entry>
        <entry><literal>Th\000o@as</literal></entry>
       </row>
     </tbody>
@@ -4000,7 +3999,7 @@ regexp_replace('foobarbaz', 'b..', 'X')
                                    <lineannotation>fooXbaz</lineannotation>
 regexp_replace('foobarbaz', 'b..', 'X', 'g')
                                    <lineannotation>fooXX</lineannotation>
-regexp_replace('foobarbaz', 'b(..)', E'X\\1Y', 'g')
+regexp_replace('foobarbaz', 'b(..)', 'X\1Y', 'g')
                                    <lineannotation>fooXarYXazY</lineannotation>
 </programlisting>
    </para>
@@ -4093,7 +4092,7 @@ SELECT col1, (SELECT regexp_matches(col2, '(bar)(beque)')) FROM tab;
     Some examples:
 <programlisting>
 
-SELECT foo FROM regexp_split_to_table('the quick brown fox jumps over the lazy dog', E'\\s+') AS foo;
+SELECT foo FROM regexp_split_to_table('the quick brown fox jumps over the lazy dog', '\s+') AS foo;
   foo   
 -------
  the    
@@ -4107,13 +4106,13 @@ SELECT foo FROM regexp_split_to_table('the quick brown fox jumps over the lazy d
  dog    
 (9 rows)
 
-SELECT regexp_split_to_array('the quick brown fox jumps over the lazy dog', E'\\s+');
+SELECT regexp_split_to_array('the quick brown fox jumps over the lazy dog', '\s+');
               regexp_split_to_array             
 -----------------------------------------------
  {the,quick,brown,fox,jumps,over,the,lazy,dog}
 (1 row)
 
-SELECT foo FROM regexp_split_to_table('the quick brown fox', E'\\s*') AS foo;
+SELECT foo FROM regexp_split_to_table('the quick brown fox', '\s*') AS foo;
  foo 
 -----
  t         
@@ -5724,11 +5723,13 @@ SELECT regexp_matches('abc01234xyz', '(?:(.*?)(\d+)(.*)){1,1}');
        </row>
        <row>
         <entry><literal>TZ</literal></entry>
-        <entry>upper case time-zone name</entry>
+        <entry>upper case time-zone abbreviation
+         (only supported in <function>to_char</>)</entry>
        </row>
        <row>
         <entry><literal>tz</literal></entry>
-        <entry>lower case time-zone name</entry>
+        <entry>lower case time-zone abbreviation
+         (only supported in <function>to_char</>)</entry>
        </row>
       </tbody>
      </tgroup>
@@ -5946,7 +5947,7 @@ SELECT regexp_matches('abc01234xyz', '(?:(.*?)(\d+)(.*)){1,1}');
       <para>
        Here is a more
        complex example:
-       <literal>to_timestamp('15:12:02.020.001230', 'HH:MI:SS.MS.US')</literal>
+       <literal>to_timestamp('15:12:02.020.001230', 'HH24:MI:SS.MS.US')</literal>
        is 15 hours, 12 minutes, and 2 seconds + 20 milliseconds +
        1230 microseconds = 2.021230 seconds.
       </para>
@@ -5990,11 +5991,11 @@ SELECT regexp_matches('abc01234xyz', '(?:(.*?)(\d+)(.*)){1,1}');
       <tbody>
        <row>
         <entry><literal>9</literal></entry>
-        <entry>value with the specified number of digits</entry>
+        <entry>digit position (can be dropped if insignificant)</entry>
        </row>
        <row>
         <entry><literal>0</literal></entry>
-        <entry>value with leading zeros</entry>
+        <entry>digit position (will not be dropped, even if insignificant)</entry>
        </row>
        <row>
         <entry><literal>.</literal> (period)</entry>
@@ -6002,7 +6003,7 @@ SELECT regexp_matches('abc01234xyz', '(?:(.*?)(\d+)(.*)){1,1}');
        </row>
        <row>
         <entry><literal>,</literal> (comma)</entry>
-        <entry>group (thousand) separator</entry>
+        <entry>group (thousands) separator</entry>
        </row>
        <row>
         <entry><literal>PR</literal></entry>
@@ -6062,23 +6063,48 @@ SELECT regexp_matches('abc01234xyz', '(?:(.*?)(\d+)(.*)){1,1}');
     <itemizedlist>
      <listitem>
       <para>
-       A sign formatted using <literal>SG</literal>, <literal>PL</literal>, or
-       <literal>MI</literal> is not anchored to
-       the number; for example,
-       <literal>to_char(-12, 'MI9999')</literal> produces <literal>'-&nbsp;&nbsp;12'</literal>
-       but <literal>to_char(-12, 'S9999')</literal> produces <literal>'&nbsp;&nbsp;-12'</literal>.
-       The Oracle implementation does not allow the use of
-       <literal>MI</literal> before <literal>9</literal>, but rather
-       requires that <literal>9</literal> precede
-       <literal>MI</literal>.
+       <literal>0</> specifies a digit position that will always be printed,
+       even if it contains a leading/trailing zero.  <literal>9</> also
+       specifies a digit position, but if it is a leading zero then it will
+       be replaced by a space, while if it is a trailing zero and fill mode
+       is specified then it will be deleted.  (For <function>to_number()</>,
+       these two pattern characters are equivalent.)
       </para>
      </listitem>
 
      <listitem>
       <para>
-       <literal>9</literal> results in a value with the same number of
-       digits as there are <literal>9</literal>s. If a digit is
-       not available it outputs a space.
+       The pattern characters <literal>S</>, <literal>L</>, <literal>D</>,
+       and <literal>G</> represent the sign, currency symbol, decimal point,
+       and thousands separator characters defined by the current locale
+       (see <xref linkend="guc-lc-monetary">
+       and <xref linkend="guc-lc-numeric">).  The pattern characters period
+       and comma represent those exact characters, with the meanings of
+       decimal point and thousands separator, regardless of locale.
+      </para>
+     </listitem>
+
+     <listitem>
+      <para>
+       If no explicit provision is made for a sign
+       in <function>to_char()</>'s pattern, one column will be reserved for
+       the sign, and it will be anchored to (appear just left of) the
+       number.  If <literal>S</> appears just left of some <literal>9</>'s,
+       it will likewise be anchored to the number.
+      </para>
+     </listitem>
+
+     <listitem>
+      <para>
+       A sign formatted using <literal>SG</literal>, <literal>PL</literal>, or
+       <literal>MI</literal> is not anchored to
+       the number; for example,
+       <literal>to_char(-12, 'MI9999')</literal> produces <literal>'-&nbsp;&nbsp;12'</literal>
+       but <literal>to_char(-12, 'S9999')</literal> produces <literal>'&nbsp;&nbsp;-12'</literal>.
+       (The Oracle implementation does not allow the use of
+       <literal>MI</literal> before <literal>9</literal>, but rather
+       requires that <literal>9</literal> precede
+       <literal>MI</literal>.)
       </para>
      </listitem>
 
@@ -6123,8 +6149,8 @@ SELECT regexp_matches('abc01234xyz', '(?:(.*?)(\d+)(.*)){1,1}');
 
    <para>
     Certain modifiers can be applied to any template pattern to alter its
-    behavior.  For example, <literal>FM9999</literal>
-    is the <literal>9999</literal> pattern with the
+    behavior.  For example, <literal>FM99.99</literal>
+    is the <literal>99.99</literal> pattern with the
     <literal>FM</literal> modifier.
     <xref linkend="functions-formatting-numericmod-table"> shows the
     modifier patterns for numeric formatting.
@@ -6143,8 +6169,8 @@ SELECT regexp_matches('abc01234xyz', '(?:(.*?)(\d+)(.*)){1,1}');
       <tbody>
        <row>
         <entry><literal>FM</literal> prefix</entry>
-        <entry>fill mode (suppress leading zeroes and padding blanks)</entry>
-        <entry><literal>FM9999</literal></entry>
+        <entry>fill mode (suppress trailing zeroes and padding blanks)</entry>
+        <entry><literal>FM99.99</literal></entry>
        </row>
        <row>
         <entry><literal>TH</literal> suffix</entry>
@@ -6190,6 +6216,10 @@ SELECT regexp_matches('abc01234xyz', '(?:(.*?)(\d+)(.*)){1,1}');
        <row>
         <entry><literal>to_char(-0.1, 'FM9.99')</literal></entry>
         <entry><literal>'-.1'</literal></entry>
+       </row>
+       <row>
+        <entry><literal>to_char(-0.1, 'FM90.99')</literal></entry>
+        <entry><literal>'-0.1'</literal></entry>
        </row>
        <row>
         <entry><literal>to_char(0.1, '0.9')</literal></entry>
@@ -7401,10 +7431,11 @@ SELECT date_trunc('year', TIMESTAMP '2001-02-16 20:38:40');
    </indexterm>
 
    <para>
-    The <literal>AT TIME ZONE</literal> construct allows conversions
-    of time stamps to different time zones.  <xref
-    linkend="functions-datetime-zoneconvert-table"> shows its
-    variants.
+    The <literal>AT TIME ZONE</literal> converts time
+    stamp <emphasis>without time zone</emphasis> to/from
+    time stamp <emphasis>with time zone</emphasis>, and
+    <emphasis>time</emphasis> values to different time zones. <xref
+    linkend="functions-datetime-zoneconvert-table"> shows its variants.
    </para>
 
     <table id="functions-datetime-zoneconvert-table">
@@ -7449,24 +7480,33 @@ SELECT date_trunc('year', TIMESTAMP '2001-02-16 20:38:40');
 
    <para>
     In these expressions, the desired time zone <replaceable>zone</> can be
-    specified either as a text string (e.g., <literal>'PST'</literal>)
+    specified either as a text string (e.g., <literal>'America/Los_Angeles'</literal>)
     or as an interval (e.g., <literal>INTERVAL '-08:00'</literal>).
     In the text case, a time zone name can be specified in any of the ways
     described in <xref linkend="datatype-timezones">.
    </para>
 
    <para>
-    Examples (assuming the local time zone is <literal>PST8PDT</>):
+    Examples (assuming the local time zone is <literal>America/Los_Angeles</literal>):
 <screen>
-SELECT TIMESTAMP '2001-02-16 20:38:40' AT TIME ZONE 'MST';
+SELECT TIMESTAMP '2001-02-16 20:38:40' AT TIME ZONE 'America/Denver';
 <lineannotation>Result: </lineannotation><computeroutput>2001-02-16 19:38:40-08</computeroutput>
 
-SELECT TIMESTAMP WITH TIME ZONE '2001-02-16 20:38:40-05' AT TIME ZONE 'MST';
+SELECT TIMESTAMP WITH TIME ZONE '2001-02-16 20:38:40-05' AT TIME ZONE 'America/Denver';
 <lineannotation>Result: </lineannotation><computeroutput>2001-02-16 18:38:40</computeroutput>
+
+SELECT TIMESTAMP '2001-02-16 20:38:40-05' AT TIME ZONE 'Asia/Tokyo' AT TIME ZONE 'America/Chicago';
+<lineannotation>Result: </lineannotation><computeroutput>2001-02-16 05:38:40</computeroutput>
 </screen>
-    The first example takes a time stamp without time zone and interprets it as MST time
-    (UTC-7), which is then converted to PST (UTC-8) for display.  The second example takes
-    a time stamp specified in EST (UTC-5) and converts it to local time in MST (UTC-7).
+    The first example adds a time zone to a value that lacks it, and
+    displays the value using the current <varname>TimeZone</varname>
+    setting.  The second example shifts the time stamp with time zone value
+    to the specified time zone, and returns the value without a time zone.
+    This allows storage and display of values different from the current
+    <varname>TimeZone</varname> setting.  The third example converts
+    Tokyo time to Chicago time.   Converting <emphasis>time</emphasis>
+    values to other time zones uses the currently active time zone rules
+    since no date is supplied.
    </para>
 
    <para>
@@ -7831,12 +7871,12 @@ CREATE TYPE rainbow AS ENUM ('red', 'orange', 'yellow', 'green', 'blue', 'purple
        <row>
         <entry> <literal>#</literal> </entry>
         <entry>Point or box of intersection</entry>
-        <entry><literal>'((1,-1),(-1,1))' # '((1,1),(-1,-1))'</literal></entry>
+        <entry><literal>box '((1,-1),(-1,1))' # box '((1,1),(-2,-2))'</literal></entry>
        </row>
        <row>
         <entry> <literal>#</literal> </entry>
         <entry>Number of points in path or polygon</entry>
-        <entry><literal># '((1,0),(0,1),(-1,0))'</literal></entry>
+        <entry><literal># path '((1,0),(0,1),(-1,0))'</literal></entry>
        </row>
        <row>
         <entry> <literal>@-@</literal> </entry>
@@ -9469,6 +9509,24 @@ SELECT xmlagg(x) FROM (SELECT * FROM test ORDER BY y DESC) AS tab;
     </para>
    </sect3>
 
+   <sect3>
+    <title><literal>IS NOT DOCUMENT</literal></title>
+
+    <indexterm>
+     <primary>IS NOT DOCUMENT</primary>
+    </indexterm>
+
+<synopsis>
+<replaceable>xml</replaceable> IS NOT DOCUMENT
+</synopsis>
+
+    <para>
+     The expression <literal>IS NOT DOCUMENT</literal> returns false if the
+     argument XML value is a proper XML document, true if it is not (that is,
+     it is a content fragment), or null if the argument is null.
+    </para>
+   </sect3>
+
    <sect3 id="xml-exists">
     <title><literal>XMLEXISTS</literal></title>
 
@@ -11029,7 +11087,7 @@ SELECT NULLIF(value, '(none)') ...
        <row>
         <entry>
          <literal>
-          <function>array_fill</function>(<type>anyelement</type>, <type>int[]</type>,
+          <function>array_fill</function>(<type>anyelement</type>, <type>int[]</type>
           <optional>, <type>int[]</type></optional>)
          </literal>
         </entry>
@@ -12790,8 +12848,8 @@ WHERE EXISTS (SELECT 1 FROM tab2 WHERE col2 = tab1.col2);
    The result is <quote>false</> if the comparison returns false for every
    subquery row (including the case where the subquery returns no
    rows).
-   The result is NULL if the comparison does not return true for any row,
-   and it returns NULL for at least one row.
+   The result is NULL if no comparison with a subquery row returns true,
+   and at least one comparison returns NULL.
   </para>
 
   <para>
@@ -12816,8 +12874,8 @@ WHERE EXISTS (SELECT 1 FROM tab2 WHERE col2 = tab1.col2);
    The result of <token>ALL</token> is <quote>true</> if all rows yield true
    (including the case where the subquery returns no rows).
    The result is <quote>false</> if any false result is found.
-   The result is NULL if the comparison does not return false for any row,
-   and it returns NULL for at least one row.
+   The result is NULL if no comparison with a subquery row returns false,
+   and at least one comparison returns NULL.
   </para>
 
   <para>
@@ -12846,8 +12904,8 @@ WHERE EXISTS (SELECT 1 FROM tab2 WHERE col2 = tab1.col2);
    case where the subquery returns no rows).
    The result is <quote>false</> if the comparison returns false for any
    subquery row.
-   The result is NULL if the comparison does not return false for any
-   subquery row, and it returns NULL for at least one row.
+   The result is NULL if no comparison with a subquery row returns false,
+   and at least one comparison returns NULL.
   </para>
 
   <para>
@@ -13440,6 +13498,12 @@ postgres=# SELECT * FROM unnest2(ARRAY[[1,2],[3,4]]);
       </row>
 
       <row>
+       <entry><literal><function>current_role</function></literal></entry>
+       <entry><type>name</type></entry>
+       <entry>equivalent to <function>current_user</function></entry>
+      </row>
+
+      <row>
        <entry><literal><function>current_schema</function>[()]</literal></entry>
        <entry><type>name</type></entry>
        <entry>name of current schema</entry>
@@ -13550,8 +13614,11 @@ postgres=# SELECT * FROM unnest2(ARRAY[[1,2],[3,4]]);
 
    <note>
     <para>
-     <function>current_catalog</function>, <function>current_schema</function>,
-     <function>current_user</function>, <function>session_user</function>,
+     <function>current_catalog</function>,
+     <function>current_role</function>,
+     <function>current_schema</function>,
+     <function>current_user</function>,
+     <function>session_user</function>,
      and <function>user</function> have special syntactic status
      in <acronym>SQL</acronym>: they must be called without trailing
      parentheses.  (In PostgreSQL, parentheses can optionally be used with
@@ -13569,6 +13636,10 @@ postgres=# SELECT * FROM unnest2(ARRAY[[1,2],[3,4]]);
 
    <indexterm>
     <primary>current_query</primary>
+   </indexterm>
+
+   <indexterm>
+    <primary>current_role</primary>
    </indexterm>
 
    <indexterm>
@@ -13622,6 +13693,11 @@ postgres=# SELECT * FROM unnest2(ARRAY[[1,2],[3,4]]);
     functions with the attribute <literal>SECURITY DEFINER</literal>.
     In Unix parlance, the session user is the <quote>real user</quote> and
     the current user is the <quote>effective user</quote>.
+    <function>current_role</function> and <function>user</function> are
+    synonyms for <function>current_user</function>.  (The SQL standard draws
+    a distinction between <function>current_role</function>
+    and <function>current_user</function>, but <productname>PostgreSQL</>
+    does not, since it unifies users and roles into a single kind of entity.)
    </para>
 
    <para>
@@ -13920,6 +13996,21 @@ SET search_path TO <replaceable>schema</> <optional>, <replaceable>schema</>, ..
        <entry>does current user have privilege for tablespace</entry>
       </row>
       <row>
+       <entry><literal><function>has_type_privilege</function>(<parameter>user</parameter>,
+                                  <parameter>type</parameter>,
+                                  <parameter>privilege</parameter>)</literal>
+       </entry>
+       <entry><type>boolean</type></entry>
+       <entry>does user have privilege for type</entry>
+      </row>
+      <row>
+       <entry><literal><function>has_type_privilege</function>(<parameter>type</parameter>,
+                                  <parameter>privilege</parameter>)</literal>
+       </entry>
+       <entry><type>boolean</type></entry>
+       <entry>does current user have privilege for type</entry>
+      </row>
+      <row>
        <entry><literal><function>pg_has_role</function>(<parameter>user</parameter>,
                                   <parameter>role</parameter>,
                                   <parameter>privilege</parameter>)</literal>
@@ -13970,6 +14061,9 @@ SET search_path TO <replaceable>schema</> <optional>, <replaceable>schema</>, ..
    </indexterm>
    <indexterm>
     <primary>has_tablespace_privilege</primary>
+   </indexterm>
+   <indexterm>
+    <primary>has_type_privilege</primary>
    </indexterm>
    <indexterm>
     <primary>pg_has_role</primary>
@@ -14120,6 +14214,18 @@ SELECT has_function_privilege('joeuser', 'myfunc(int, text)', 'execute');
     are analogous to <function>has_table_privilege</function>.
     The desired access privilege type must evaluate to
     <literal>CREATE</literal>.
+   </para>
+
+   <para>
+    <function>has_type_privilege</function> checks whether a user
+    can access a type in a particular way.
+    Its argument possibilities
+    are analogous to <function>has_table_privilege</function>.
+    When specifying a type by a text string rather than by OID,
+    the allowed input is the same as for the <type>regtype</> data type
+    (see <xref linkend="datatype-oid">).
+    The desired access privilege type must evaluate to
+    <literal>USAGE</literal>.
    </para>
 
    <para>

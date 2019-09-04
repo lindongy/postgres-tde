@@ -83,6 +83,9 @@ main(int argc, char **argv)
 	char	   *deletion_script_file_name = NULL;
 	bool		live_check = false;
 
+	/* Ensure that all files created by pg_upgrade are non-world-readable */
+	umask(S_IRWXG | S_IRWXO);
+
 	parseCommandLine(argc, argv);
 
 	get_restricted_token(os_info.progname);
@@ -168,7 +171,7 @@ main(int argc, char **argv)
 	create_script_for_cluster_analyze(&analyze_script_file_name);
 	create_script_for_old_cluster_deletion(&deletion_script_file_name);
 
-	issue_warnings(sequence_script_file_name);
+	issue_warnings_and_set_wal_level(sequence_script_file_name);
 
 	pg_log(PG_REPORT, "\nUpgrade Complete\n");
 	pg_log(PG_REPORT, "----------------\n");
@@ -364,7 +367,8 @@ setup(char *argv0, bool *live_check)
 		 * start, assume the server is running.  If the pid file is left over
 		 * from a server crash, this also allows any committed transactions
 		 * stored in the WAL to be replayed so they are not lost, because WAL
-		 * files are not transfered from old to new servers.
+		 * files are not transfered from old to new servers.  We later check
+		 * for a clean shutdown.
 		 */
 		if (start_postmaster(&old_cluster, false))
 			stop_postmaster(false);
@@ -435,13 +439,13 @@ static void
 prepare_new_databases(void)
 {
 	/*
-	 * We set autovacuum_freeze_max_age to its maximum value so autovacuum
-	 * does not launch here and delete clog files, before the frozen xids are
-	 * set.
+	 * Before we restore anything, set frozenxids of initdb-created tables.
 	 */
-
 	set_frozenxids(false);
 
+	/*
+	 * Now restore global objects (roles and tablespaces).
+	 */
 	prep_status("Restoring global objects in the new cluster");
 
 	/*
@@ -498,6 +502,15 @@ create_new_objects(void)
 		char		sql_file_name[MAXPGPATH],
 					log_file_name[MAXPGPATH];
 		DbInfo	   *old_db = &old_cluster.dbarr.dbs[dbnum];
+		PQExpBufferData connstr,
+					escaped_connstr;
+
+		initPQExpBuffer(&connstr);
+		appendPQExpBuffer(&connstr, "dbname=");
+		appendConnStrVal(&connstr, old_db->db_name);
+		initPQExpBuffer(&escaped_connstr);
+		appendShellString(&escaped_connstr, connstr.data);
+		termPQExpBuffer(&connstr);
 
 		pg_log(PG_STATUS, "%s", old_db->db_name);
 		snprintf(sql_file_name, sizeof(sql_file_name), DB_DUMP_FILE_MASK, old_db->db_oid);
@@ -509,11 +522,13 @@ create_new_objects(void)
 		 */
 		parallel_exec_prog(log_file_name,
 						   NULL,
-						   "\"%s/pg_restore\" %s --exit-on-error --verbose --dbname \"%s\" \"%s\"",
+		 "\"%s/pg_restore\" %s --exit-on-error --verbose --dbname %s \"%s\"",
 						   new_cluster.bindir,
 						   cluster_conn_opts(&new_cluster),
-						   old_db->db_name,
+						   escaped_connstr.data,
 						   sql_file_name);
+
+		termPQExpBuffer(&escaped_connstr);
 	}
 
 	/* reap all children */
@@ -525,12 +540,10 @@ create_new_objects(void)
 
 	/*
 	 * We don't have minmxids for databases or relations in pre-9.3
-	 * clusters, so set those after we have restores the schemas.
+	 * clusters, so set those after we have restored the schema.
 	 */
 	if (GET_MAJOR_VERSION(old_cluster.major_version) < 903)
 		set_frozenxids(true);
-
-	optionally_create_toast_tables();
 
 	/* regenerate now that we have objects in the databases */
 	get_db_and_rel_infos(&new_cluster);
@@ -670,14 +683,25 @@ copy_clog_xlog_xid(void)
 /*
  *	set_frozenxids()
  *
- *	We have frozen all xids, so set relfrozenxid and datfrozenxid
- *	to be the old cluster's xid counter, which we just set in the new
- *	cluster.  User-table frozenxid values will be set by pg_dumpall
- *	--binary-upgrade, but objects not set by the pg_dump must have
- *	proper frozen counters.
+ * This is called on the new cluster before we restore anything, with
+ * minmxid_only = false.  Its purpose is to ensure that all initdb-created
+ * vacuumable tables have relfrozenxid/relminmxid matching the old cluster's
+ * xid/mxid counters.  We also initialize the datfrozenxid/datminmxid of the
+ * built-in databases to match.
+ *
+ * As we create user tables later, their relfrozenxid/relminmxid fields will
+ * be restored properly by the binary-upgrade restore script.  Likewise for
+ * user-database datfrozenxid/datminmxid.  However, if we're upgrading from a
+ * pre-9.3 database, which does not store per-table or per-DB minmxid, then
+ * the relminmxid/datminmxid values filled in by the restore script will just
+ * be zeroes.
+ *
+ * Hence, with a pre-9.3 source database, a second call occurs after
+ * everything is restored, with minmxid_only = true.  This pass will
+ * initialize all tables and databases, both those made by initdb and user
+ * objects, with the desired minmxid value.  frozenxid values are left alone.
  */
-static
-void
+static void
 set_frozenxids(bool minmxid_only)
 {
 	int			dbnum;

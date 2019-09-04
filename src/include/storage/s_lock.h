@@ -94,10 +94,7 @@
 #ifndef S_LOCK_H
 #define S_LOCK_H
 
-#include "storage/pg_sema.h"
-
 #ifdef HAVE_SPINLOCKS	/* skip spinlocks if requested */
-
 
 #if defined(__GNUC__) || defined(__INTEL_COMPILER)
 /*************************************************************************
@@ -562,6 +559,30 @@ tas(volatile slock_t *lock)
 #endif	 /* (__mc68000__ || __m68k__) && __linux__ */
 
 
+/* Motorola 88k */
+#if defined(__m88k__)
+#define HAS_TEST_AND_SET
+
+typedef unsigned int slock_t;
+
+#define TAS(lock) tas(lock)
+
+static __inline__ int
+tas(volatile slock_t *lock)
+{
+	register slock_t _res = 1;
+
+	__asm__ __volatile__(
+		"	xmem	%0, %2, %%r0	\n"
+:		"+r"(_res), "+m"(*lock)
+:		"r"(lock)
+:		"memory");
+	return (int) _res;
+}
+
+#endif	 /* __m88k__ */
+
+
 /*
  * VAXen -- even multiprocessor ones
  * (thanks to Tom Ivar Helbekkmo)
@@ -995,7 +1016,7 @@ typedef LONG slock_t;
 #define SPIN_DELAY() spin_delay()
 
 /* If using Visual C++ on Win64, inline assembly is unavailable.
- * Use a _mm_pause instrinsic instead of rep nop.
+ * Use a _mm_pause intrinsic instead of rep nop.
  */
 #if defined(_WIN64)
 static __forceinline void
@@ -1032,7 +1053,7 @@ spin_delay(void)
  * to fall foul of kernel limits on number of semaphores, so don't use this
  * unless you must!  The subroutines appear in spin.c.
  */
-typedef PGSemaphoreData slock_t;
+typedef int slock_t;
 
 extern bool s_lock_free_sema(volatile slock_t *lock);
 extern void s_unlock_sema(volatile slock_t *lock);

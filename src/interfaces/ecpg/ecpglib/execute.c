@@ -1,8 +1,8 @@
 /* src/interfaces/ecpg/ecpglib/execute.c */
 
 /*
- * The aim is to get a simpler inteface to the database routines.
- * All the tidieous messing around with tuples is supposed to be hidden
+ * The aim is to get a simpler interface to the database routines.
+ * All the tedious messing around with tuples is supposed to be hidden
  * by this function.
  */
 /* Author: Linus Tolke
@@ -1301,8 +1301,8 @@ ecpg_build_params(struct statement * stmt, bool first_0_is_cursor_amount)
 		if ((position = next_insert(stmt->command, position, stmt->questionmarks) + 1) == 0)
 		{
 			/*
-			 * We have an argument but we dont have the matched up placeholder
-			 * in the string
+			 * We have an argument but we don't have the matched up
+			 * placeholder in the string
 			 */
 			ecpg_raise(stmt->lineno, ECPG_TOO_MANY_ARGUMENTS,
 					   ECPG_SQLSTATE_USING_CLAUSE_DOES_NOT_MATCH_PARAMETERS,

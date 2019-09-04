@@ -197,7 +197,7 @@ sub CopySolutionOutput
 	my $conf   = shift;
 	my $target = shift;
 	my $rem =
-	  qr{Project\("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}"\) = "([^"]+)"};
+	  qr{Project\("\{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942\}"\) = "([^"]+)"};
 
 	my $sln = read_file("pgsql.sln") || croak "Could not open pgsql.sln\n";
 
@@ -315,13 +315,28 @@ sub GenerateTimezoneFiles
 	my $conf   = shift;
 	my $mf     = read_file("src/timezone/Makefile");
 	$mf =~ s{\\\s*[\r\n]+}{}mg;
-	$mf =~ /^TZDATA\s*:?=\s*(.*)$/m
-	  || die "Could not find TZDATA row in timezone makefile\n";
+
+	$mf =~ /^TZDATAFILES\s*:?=\s*(.*)$/m
+	  || die "Could not find TZDATAFILES line in timezone makefile\n";
 	my @tzfiles = split /\s+/, $1;
-	unshift @tzfiles, '';
+
+	$mf =~ /^POSIXRULES\s*:?=\s*(.*)$/m
+	  || die "Could not find POSIXRULES line in timezone makefile\n";
+	my $posixrules = $1;
+	$posixrules =~ s/\s+//g;
+
 	print "Generating timezone files...";
-	system("$conf\\zic\\zic -d \"$target/share/timezone\" "
-		  . join(" src/timezone/data/", @tzfiles));
+
+	my @args = ("$conf/zic/zic", '-d', "$target/share/timezone",
+				'-p', "$posixrules");
+	foreach (@tzfiles)
+	{
+		my $tzfile = $_;
+		$tzfile =~ s|\$\(srcdir\)|src/timezone|;
+		push(@args, $tzfile);
+	}
+
+	system(@args);
 	print "\n";
 }
 
@@ -550,9 +565,10 @@ sub CopyIncludeFiles
 		next unless (-d "src/include/$d");
 
 		EnsureDirectories("$target/include/server/$d");
-		system(
-qq{xcopy /s /i /q /r /y src\\include\\$d\\*.h "$ctarget\\include\\server\\$d\\"}
-		) && croak("Failed to copy include directory $d\n");
+		my @args = ('xcopy', '/s', '/i', '/q', '/r', '/y',
+				 "src\\include\\$d\\*.h",
+				 "$ctarget\\include\\server\\$d\\");
+		system(@args) && croak("Failed to copy include directory $d\n");
 	}
 	closedir($D);
 
@@ -605,9 +621,11 @@ sub GenerateNLSFiles
 
 			EnsureDirectories($target, "share/locale/$lang",
 				"share/locale/$lang/LC_MESSAGES");
-			system(
-"\"$nlspath\\bin\\msgfmt\" -o \"$target\\share\\locale\\$lang\\LC_MESSAGES\\$prgm-$majorver.mo\" $_"
-			) && croak("Could not run msgfmt on $dir\\$_");
+			my @args = ("$nlspath\\bin\\msgfmt",
+			   '-o',
+			   "$target\\share\\locale\\$lang\\LC_MESSAGES\\$prgm-$majorver.mo",
+			   $_);
+			system(@args) && croak("Could not run msgfmt on $dir\\$_");
 			print ".";
 		}
 	}

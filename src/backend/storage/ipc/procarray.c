@@ -651,10 +651,21 @@ ProcArrayApplyRecoveryInfo(RunningTransactions running)
 		qsort(xids, nxids, sizeof(TransactionId), xidComparator);
 
 		/*
-		 * Add the sorted snapshot into KnownAssignedXids
+		 * Add the sorted snapshot into KnownAssignedXids.  The running-xacts
+		 * snapshot may include duplicated xids because of prepared
+		 * transactions, so ignore them.
 		 */
 		for (i = 0; i < nxids; i++)
+		{
+			if (i > 0 && TransactionIdEquals(xids[i - 1], xids[i]))
+			{
+				elog(DEBUG1,
+					 "found duplicated transaction %u for KnownAssignedXids insertion",
+					 xids[i]);
+				continue;
+			}
 			KnownAssignedXidsAdd(xids[i], xids[i], true);
+		}
 
 		KnownAssignedXidsDisplay(trace_recovery(DEBUG3));
 	}
@@ -1604,7 +1615,8 @@ ProcArrayInstallImportedXmin(TransactionId xmin, TransactionId sourcexid)
  * GetRunningTransactionData -- returns information about running transactions.
  *
  * Similar to GetSnapshotData but returns more information. We include
- * all PGXACTs with an assigned TransactionId, even VACUUM processes.
+ * all PGXACTs with an assigned TransactionId, even VACUUM processes and
+ * prepared transactions.
  *
  * We acquire XidGenLock, but the caller is responsible for releasing it.
  * This ensures that no new XIDs enter the proc array until the caller has
@@ -1615,6 +1627,11 @@ ProcArrayInstallImportedXmin(TransactionId xmin, TransactionId sourcexid)
  *
  * This is never executed during recovery so there is no need to look at
  * KnownAssignedXids.
+ *
+ * Dummy PGXACTs from prepared transaction are included, meaning that this
+ * may return entries with duplicated TransactionId values coming from
+ * transaction finishing to prepare.  Nothing is done about duplicated
+ * entries here to not hold on ProcArrayLock more than necessary.
  *
  * We don't worry about updating other counters, we want to keep this as
  * simple as possible and leave GetSnapshotData() as the primary code for
@@ -1784,20 +1801,21 @@ GetOldestActiveTransactionId(void)
 
 	Assert(!RecoveryInProgress());
 
-	LWLockAcquire(ProcArrayLock, LW_SHARED);
-
 	/*
-	 * It's okay to read nextXid without acquiring XidGenLock because (1) we
-	 * assume TransactionIds can be read atomically and (2) we don't care if
-	 * we get a slightly stale value.  It can't be very stale anyway, because
-	 * the LWLockAcquire above will have done any necessary memory
-	 * interlocking.
+	 * Read nextXid, as the upper bound of what's still active.
+	 *
+	 * Reading a TransactionId is atomic, but we must grab the lock to make
+	 * sure that all XIDs < nextXid are already present in the proc array (or
+	 * have already completed), when we spin over it.
 	 */
+	LWLockAcquire(XidGenLock, LW_SHARED);
 	oldestRunningXid = ShmemVariableCache->nextXid;
+	LWLockRelease(XidGenLock);
 
 	/*
 	 * Spin over procArray collecting all xids and subxids.
 	 */
+	LWLockAcquire(ProcArrayLock, LW_SHARED);
 	for (index = 0; index < arrayP->numProcs; index++)
 	{
 		int			pgprocno = arrayP->pgprocnos[index];
@@ -1819,7 +1837,6 @@ GetOldestActiveTransactionId(void)
 		 * smaller than oldestRunningXid
 		 */
 	}
-
 	LWLockRelease(ProcArrayLock);
 
 	return oldestRunningXid;

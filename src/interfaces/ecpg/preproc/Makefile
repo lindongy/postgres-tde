@@ -26,7 +26,7 @@ override CPPFLAGS := -I../include -I$(top_srcdir)/src/interfaces/ecpg/include \
 
 override CFLAGS += $(PTHREAD_CFLAGS) -DECPG_COMPILE
 
-OBJS=	preproc.o type.o ecpg.o output.o parser.o \
+OBJS=	preproc.o pgc.o type.o ecpg.o output.o parser.o \
 	keywords.o c_keywords.o ecpg_keywords.o kwlookup.o ../ecpglib/typename.o descriptor.o variable.o \
 	$(WIN32RES)
 
@@ -44,17 +44,17 @@ ecpg: $(OBJS) | submake-libpgport
 ../ecpglib/typename.o: ../ecpglib/typename.c
 	$(MAKE) -C $(dir $@) $(notdir $@)
 
-# pgc is compiled as part of preproc
-preproc.o: pgc.c
+# See notes in src/backend/parser/Makefile about the following two rules
+preproc.h: preproc.c
+	touch $@
 
-preproc.h: preproc.c ;
 preproc.c: BISONFLAGS += -d
 
 preproc.y: ../../../backend/parser/gram.y parse.pl ecpg.addons ecpg.header ecpg.tokens ecpg.trailer ecpg.type
 	$(PERL) $(srcdir)/parse.pl $(srcdir) < $< > $@
 	$(PERL) $(srcdir)/check_rules.pl $(srcdir) $<
 
-ecpg_keywords.o c_keywords.o keywords.o preproc.o parser.o: preproc.h
+ecpg_keywords.o c_keywords.o keywords.o preproc.o pgc.o parser.o: preproc.h
 
 kwlookup.c: % : $(top_srcdir)/src/backend/parser/%
 	rm -f $@ && $(LN_S) $< .

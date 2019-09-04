@@ -587,13 +587,13 @@ vacuum_set_xid_limits(int freeze_min_age,
  * vac_estimate_reltuples() -- estimate the new value for pg_class.reltuples
  *
  *		If we scanned the whole relation then we should just use the count of
- *		live tuples seen; but if we did not, we should not trust the count
- *		unreservedly, especially not in VACUUM, which may have scanned a quite
- *		nonrandom subset of the table.  When we have only partial information,
- *		we take the old value of pg_class.reltuples as a measurement of the
+ *		live tuples seen; but if we did not, we should not blindly extrapolate
+ *		from that number, since VACUUM may have scanned a quite nonrandom
+ *		subset of the table.  When we have only partial information, we take
+ *		the old value of pg_class.reltuples as a measurement of the
  *		tuple density in the unscanned pages.
  *
- *		This routine is shared by VACUUM and ANALYZE.
+ *		The is_analyze argument is historical.
  */
 double
 vac_estimate_reltuples(Relation relation, bool is_analyze,
@@ -604,9 +604,8 @@ vac_estimate_reltuples(Relation relation, bool is_analyze,
 	BlockNumber old_rel_pages = relation->rd_rel->relpages;
 	double		old_rel_tuples = relation->rd_rel->reltuples;
 	double		old_density;
-	double		new_density;
-	double		multiplier;
-	double		updated_density;
+	double		unscanned_pages;
+	double		total_tuples;
 
 	/* If we did scan the whole table, just use the count as-is */
 	if (scanned_pages >= total_pages)
@@ -630,31 +629,14 @@ vac_estimate_reltuples(Relation relation, bool is_analyze,
 
 	/*
 	 * Okay, we've covered the corner cases.  The normal calculation is to
-	 * convert the old measurement to a density (tuples per page), then update
-	 * the density using an exponential-moving-average approach, and finally
-	 * compute reltuples as updated_density * total_pages.
-	 *
-	 * For ANALYZE, the moving average multiplier is just the fraction of the
-	 * table's pages we scanned.  This is equivalent to assuming that the
-	 * tuple density in the unscanned pages didn't change.  Of course, it
-	 * probably did, if the new density measurement is different. But over
-	 * repeated cycles, the value of reltuples will converge towards the
-	 * correct value, if repeated measurements show the same new density.
-	 *
-	 * For VACUUM, the situation is a bit different: we have looked at a
-	 * nonrandom sample of pages, but we know for certain that the pages we
-	 * didn't look at are precisely the ones that haven't changed lately.
-	 * Thus, there is a reasonable argument for doing exactly the same thing
-	 * as for the ANALYZE case, that is use the old density measurement as the
-	 * value for the unscanned pages.
-	 *
-	 * This logic could probably use further refinement.
+	 * convert the old measurement to a density (tuples per page), then
+	 * estimate the number of tuples in the unscanned pages using that figure,
+	 * and finally add on the number of tuples in the scanned pages.
 	 */
 	old_density = old_rel_tuples / old_rel_pages;
-	new_density = scanned_tuples / scanned_pages;
-	multiplier = (double) scanned_pages / (double) total_pages;
-	updated_density = old_density + (new_density - old_density) * multiplier;
-	return floor(updated_density * total_pages + 0.5);
+	unscanned_pages = (double) total_pages - (double) scanned_pages;
+	total_tuples = old_density * unscanned_pages + scanned_tuples;
+	return floor(total_tuples + 0.5);
 }
 
 
@@ -1002,7 +984,7 @@ vac_truncate_clog(TransactionId frozenXID,
 				  TransactionId lastSaneFrozenXid,
 				  MultiXactId lastSaneMinMulti)
 {
-	TransactionId myXID = GetCurrentTransactionId();
+	TransactionId nextXID = ReadNewTransactionId();
 	Relation	relation;
 	HeapScanDesc scan;
 	HeapTuple	tuple;
@@ -1017,6 +999,12 @@ vac_truncate_clog(TransactionId frozenXID,
 
 	/*
 	 * Scan pg_database to compute the minimum datfrozenxid/datminmxid
+	 *
+	 * Since vac_update_datfrozenxid updates datfrozenxid/datminmxid in-place,
+	 * the values could change while we look at them.  Fetch each one just
+	 * once to ensure sane behavior of the comparison logic.  (Here, as in
+	 * many other places, we assume that fetching or updating an XID in shared
+	 * storage is atomic.)
 	 *
 	 * Note: we need not worry about a race condition with new entries being
 	 * inserted by CREATE DATABASE.  Any such entry will have a copy of some
@@ -1033,10 +1021,12 @@ vac_truncate_clog(TransactionId frozenXID,
 
 	while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL)
 	{
-		Form_pg_database dbform = (Form_pg_database) GETSTRUCT(tuple);
+		volatile FormData_pg_database *dbform = (Form_pg_database) GETSTRUCT(tuple);
+		TransactionId datfrozenxid = dbform->datfrozenxid;
+		TransactionId datminmxid = dbform->datminmxid;
 
-		Assert(TransactionIdIsNormal(dbform->datfrozenxid));
-		Assert(MultiXactIdIsValid(dbform->datminmxid));
+		Assert(TransactionIdIsNormal(datfrozenxid));
+		Assert(MultiXactIdIsValid(datminmxid));
 
 		/*
 		 * If things are working properly, no database should have a
@@ -1047,21 +1037,21 @@ vac_truncate_clog(TransactionId frozenXID,
 		 * databases have been scanned and cleaned up.  (We will issue the
 		 * "already wrapped" warning if appropriate, though.)
 		 */
-		if (TransactionIdPrecedes(lastSaneFrozenXid, dbform->datfrozenxid) ||
-			MultiXactIdPrecedes(lastSaneMinMulti, dbform->datminmxid))
+		if (TransactionIdPrecedes(lastSaneFrozenXid, datfrozenxid) ||
+			MultiXactIdPrecedes(lastSaneMinMulti, datminmxid))
 			bogus = true;
 
-		if (TransactionIdPrecedes(myXID, dbform->datfrozenxid))
+		if (TransactionIdPrecedes(nextXID, datfrozenxid))
 			frozenAlreadyWrapped = true;
-		else if (TransactionIdPrecedes(dbform->datfrozenxid, frozenXID))
+		else if (TransactionIdPrecedes(datfrozenxid, frozenXID))
 		{
-			frozenXID = dbform->datfrozenxid;
+			frozenXID = datfrozenxid;
 			oldestxid_datoid = HeapTupleGetOid(tuple);
 		}
 
-		if (MultiXactIdPrecedes(dbform->datminmxid, minMulti))
+		if (MultiXactIdPrecedes(datminmxid, minMulti))
 		{
-			minMulti = dbform->datminmxid;
+			minMulti = datminmxid;
 			minmulti_datoid = HeapTupleGetOid(tuple);
 		}
 	}

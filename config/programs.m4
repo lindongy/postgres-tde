@@ -23,6 +23,14 @@ if test "$BISON"; then
 *** Bison version 1.875 or later is required, but this is $pgac_bison_version.])
     BISON=""
   fi
+  # Bison >=3.0 issues warnings about %name-prefix="base_yy", instead
+  # of the now preferred %name-prefix "base_yy", but the latter
+  # doesn't work with Bison 2.3 or less.  So for now we silence the
+  # deprecation warnings.
+  if echo "$pgac_bison_version" | $AWK '{ if ([$]4 >= 3) exit 0; else exit 1;}'
+  then
+    BISONFLAGS="$BISONFLAGS -Wno-deprecated"
+  fi
 fi
 
 if test -z "$BISON"; then
@@ -69,7 +77,7 @@ else
         echo '%%'  > conftest.l
         if $pgac_candidate -t conftest.l 2>/dev/null | grep FLEX_SCANNER >/dev/null 2>&1; then
           pgac_flex_version=`$pgac_candidate --version 2>/dev/null`
-          if echo "$pgac_flex_version" | sed ['s/[.a-z]/ /g'] | $AWK '{ if ([$]1 = 2 && ([$]2 > 5 || ([$]2 = 5 && [$]3 >= 31))) exit 0; else exit 1;}'
+          if echo "$pgac_flex_version" | sed ['s/[.a-z]/ /g'] | $AWK '{ if ([$]1 == 2 && ([$]2 > 5 || ([$]2 == 5 && [$]3 >= 31))) exit 0; else exit 1;}'
           then
             pgac_cv_path_flex=$pgac_candidate
             break 2

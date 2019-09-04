@@ -802,7 +802,7 @@ static const pgsql_thing_t words_after_create[] = {
 	{"UNIQUE", NULL, NULL, THING_NO_DROP},		/* for CREATE UNIQUE INDEX ... */
 	{"UNLOGGED", NULL, NULL, THING_NO_DROP},	/* for CREATE UNLOGGED TABLE
 												 * ... */
-	{"USER", Query_for_list_of_roles},
+	{"USER", Query_for_list_of_roles " UNION SELECT 'MAPPING FOR'"},
 	{"USER MAPPING FOR", NULL, NULL},
 	{"VIEW", NULL, &Query_for_list_of_views},
 	{NULL}						/* end of list */
@@ -1187,7 +1187,7 @@ psql_completion(char *text, int start, int end)
 			 pg_strcasecmp(prev_wd, "PRIVILEGES") == 0)
 	{
 		static const char *const list_ALTER_DEFAULT_PRIVILEGES[] =
-		{"FOR ROLE", "FOR USER", "IN SCHEMA", NULL};
+		{"FOR ROLE", "IN SCHEMA", NULL};
 
 		COMPLETE_WITH_LIST(list_ALTER_DEFAULT_PRIVILEGES);
 	}
@@ -1197,19 +1197,26 @@ psql_completion(char *text, int start, int end)
 			 pg_strcasecmp(prev2_wd, "PRIVILEGES") == 0 &&
 			 pg_strcasecmp(prev_wd, "FOR") == 0)
 	{
-		static const char *const list_ALTER_DEFAULT_PRIVILEGES_FOR[] =
-		{"ROLE", "USER", NULL};
-
-		COMPLETE_WITH_LIST(list_ALTER_DEFAULT_PRIVILEGES_FOR);
+		COMPLETE_WITH_CONST("ROLE");
 	}
-	/* ALTER DEFAULT PRIVILEGES { FOR ROLE ... | IN SCHEMA ... } */
+	/* ALTER DEFAULT PRIVILEGES FOR ROLE ... } */
 	else if (pg_strcasecmp(prev5_wd, "DEFAULT") == 0 &&
 			 pg_strcasecmp(prev4_wd, "PRIVILEGES") == 0 &&
-			 (pg_strcasecmp(prev3_wd, "FOR") == 0 ||
-			  pg_strcasecmp(prev3_wd, "IN") == 0))
+			 pg_strcasecmp(prev3_wd, "FOR") == 0)
 	{
 		static const char *const list_ALTER_DEFAULT_PRIVILEGES_REST[] =
-		{"GRANT", "REVOKE", NULL};
+		{"GRANT", "REVOKE", "IN SCHEMA", NULL};
+
+		COMPLETE_WITH_LIST(list_ALTER_DEFAULT_PRIVILEGES_REST);
+	}
+	/* ALTER DEFAULT PRIVILEGES IN SCHEMA ... } */
+	else if (pg_strcasecmp(prev5_wd, "DEFAULT") == 0 &&
+			 pg_strcasecmp(prev4_wd, "PRIVILEGES") == 0 &&
+			 pg_strcasecmp(prev3_wd, "IN") == 0 &&
+			 pg_strcasecmp(prev2_wd, "SCHEMA") == 0)
+	{
+		static const char *const list_ALTER_DEFAULT_PRIVILEGES_REST[] =
+		{"GRANT", "REVOKE", "FOR ROLE", NULL};
 
 		COMPLETE_WITH_LIST(list_ALTER_DEFAULT_PRIVILEGES_REST);
 	}
@@ -2579,8 +2586,9 @@ psql_completion(char *text, int start, int end)
 
 /* GRANT && REVOKE */
 	/* Complete GRANT/REVOKE with a list of roles and privileges */
-	else if (pg_strcasecmp(prev_wd, "GRANT") == 0 ||
-			 pg_strcasecmp(prev_wd, "REVOKE") == 0)
+	else if (prev2_wd[0] == '\0' &&
+			 (pg_strcasecmp(prev_wd, "GRANT") == 0 ||
+			  pg_strcasecmp(prev_wd, "REVOKE") == 0))
 	{
 		COMPLETE_WITH_QUERY(Query_for_list_of_roles
 							" UNION SELECT 'SELECT'"
@@ -3352,9 +3360,7 @@ psql_completion(char *text, int start, int end)
 		}
 	}
 	else if (strcmp(prev_wd, "\\set") == 0)
-	{
 		matches = complete_from_variables(text, "", "");
-	}
 	else if (strcmp(prev_wd, "\\sf") == 0 || strcmp(prev_wd, "\\sf+") == 0)
 		COMPLETE_WITH_SCHEMA_QUERY(Query_for_list_of_functions, NULL);
 	else if (strcmp(prev_wd, "\\cd") == 0 ||

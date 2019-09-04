@@ -5608,9 +5608,9 @@
       <entry>The number of distinct nonnull data values in the column.
       A value greater than zero is the actual number of distinct values.
       A value less than zero is the negative of a multiplier for the number
-      of rows in the table; for example, a column in which values appear about
-      twice on the average could be represented by
-      <structfield>stadistinct</> = -0.5.
+      of rows in the table; for example, a column in which about 80% of the
+      values are nonnull and each nonnull value appears about twice on
+      average could be represented by <structfield>stadistinct</> = -0.4.
       A zero value means the number of distinct values is unknown.
       </entry>
      </row>
@@ -8977,6 +8977,13 @@ SELECT * FROM pg_locks pl LEFT JOIN pg_prepared_xacts ppx
    </tgroup>
   </table>
 
+  <para>
+   While most timezone abbreviations represent fixed offsets from UTC,
+   there are some that have historically varied in value
+   (see <xref linkend="datetime-config-files"> for more information).
+   In such cases this view presents their current meaning.
+  </para>
+
  </sect1>
 
  <sect1 id="view-pg-timezone-names">
@@ -9204,14 +9211,37 @@ SELECT * FROM pg_locks pl LEFT JOIN pg_prepared_xacts ppx
       <entry><type>text[]</type></entry>
       <entry></entry>
       <entry>
-       User mapping specific options, as <quote>keyword=value</>
-       strings, if the current user is the owner of the foreign
-       server, else null
+       User mapping specific options, as <quote>keyword=value</> strings
       </entry>
      </row>
     </tbody>
    </tgroup>
   </table>
+
+  <para>
+   To protect password information stored as a user mapping option,
+   the <structfield>umoptions</structfield> column will read as null
+   unless one of the following applies:
+   <itemizedlist>
+    <listitem>
+     <para>
+      current user is the user being mapped, and owns the server or
+      holds <literal>USAGE</> privilege on it
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      current user is the server owner and mapping is for <literal>PUBLIC</>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      current user is a superuser
+     </para>
+    </listitem>
+   </itemizedlist>
+  </para>
+
  </sect1>
 
 

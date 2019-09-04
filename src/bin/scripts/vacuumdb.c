@@ -244,7 +244,7 @@ vacuum_one_database(const char *dbname, bool full, bool verbose, bool and_analyz
 	initPQExpBuffer(&sql);
 
 	conn = connectDatabase(dbname, host, port, username, prompt_password,
-						   progname, false);
+						   progname, echo, false);
 
 	if (analyze_only)
 	{
@@ -297,17 +297,20 @@ vacuum_one_database(const char *dbname, bool full, bool verbose, bool and_analyz
 		}
 	}
 	if (table)
-		appendPQExpBuffer(&sql, " %s", table);
+	{
+		appendPQExpBufferChar(&sql, ' ');
+		appendQualifiedRelation(&sql, table, conn, progname, echo);
+	}
 	appendPQExpBuffer(&sql, ";\n");
 
 	if (!executeMaintenanceCommand(conn, sql.data, echo))
 	{
 		if (table)
 			fprintf(stderr, _("%s: vacuuming of table \"%s\" in database \"%s\" failed: %s"),
-					progname, table, dbname, PQerrorMessage(conn));
+					progname, table, PQdb(conn), PQerrorMessage(conn));
 		else
 			fprintf(stderr, _("%s: vacuuming of database \"%s\" failed: %s"),
-					progname, dbname, PQerrorMessage(conn));
+					progname, PQdb(conn), PQerrorMessage(conn));
 		PQfinish(conn);
 		exit(1);
 	}
@@ -325,13 +328,15 @@ vacuum_all_databases(bool full, bool verbose, bool and_analyze, bool analyze_onl
 {
 	PGconn	   *conn;
 	PGresult   *result;
+	PQExpBufferData connstr;
 	int			i;
 
 	conn = connectMaintenanceDatabase(maintenance_db, host, port,
-									  username, prompt_password, progname);
+									  username, prompt_password, progname, echo);
 	result = executeQuery(conn, "SELECT datname FROM pg_database WHERE datallowconn ORDER BY 1;", progname, echo);
 	PQfinish(conn);
 
+	initPQExpBuffer(&connstr);
 	for (i = 0; i < PQntuples(result); i++)
 	{
 		char	   *dbname = PQgetvalue(result, i, 0);
@@ -342,10 +347,16 @@ vacuum_all_databases(bool full, bool verbose, bool and_analyze, bool analyze_onl
 			fflush(stdout);
 		}
 
-		vacuum_one_database(dbname, full, verbose, and_analyze, analyze_only,
+		resetPQExpBuffer(&connstr);
+		appendPQExpBuffer(&connstr, "dbname=");
+		appendConnStrVal(&connstr, PQgetvalue(result, i, 0));
+
+		vacuum_one_database(connstr.data, full, verbose, and_analyze,
+							analyze_only,
 						 freeze, NULL, host, port, username, prompt_password,
 							progname, echo);
 	}
+	termPQExpBuffer(&connstr);
 
 	PQclear(result);
 }

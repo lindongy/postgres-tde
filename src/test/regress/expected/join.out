@@ -2203,6 +2203,118 @@ where t4.thousand = t5.unique1 and ss.x1 = t4.tenthous and ss.x2 = t5.stringu1;
 (1 row)
 
 --
+-- regression test: check a case where we formerly missed including an EC
+-- enforcement clause because it was expected to be handled at scan level
+--
+explain (costs off)
+select a.f1, b.f1, t.thousand, t.tenthous from
+  tenk1 t,
+  (select sum(f1)+1 as f1 from int4_tbl i4a) a,
+  (select sum(f1) as f1 from int4_tbl i4b) b
+where b.f1 = t.thousand and a.f1 = b.f1 and (a.f1+b.f1+999) = t.tenthous;
+                                                      QUERY PLAN                                                       
+-----------------------------------------------------------------------------------------------------------------------
+ Nested Loop
+   ->  Aggregate
+         ->  Seq Scan on int4_tbl i4b
+   ->  Nested Loop
+         Join Filter: ((sum(i4b.f1)) = ((sum(i4a.f1) + 1)))
+         ->  Aggregate
+               ->  Seq Scan on int4_tbl i4a
+         ->  Index Only Scan using tenk1_thous_tenthous on tenk1 t
+               Index Cond: ((thousand = (sum(i4b.f1))) AND (tenthous = ((((sum(i4a.f1) + 1)) + (sum(i4b.f1))) + 999)))
+(9 rows)
+
+select a.f1, b.f1, t.thousand, t.tenthous from
+  tenk1 t,
+  (select sum(f1)+1 as f1 from int4_tbl i4a) a,
+  (select sum(f1) as f1 from int4_tbl i4b) b
+where b.f1 = t.thousand and a.f1 = b.f1 and (a.f1+b.f1+999) = t.tenthous;
+ f1 | f1 | thousand | tenthous 
+----+----+----------+----------
+(0 rows)
+
+--
+-- check a case where we formerly got confused by conflicting sort orders
+-- in redundant merge join path keys
+--
+explain (costs off)
+select * from
+  j1_tbl full join
+  (select * from j2_tbl order by j2_tbl.i desc, j2_tbl.k asc) j2_tbl
+  on j1_tbl.i = j2_tbl.i and j1_tbl.i = j2_tbl.k;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Merge Full Join
+   Merge Cond: ((j2_tbl.i = j1_tbl.i) AND (j2_tbl.k = j1_tbl.i))
+   ->  Sort
+         Sort Key: j2_tbl.i, j2_tbl.k
+         ->  Seq Scan on j2_tbl
+   ->  Sort
+         Sort Key: j1_tbl.i
+         ->  Seq Scan on j1_tbl
+(8 rows)
+
+select * from
+  j1_tbl full join
+  (select * from j2_tbl order by j2_tbl.i desc, j2_tbl.k asc) j2_tbl
+  on j1_tbl.i = j2_tbl.i and j1_tbl.i = j2_tbl.k;
+ i | j |   t   | i | k  
+---+---+-------+---+----
+   |   |       |   |  0
+   |   |       |   |   
+   | 0 | zero  |   |   
+   |   | null  |   |   
+ 8 | 8 | eight |   |   
+ 7 | 7 | seven |   |   
+ 6 | 6 | six   |   |   
+   |   |       | 5 | -5
+   |   |       | 5 | -5
+ 5 | 0 | five  |   |   
+ 4 | 1 | four  |   |   
+   |   |       | 3 | -3
+ 3 | 2 | three |   |   
+ 2 | 3 | two   | 2 |  2
+   |   |       | 2 |  4
+   |   |       | 1 | -1
+   |   |       | 0 |   
+ 1 | 4 | one   |   |   
+ 0 |   | zero  |   |   
+(19 rows)
+
+--
+-- a different check for handling of redundant sort keys in merge joins
+--
+explain (costs off)
+select count(*) from
+  (select * from tenk1 x order by x.thousand, x.twothousand, x.fivethous) x
+  left join
+  (select * from tenk1 y order by y.unique2) y
+  on x.thousand = y.unique2 and x.twothousand = y.hundred and x.fivethous = y.unique2;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   ->  Merge Left Join
+         Merge Cond: (x.thousand = y.unique2)
+         Join Filter: ((x.twothousand = y.hundred) AND (x.fivethous = y.unique2))
+         ->  Sort
+               Sort Key: x.thousand, x.twothousand, x.fivethous
+               ->  Seq Scan on tenk1 x
+         ->  Materialize
+               ->  Index Scan using tenk1_unique2 on tenk1 y
+(9 rows)
+
+select count(*) from
+  (select * from tenk1 x order by x.thousand, x.twothousand, x.fivethous) x
+  left join
+  (select * from tenk1 y order by y.unique2) y
+  on x.thousand = y.unique2 and x.twothousand = y.hundred and x.fivethous = y.unique2;
+ count 
+-------
+ 10000
+(1 row)
+
+--
 -- Clean up
 --
 DROP TABLE t1;
@@ -2469,6 +2581,36 @@ select * from a left join b on i = x and i = y and x = i;
  i | x | y 
 ---+---+---
 (0 rows)
+
+rollback;
+--
+-- test handling of merge clauses using record_ops
+--
+begin;
+create type mycomptype as (id int, v bigint);
+create temp table tidv (idv mycomptype);
+create index on tidv (idv);
+explain (costs off)
+select a.idv, b.idv from tidv a, tidv b where a.idv = b.idv;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Merge Join
+   Merge Cond: (a.idv = b.idv)
+   ->  Index Only Scan using tidv_idv_idx on tidv a
+   ->  Materialize
+         ->  Index Only Scan using tidv_idv_idx on tidv b
+(5 rows)
+
+set enable_mergejoin = 0;
+explain (costs off)
+select a.idv, b.idv from tidv a, tidv b where a.idv = b.idv;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Nested Loop
+   ->  Seq Scan on tidv a
+   ->  Index Only Scan using tidv_idv_idx on tidv b
+         Index Cond: (idv = a.idv)
+(4 rows)
 
 rollback;
 --
@@ -3095,6 +3237,33 @@ order by fault;
          | 123 |   122
 (1 row)
 
+explain (costs off)
+select * from
+(values (1, array[10,20]), (2, array[20,30])) as v1(v1x,v1ys)
+left join (values (1, 10), (2, 20)) as v2(v2x,v2y) on v2x = v1x
+left join unnest(v1ys) as u1(u1y) on u1y = v2y;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Nested Loop Left Join
+   ->  Values Scan on "*VALUES*"
+   ->  Hash Right Join
+         Hash Cond: (u1.u1y = "*VALUES*_1".column2)
+         Filter: ("*VALUES*_1".column1 = "*VALUES*".column1)
+         ->  Function Scan on unnest u1
+         ->  Hash
+               ->  Values Scan on "*VALUES*_1"
+(8 rows)
+
+select * from
+(values (1, array[10,20]), (2, array[20,30])) as v1(v1x,v1ys)
+left join (values (1, 10), (2, 20)) as v2(v2x,v2y) on v2x = v1x
+left join unnest(v1ys) as u1(u1y) on u1y = v2y;
+ v1x |  v1ys   | v2x | v2y | u1y 
+-----+---------+-----+-----+-----
+   1 | {10,20} |   1 |  10 |  10
+   2 | {20,30} |   2 |  20 |  20
+(2 rows)
+
 --
 -- test handling of potential equivalence clauses above outer joins
 --
@@ -3658,6 +3827,37 @@ where ss1.c2 = 0;
  f1 | q1 | q2 | c1 | c2 | c3 
 ----+----+----+----+----+----
 (0 rows)
+
+--
+-- test successful handling of full join underneath left join (bug #14105)
+--
+explain (costs off)
+select * from
+  (select 1 as id) as xx
+  left join
+    (tenk1 as a1 full join (select 1 as id) as yy on (a1.unique1 = yy.id))
+  on (xx.id = coalesce(yy.id));
+              QUERY PLAN               
+---------------------------------------
+ Nested Loop Left Join
+   Join Filter: ((1) = COALESCE((1)))
+   ->  Result
+   ->  Hash Full Join
+         Hash Cond: (a1.unique1 = (1))
+         ->  Seq Scan on tenk1 a1
+         ->  Hash
+               ->  Result
+(8 rows)
+
+select * from
+  (select 1 as id) as xx
+  left join
+    (tenk1 as a1 full join (select 1 as id) as yy on (a1.unique1 = yy.id))
+  on (xx.id = coalesce(yy.id));
+ id | unique1 | unique2 | two | four | ten | twenty | hundred | thousand | twothousand | fivethous | tenthous | odd | even | stringu1 | stringu2 | string4 | id 
+----+---------+---------+-----+------+-----+--------+---------+----------+-------------+-----------+----------+-----+------+----------+----------+---------+----
+  1 |       1 |    2838 |   1 |    1 |   1 |      1 |       1 |        1 |           1 |         1 |        1 |   2 |    3 | BAAAAA   | EFEAAA   | OOOOxx  |  1
+(1 row)
 
 --
 -- test ability to push constants through outer join clauses
@@ -4816,6 +5016,25 @@ select * from
    ->  Result
          Output: 3
 (11 rows)
+
+-- check handling of nested appendrels inside LATERAL
+select * from
+  ((select 2 as v) union all (select 3 as v)) as q1
+  cross join lateral
+  ((select * from
+      ((select 4 as v) union all (select 5 as v)) as q3)
+   union all
+   (select q1.v)
+  ) as q2;
+ v | v 
+---+---
+ 2 | 4
+ 2 | 5
+ 2 | 2
+ 3 | 4
+ 3 | 5
+ 3 | 3
+(6 rows)
 
 -- check we don't try to do a unique-ified semijoin with LATERAL
 explain (verbose, costs off)
