@@ -254,7 +254,7 @@ derive_key_from_password(unsigned char *encryption_key, const char *password,
  * it's used to replace '%D' pattern in the command.
  */
 void
-run_encryption_key_command(unsigned char *encryption_key, char *data_dir)
+run_encryption_key_command(char *data_dir)
 {
 	FILE	   *fp;
 	char	cmd[MAXPGPATH];

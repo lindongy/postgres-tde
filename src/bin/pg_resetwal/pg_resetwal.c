@@ -422,7 +422,7 @@ main(int argc, char *argv[])
 	if (ControlFile.data_cipher > PG_CIPHER_NONE && !noupdate)
 	{
 		if (encryption_key_command)
-			run_encryption_key_command(encryption_key, DataDir);
+			run_encryption_key_command(DataDir);
 		else
 		{
 			/*

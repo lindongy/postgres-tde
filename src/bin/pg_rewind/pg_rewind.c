@@ -279,7 +279,7 @@ main(int argc, char **argv)
 		 * directory. It should have been checked earlier that both clusters
 		 * are encrypted using the same key.
 		 */
-		run_encryption_key_command(encryption_key, datadir_source);
+		run_encryption_key_command(datadir_source);
 		setup_encryption();
 		data_encrypted = true;
 	}

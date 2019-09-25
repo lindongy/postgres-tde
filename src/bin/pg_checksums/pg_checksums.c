@@ -617,7 +617,7 @@ main(int argc, char *argv[])
 			exit(1);
 		}
 
-		run_encryption_key_command(encryption_key, DataDir);
+		run_encryption_key_command(DataDir);
 		setup_encryption();
 	}
 

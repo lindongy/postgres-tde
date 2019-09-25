@@ -1159,7 +1159,7 @@ main(int argc, char **argv)
 
 	if (data_encrypted)
 	{
-		run_encryption_key_command(encryption_key, NULL);
+		run_encryption_key_command(NULL);
 		setup_encryption();
 	}
 

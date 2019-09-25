@@ -109,7 +109,7 @@ main(int argc, char **argv)
 		 * Both clusters should have the same KDF parameters, so we can pass
 		 * pgdata of any one.
 		 */
-		run_encryption_key_command(encryption_key, old_cluster.pgdata);
+		run_encryption_key_command(old_cluster.pgdata);
 
 		encryption_setup_done = true;
 	}

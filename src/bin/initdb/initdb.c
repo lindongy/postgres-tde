@@ -3025,7 +3025,7 @@ initialize_data_directory(void)
 		 * the KDF parameters. The KDF parameters are now available so we can
 		 * run the command.
 		 */
-		run_encryption_key_command(encryption_key, pg_data);
+		run_encryption_key_command(pg_data);
 	}
 
 	/* Select suitable configuration settings */
