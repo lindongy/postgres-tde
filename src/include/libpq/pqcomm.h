@@ -215,7 +215,7 @@ typedef struct CancelRequestPacket
  * startup.
  *
  * TODO Consider adding extension identifier and key_length field so that
- * postmaster can also receove extension-specific keys. Extension that needs a
+ * postmaster can also receive extension-specific keys. Extension that needs a
  * key would call a function from _PG_init() that tells postmaster where to
  * store the key and how long the key is. (Should also postgres in standalone
  * mode accept keys for extensions?)

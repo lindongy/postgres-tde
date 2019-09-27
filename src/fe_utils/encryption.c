@@ -438,8 +438,8 @@ send_key_to_postmaster(const char *host, const char *port,
 
 	retry:
 		/*
-		 * Send the packet. Here we need to use low level API because the server
-		 * does is not fully up so libpq cannot be used properly.
+		 * Send the packet. Here we need to use low level API because the
+		 * server is not fully up, so libpq cannot be used properly.
 		 */
 		if (send(sock, (char *) packet, packet_size, 0) != packet_size)
 		{
