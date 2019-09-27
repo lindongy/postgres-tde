@@ -812,7 +812,7 @@ XLogRead(char *buf, int segsize, TimeLineID tli, XLogRecPtr startptr,
 	 * TODO Currently the function is only called with count==XLOG_BLCKSZ. See
 	 * the comment on consolidation of XLogRead() above.
 	 */
-	Assert(decrypt_p == p);
+	Assert(decrypt_p == p || !data_encrypted);
 }
 
 /*

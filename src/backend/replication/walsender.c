@@ -790,7 +790,7 @@ logical_read_xlog_page(XLogReaderState *state, XLogRecPtr targetPagePtr, int req
 		count = flushptr - targetPagePtr;	/* part of the page available */
 
 	/* now actually read the data, we know it's there */
-	XLogRead(cur_page, targetPagePtr, XLOG_BLCKSZ, true);
+	XLogRead(cur_page, targetPagePtr, XLOG_BLCKSZ, data_encrypted);
 
 	return count;
 }
@@ -2850,7 +2850,8 @@ XLogSendPhysical(void)
 	 * calls.
 	 */
 	enlargeStringInfo(&output_message, nbytes);
-	XLogRead(&output_message.data[output_message.len], startptr, nbytes, false);
+	XLogRead(&output_message.data[output_message.len], startptr, nbytes,
+			 false);
 	output_message.len += nbytes;
 	output_message.data[output_message.len] = '\0';
 
