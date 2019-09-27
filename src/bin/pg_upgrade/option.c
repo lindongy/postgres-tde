@@ -56,7 +56,9 @@ parseCommandLine(int argc, char *argv[])
 		{"socketdir", required_argument, NULL, 's'},
 		{"verbose", no_argument, NULL, 'v'},
 		{"clone", no_argument, NULL, 1},
+#ifdef USE_ENCRYPTION
 		{"encryption-key-command", required_argument, NULL, 'K'},
+#endif	/* USE_ENCRYPTION */
 
 		{NULL, 0, NULL, 0}
 	};
@@ -210,9 +212,11 @@ parseCommandLine(int argc, char *argv[])
 				user_opts.transfer_mode = TRANSFER_MODE_CLONE;
 				break;
 
+#ifdef USE_ENCRYPTION
 			case 'K':
 				encryption_key_command = pg_strdup(optarg);
 				break;
+#endif	/* USE_ENCRYPTION */
 
 			default:
 				fprintf(stderr, _("Try \"%s --help\" for more information.\n"),

@@ -27,6 +27,8 @@
 
 char	   *encryption_key_command = NULL;
 
+#ifdef USE_ENCRYPTION
+
 #define KDF_PARAMS_FILE			"global/kdf_params"
 #define KDF_PARAMS_FILE_SIZE	512
 
@@ -459,3 +461,4 @@ send_key_to_postmaster(const char *host, const char *port,
 
 	return res;
 }
+#endif	/* USE_ENCRYPTION */

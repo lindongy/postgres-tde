@@ -267,6 +267,7 @@ main(int argc, char **argv)
 	 * XLOG.
 	 */
 	if (ControlFile_target.data_cipher > PG_CIPHER_NONE)
+#ifdef USE_ENCRYPTION
 	{
 		if (encryption_key_command == NULL)
 		{
@@ -283,6 +284,12 @@ main(int argc, char **argv)
 		setup_encryption();
 		data_encrypted = true;
 	}
+#else
+	{
+		pg_log_error(ENCRYPTION_NOT_SUPPORTED_MSG);
+		exit(EXIT_FAILURE);
+	}
+#endif	/* USE_ENCRYPTION */
 
 	/*
 	 * If both clusters are already on the same timeline, there's nothing to

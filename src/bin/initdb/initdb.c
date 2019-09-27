@@ -3006,6 +3006,7 @@ initialize_data_directory(void)
 	 * key can be derived from password.
 	 */
 	if (encryption_key_command)
+#ifdef USE_ENCRYPTION
 	{
 		/*
 		 * XXX Since execution of encryption_key_command produce the key (as
@@ -3027,6 +3028,12 @@ initialize_data_directory(void)
 		 */
 		run_encryption_key_command(pg_data);
 	}
+#else
+	{
+		/* User should not be able to enable encryption. */
+		Assert(false);
+	}
+#endif	/* USE_ENCRYPTION */
 
 	/* Select suitable configuration settings */
 	set_null_conf();

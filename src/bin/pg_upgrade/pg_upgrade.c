@@ -104,6 +104,7 @@ main(int argc, char **argv)
 	 * The encryption key is needed to start the clusters.
 	 */
 	if (encryption_key_command)
+#ifdef USE_ENCRYPTION
 	{
 		/*
 		 * Both clusters should have the same KDF parameters, so we can pass
@@ -113,6 +114,13 @@ main(int argc, char **argv)
 
 		encryption_setup_done = true;
 	}
+#else
+	{
+		/* User should not be able to enable encryption. */
+		Assert(false);
+	}
+#endif	/* USE_ENCRYPTION */
+
 
 	setup(argv[0], &live_check);
 
@@ -160,6 +168,7 @@ main(int argc, char **argv)
 	copy_xact_xlog_xid();
 
 	if (encryption_setup_done)
+#ifdef USE_ENCRYPTION
 	{
 		/*
 		 * Copy KDF file so that the old cluster encryption password works for
@@ -168,6 +177,12 @@ main(int argc, char **argv)
 		read_kdf_file(old_cluster.pgdata);
 		write_kdf_file(new_cluster.pgdata);
 	}
+#else
+	{
+		/* User should not be able to enable encryption. */
+		Assert(false);
+	}
+#endif	/* USE_ENCRYPTION */
 
 	/* New now using xids of the old system */
 

@@ -605,20 +605,21 @@ main(int argc, char *argv[])
 
 	if (ControlFile->data_cipher > PG_CIPHER_NONE)
 	{
+#ifdef USE_ENCRYPTION
 		if (encryption_key_command == NULL)
 		{
-#ifdef USE_ENCRYPTION
 			fprintf(stderr, _("%s: please specify command to retrieve encryption key\n"),
 					progname);
-#else
-			fprintf(stderr, _("%s: compile postgres with --with-openssl to use encryption\n"),
-					progname);
-#endif							/* USE_ENCRYPTION */
 			exit(1);
 		}
 
 		run_encryption_key_command(DataDir);
 		setup_encryption();
+#else
+		fprintf(stderr, _("%s: %s\n"), progname,
+				ENCRYPTION_NOT_SUPPORTED_MSG);
+		exit(1);
+#endif	/* USE_ENCRYPTION */
 	}
 
 	if (ControlFile->pg_control_version != PG_CONTROL_VERSION)

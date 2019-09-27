@@ -259,6 +259,7 @@ start_postmaster(ClusterInfo *cluster, bool report_and_exit_on_error)
 	 * if it receives no key).
 	 */
 	if (encryption_setup_done)
+#ifdef USE_ENCRYPTION
 	{
 #ifndef WIN32
 		pid_t sender;
@@ -280,11 +281,17 @@ start_postmaster(ClusterInfo *cluster, bool report_and_exit_on_error)
 			pg_fatal("could not create key sender process");
 			exit(EXIT_FAILURE);
 		}
-#else
+#else	/* WIN32 */
 		/* TODO  */
 		#error "W32 not implemented yet"
-#endif
+#endif	/* WIN32 */
 	}
+#else	/* USE_ENCRYPTION */
+	{
+		/* User should not be able to enable encryption. */
+		Assert(false);
+	}
+#endif	/* USE_ENCRYPTION */
 
 	/*
 	 * Don't throw an error right away, let connecting throw the error because

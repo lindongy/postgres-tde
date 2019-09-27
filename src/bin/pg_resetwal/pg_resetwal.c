@@ -420,6 +420,7 @@ main(int argc, char *argv[])
 	 * below.
 	 */
 	if (ControlFile.data_cipher > PG_CIPHER_NONE && !noupdate)
+#ifdef USE_ENCRYPTION
 	{
 		if (encryption_key_command)
 			run_encryption_key_command(DataDir);
@@ -427,8 +428,8 @@ main(int argc, char *argv[])
 		{
 			/*
 			 * If executed by pg_upgrade, we don't want pg_resetwal to run the
-			 * encryption key command (possibly interactive application) w/o
-			 * access to terminal.
+			 * encryption key command (possibly interactive application)
+			 * because we have no access to terminal.
 			 */
 			read_encryption_key_fe(stdin);
 		}
@@ -436,6 +437,12 @@ main(int argc, char *argv[])
 		setup_encryption();
 		data_encrypted = true;
 	}
+#else
+	{
+		pg_log_error(ENCRYPTION_NOT_SUPPORTED_MSG);
+		exit(EXIT_FAILURE);
+	}
+#endif	/* USE_ENCRYPTION */
 
 	/*
 	 * Also look at existing segment files to set up newXlogSegNo

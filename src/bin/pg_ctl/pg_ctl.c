@@ -141,8 +141,10 @@ static void do_kill(pgpid_t pid);
 static void print_msg(const char *msg);
 static void adjust_data_dir(void);
 static char *get_config_variable(const char *var_name, size_t res_size);
+#ifdef USE_ENCRYPTION
 static char *get_first_csv_item(char *csv_list);
 static void get_postmaster_address(char **host_p, char **port_str_p);
+#endif	/* USE_ENCRYPTION */
 
 #ifdef WIN32
 #if (_MSC_VER >= 1800)
@@ -834,8 +836,10 @@ do_start(void)
 {
 	pgpid_t		old_pid = 0;
 	pgpid_t		pm_pid;
+#ifdef USE_ENCRYPTION
 	char	*host = NULL;
 	char	*port_str = NULL;
+#endif	/* USE_ENCRYPTION */
 
 	if (ctl_command != RESTART_COMMAND)
 	{
@@ -876,6 +880,7 @@ do_start(void)
 #endif
 
 	if (encryption_key_command)
+#ifdef USE_ENCRYPTION
 	{
 		/*
 		 * If encryption key is needed, retrieve it before trying to start
@@ -891,10 +896,17 @@ do_start(void)
 		 */
 		get_postmaster_address(&host, &port_str);
 	}
+#else
+	{
+		/* User should not be able to enable encryption. */
+		Assert(false);
+	}
+#endif	/* USE_ENCRYPTION */
 
 	pm_pid = start_postmaster();
 
 	if (encryption_key_command)
+#ifdef USE_ENCRYPTION
 	{
 		/* Send the key to the postmaster */
 		if (!send_key_to_postmaster(host, port_str, encryption_key))
@@ -904,6 +916,12 @@ do_start(void)
 			exit(1);
 		}
 	}
+#else
+	{
+		/* User should not be able to use encryption. */
+		Assert(false);
+	}
+#endif	/* USE_ENCRYPTION */
 
 	if (do_wait)
 	{
@@ -2297,6 +2315,7 @@ get_config_variable(const char *var_name, size_t res_size)
 	return result;
 }
 
+#ifdef USE_ENCRYPTION
 /*
  * Get the first item of comma-separated list or NULL if there's no valid
  * item.
@@ -2357,6 +2376,7 @@ get_postmaster_address(char **host_p, char **port_str_p)
 	 */
 	*port_str_p = get_config_variable("port", 7);
 }
+#endif	/* USE_ENCRYPTION */
 
 static DBState
 get_control_dbstate(void)
@@ -2486,9 +2506,11 @@ main(int argc, char **argv)
 				case 'e':
 					event_source = pg_strdup(optarg);
 					break;
+#ifdef USE_ENCRYPTION
 				case 'K':
 					encryption_key_command = pg_strdup(optarg);
 					break;
+#endif	/* USE_ENCRYPTION */
 				case 'l':
 					log_file = pg_strdup(optarg);
 					break;

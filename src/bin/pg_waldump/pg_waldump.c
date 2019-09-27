@@ -1158,10 +1158,17 @@ main(int argc, char **argv)
 	/* done with argument parsing, do the actual work */
 
 	if (data_encrypted)
+#ifdef USE_ENCRYPTION
 	{
 		run_encryption_key_command(NULL);
 		setup_encryption();
 	}
+#else
+	{
+		/* User should not be able to enable encryption. */
+		Assert(false);
+	}
+#endif	/* USE_ENCRYPTION */
 
 	/* we have everything we need, start reading */
 	xlogreader_state = XLogReaderAllocate(WalSegSz, XLogDumpReadPage,
