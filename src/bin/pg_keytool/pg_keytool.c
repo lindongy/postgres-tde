@@ -159,6 +159,17 @@ main(int argc, char **argv)
 		exit(1);
 	}
 
+	/* Try to initialize DataDir using environment variable. */
+	if (DataDir == NULL)
+	{
+		DataDir = getenv("PGDATA");
+		if (DataDir)
+			DataDir = pg_strdup(DataDir);
+	}
+
+	if (DataDir)
+		canonicalize_path(DataDir);
+
 	/*
 	 * The KDF file is needed to derive the key from password, and this file
 	 * is located in the data directory.

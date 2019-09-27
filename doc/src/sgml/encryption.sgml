@@ -46,8 +46,8 @@ echo &lt;your key&gt;
    following example, the DBA will be asked for password interactively:
 
 <screen>
-<prompt>$</prompt> <userinput>initdb -K 'read -sp "Cluster encryption password: " PGENCRPWD; echo $PGENCRPWD
-| pg_keytool -D %D -w' -D data
+<prompt>$</prompt> <userinput>initdb -K 'read -sp "Cluster encryption
+  password: " PGENCRPWD; echo $PGENCRPWD | pg_keytool -D %D -w' -D data
 </userinput>
 </screen>
 
@@ -55,17 +55,25 @@ echo &lt;your key&gt;
 
  <para>
    As long as the application is aware of the data directory, you can
-   put <literal>%D</literal> into the command and the application will replace
-   it with the actual directory path.
+   put <literal>%D</literal> into the command and the
+   <application>initdb</application> application will replace it with the
+   actual directory path. Note however that only the actual value of
+   the <option>-K</option> option is subject to this replacement. No
+   replacement will take place if <application>pg_keytool</application> is
+   called from a shell script whose path is passed
+   to <application>initdb</application> via the <option>-K</option> option. In
+   such a case it may be easier to pass the data directory to
+   <application>pg_keytool</application> via <envar>PGDATA</envar> environment
+   variable.
  </para>
 
  <para>
-   Likewise, the same command can be passed to <xref linkend="app-pg-ctl"/> in
-   order to start the cluster:
+   Likewise, the same command needs to be passed to
+   <xref linkend="app-pg-ctl"/> in order to start the cluster:
 
 <screen>
-<prompt>$</prompt> <userinput>pg_ctl -K 'read -sp "Cluster encryption password: " PGENCRPWD; echo $PGENCRPWD
-| pg_keytool -D %D -w' -D data start
+<prompt>$</prompt> <userinput>pg_ctl -K 'read -sp "Cluster encryption
+  password: " PGENCRPWD; echo $PGENCRPWD | pg_keytool -D %D -w' -D data start
 </userinput>
 </screen>
  </para>

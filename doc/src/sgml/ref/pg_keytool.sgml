@@ -33,8 +33,9 @@ PostgreSQL documentation
    <application>pg_keytool</application> reads encryption key or password from
    the standard input. If it received password, it runs <firstterm>key
    derivation function</firstterm> on it in order to derive the key. The
-   encryption key is written either to the standard output or sent to via
-   frontend/backend protocol to postmaster process which is being started up.
+   encryption key is written either to the standard output (the default
+   behavior) or sent to via frontend/backend protocol to postmaster process
+   which is being started up.
   </para>
 
   <para>
@@ -68,6 +69,12 @@ PostgreSQL documentation
         Specifies the directory where the database cluster is
         stored. Different directory generally means that a different key will
         be derived from the same password.
+       </para>
+
+       <para>
+         If this option is not passed, <xref linkend="app-pg-keytool"/> tries
+         to get the data directory from <envar>PGDATA</envar> environment
+         variable.
        </para>
       </listitem>
      </varlistentry>
