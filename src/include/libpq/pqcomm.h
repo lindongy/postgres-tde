@@ -225,6 +225,7 @@ typedef struct EncryptionKeyMsg
 	/* Note this integer field is stored in network byte order! */
 	MsgType		encryptionKeyCode;	/* code to identify a key message */
 
+	bool	empty;	 /* doesn't this message contain any key? */
 	unsigned char	version;	/* message format version. */
 	char	data[ENCRYPTION_KEY_LENGTH];	/* the key itself. */
 } EncryptionKeyMsg;

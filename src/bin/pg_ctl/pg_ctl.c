@@ -840,6 +840,7 @@ do_start(void)
 	char	*host = NULL;
 	char	*port_str = NULL;
 #endif	/* USE_ENCRYPTION */
+	unsigned char	*key_to_send;
 
 	if (ctl_command != RESTART_COMMAND)
 	{
@@ -905,21 +906,30 @@ do_start(void)
 
 	pm_pid = start_postmaster();
 
-	if (encryption_key_command)
 #ifdef USE_ENCRYPTION
+	if (encryption_key_command)
+		key_to_send = encryption_key;
+	else
 	{
-		/* Send the key to the postmaster */
-		if (!send_key_to_postmaster(host, port_str, encryption_key))
-		{
-			write_stderr(_("%s: could not send encryption key to postmaster\n"),
-						 progname);
-			exit(1);
-		}
+		/*
+		 * An empty key message should be sent if no key command was
+		 * passed. It's more user friendly to let startup fail immediately
+		 * than to let postmaster wait until MAX_WAIT_FOR_KEY_SECS has elapsed
+		 * and then fail.
+		 */
+		key_to_send = NULL;
 	}
-#else
+
+	/*
+	 * Send the key to the postmaster, or NULL if we have no key. The latter
+	 * means that postmaster should try to get the key using a command that it
+	 * might find in postgresql.conf.
+	 */
+	if (!send_key_to_postmaster(host, port_str, key_to_send))
 	{
-		/* User should not be able to use encryption. */
-		Assert(false);
+		write_stderr(_("%s: could not send encryption key to postmaster\n"),
+					 progname);
+		exit(1);
 	}
 #endif	/* USE_ENCRYPTION */
 

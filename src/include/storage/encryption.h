@@ -74,15 +74,20 @@ extern unsigned char encryption_key[];
  * key during startup stores it here so postmaster can eventually take a local
  * copy.
  *
- * We cannot protect the "initialized" field with a spinlock because the data
- * will be accessed by postmaster, but it should not be necessary for bool
- * type. Furthermore, synchronization is not really critical here, see
- * processEncryptionKey().
+ * Although postmaster should not do anything else with shared memory beyond
+ * its setup, mere reading of this structure should not be a problem. The
+ * worst thing that shared memory corruption can cause is wrong or missing
+ * key, both of which will be detected later during the startup. (Failed
+ * startup is not a real crash.) However we don't dare to use spinlock here
+ * because that way shared memory corruption could cause postmaster to end up
+ * in an infinite loop. See processEncryptionKey() for more comments on
+ * synchronization.
  */
 typedef struct ShmemEncryptionKey
 {
 	char	data[ENCRYPTION_KEY_LENGTH]; /* the key */
-	bool	initialized;				/* received the key? */
+	bool	received;				/* received the key message? */
+	bool	empty;					/* was the key message empty? */
 } ShmemEncryptionKey;
 
 /*

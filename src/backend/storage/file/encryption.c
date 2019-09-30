@@ -96,7 +96,8 @@ EncryptionShmemInit(void)
 	{
 		Assert(!found);
 
-		encryption_key_shmem->initialized = false;
+		encryption_key_shmem->received = false;
+		encryption_key_shmem->empty = false;
 	}
 	else
 		Assert(found);

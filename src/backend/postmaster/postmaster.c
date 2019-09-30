@@ -1380,8 +1380,8 @@ PostmasterMain(int argc, char *argv[])
 		/* No other return code should be seen here. */
 		Assert(status == STATUS_OK);
 
-		/* ServerLoop() shouldn't have exited otherwise. */
-		Assert(encryption_key_shmem->initialized);
+		if (!encryption_key_shmem->received || encryption_key_shmem->empty)
+			ereport(FATAL, (errmsg("Encryption key not received.")));
 
 		/*
 		 * Take a local copy of the key so that we don't have to receive it
@@ -1666,7 +1666,8 @@ static TimestampTz	wait_for_keys_until = 0;
  * Main idle loop of postmaster
  *
  * If receive_encryption_key is true, only launch backend(s) to receive
- * cluster encryption key and stop as soon as the key is in shared memory.
+ * cluster encryption key and return as soon as the key is in shared memory or
+ * MAX_WAIT_FOR_KEY_SECS elapsed.
  *
  * NB: Needs to be called with signals blocked
  */
@@ -1801,19 +1802,28 @@ ServerLoop(bool receive_encryption_key)
 			ServerLoopCheckTimeouts();
 
 			/* Done if the key has been delivered. */
-			if (encryption_key_shmem->initialized)
+			if (encryption_key_shmem->received)
+			{
+				/*
+				 * Make sure the key is read from main memory again if it had
+				 * been prefetched before processEncryptionKey() could have
+				 * written it there.
+				 */
+				pg_read_barrier();
+
 				return STATUS_OK;
+			}
 
 			/*
-			 * Do not wait for the key forever. One problem we solve here is
-			 * that pg_ctl (or custom script that starts postgres) does not
-			 * have to check whether the cluster is encrypted. If DBA forgets
-			 * to pass the encryption key command, he'll simply see the
-			 * startup to fail and the appropriate message to appear in the
-			 * server log.
+			 * Do not wait for the key forever.
+			 *
+			 * Since pg_ctl sends an "empty key message" if passed no key
+			 * command, we should only get here if the cluster is being
+			 * started using a custom script which failed to send the key.
 			 */
 			if (GetCurrentTimestamp() >= wait_for_keys_until)
-				ereport(FATAL, (errmsg("Encryption key not received.")));
+				/* ok here, caller should examine the conditions in detail. */
+				return STATUS_OK;
 
 			continue;
 		}
@@ -2512,10 +2522,11 @@ processCancelRequest(Port *port, void *pkt)
  * callers try to process the same message, nothing should get broken. If some
  * caller is delivering a wrong key (e.g. due to misconfiguration of another
  * cluster), it does not help if it waits until processing of the correct key
- * is finished.
+ * is finished.  If the key gets messed up, the worst case is that the server
+ * fails to start up. (No data corruption is expected.)
  *
- * If the key gets messed up, the worst case is that the server fails to start
- * up. (No data corruption is expected.)
+ * To ensure that postmaster does not read the key before it's initialized, we
+ * use a memory barrier, see below.
  *
  * Client should not expect any response to this request: failure on client
  * side indicates either broken connection, wrong key, bug in
@@ -2550,7 +2561,7 @@ processEncryptionKey(void *pkt)
 	 * postmaster has a local copy of the key, the new key should not be used,
 	 * but it'd be inconsistent if we didn't complain in this special case.
 	 */
-	if (encryption_key_shmem->initialized || encryption_setup_done)
+	if (encryption_key_shmem->received || encryption_setup_done)
 	{
 		ereport(COMMERROR,
 				(errmsg("received encryption key more than once")));
@@ -2565,12 +2576,17 @@ processEncryptionKey(void *pkt)
 		return;
 	}
 
-	memcpy(encryption_key_shmem->data, msg->data, ENCRYPTION_KEY_LENGTH);
+	encryption_key_shmem->empty = msg->empty;
+
+	if (!encryption_key_shmem->empty)
+		memcpy(encryption_key_shmem->data, msg->data, ENCRYPTION_KEY_LENGTH);
+
 	/*
-	 * XXX Is memory barrier needed here to make sure that the copying is
-	 * done?
+	 * received==true should be a guarantee that the key is in the shared
+	 * memory or that "empty" is set.
 	 */
-	encryption_key_shmem->initialized = true;
+	pg_write_barrier();
+	encryption_key_shmem->received = true;
 
 	ereport(DEBUG1, (errmsg_internal("encryption key received")));
 }

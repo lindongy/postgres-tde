@@ -365,6 +365,10 @@ read_encryption_key_fe(FILE *f)
  * Send the contents of encryption_key in the form of special startup packet
  * to a server that is being started.
  *
+ * If encryption_key is NULL, send an "empty message". This tells postmaster
+ * that the client (typically pg_ctl) has no key, so postmaster should stop
+ * waiting for it and try to get the key elsewhere.
+ *
  * Returns true if we could send the message and false if not, however even
  * success does not guarantee that server started up - caller should
  * eventually test server connection himself.
@@ -373,7 +377,7 @@ read_encryption_key_fe(FILE *f)
  */
 bool
 send_key_to_postmaster(const char *host, const char *port,
-					   const unsigned char *encryption_Key)
+					   const unsigned char *encryption_key)
 {
 	const char **keywords = pg_malloc0(3 * sizeof(*keywords));
 	const char **values = pg_malloc0(3 * sizeof(*values));
@@ -399,7 +403,13 @@ send_key_to_postmaster(const char *host, const char *port,
 	/* Compose the message. */
 	message.encryptionKeyCode = pg_hton32(ENCRYPTION_KEY_MSG_CODE);
 	message.version = 1;
-	memcpy(message.data, encryption_key, ENCRYPTION_KEY_LENGTH);
+	if (encryption_key)
+	{
+		memcpy(message.data, encryption_key, ENCRYPTION_KEY_LENGTH);
+		message.empty = false;
+	}
+	else
+		message.empty = true;
 	msg_size = offsetof(EncryptionKeyMsg, data) + ENCRYPTION_KEY_LENGTH;
 
 	packet_size = msg_size + 4;
