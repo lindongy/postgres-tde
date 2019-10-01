@@ -15,43 +15,6 @@ char	   *encryption_key_command = NULL;
 unsigned char encryption_key[ENCRYPTION_KEY_LENGTH];
 
 /*
- * Pointer to the KDF parameters.
- */
-KDFParamsData *KDFParams = NULL;
-
-/*
- * Run the key derivation function and initialize encryption_key variable.
- */
-void
-derive_key_from_password(unsigned char *encryption_key, const char *password,
-						 int len)
-{
-	KDFParamsPBKDF2 *params;
-	int			rc;
-
-	params = &KDFParams->data.pbkdf2;
-	rc = PKCS5_PBKDF2_HMAC(password,
-						   len,
-						   params->salt,
-						   ENCRYPTION_KDF_SALT_LEN,
-						   params->niter,
-						   EVP_sha1(),
-						   ENCRYPTION_KEY_LENGTH,
-						   encryption_key);
-
-	if (rc != 1)
-	{
-#ifdef FRONTEND
-		pg_log_fatal("failed to derive key from password");
-		exit(EXIT_FAILURE);
-#else
-		ereport(FATAL,
-				(errmsg("failed to derive key from password")));
-#endif	/* FRONTEND */
-	}
-}
-
-/*
  * Run the command that is supposed to generate encryption key and store it
  * where encryption_key points to. If valid string is passed for data_dir,
  * it's used to replace '%D' pattern in the command.

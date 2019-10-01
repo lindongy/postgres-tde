@@ -255,7 +255,8 @@ main(int argc, char **argv)
 	}
 	else
 	{
-		if (!send_key_to_postmaster(host, port_str, encryption_key))
+		/* XXX Try to find the postmaster PID? */
+		if (!send_key_to_postmaster(host, port_str, encryption_key, 0))
 			pg_log_error("could not send encryption key to server");
 	}
 
