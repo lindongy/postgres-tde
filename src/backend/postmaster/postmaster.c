@@ -2104,9 +2104,19 @@ ProcessStartupPacket(Port *port, bool secure_done)
 		return STATUS_ERROR;
 	}
 
-	if (proto == ENCRYPTION_KEY_MSG_CODE && data_encrypted)
+	/*
+	 * Catch the encryption key message even if the cluster is not encrypted:
+	 * pg_ctl can send an empty message if was passed no key, just to let
+	 * postmaster know that it shouldn't wait for the key message (pg_ctl does
+	 * not know whether the cluster is encrypted). This empty message would
+	 * make the first started backend of the cluster complain about
+	 * "unsupported frontend protocol".
+	 */
+	if (proto == ENCRYPTION_KEY_MSG_CODE)
 	{
-		processEncryptionKey(buf);
+		if (data_encrypted)
+			processEncryptionKey(buf);
+
 		/* Not really an error, but we don't want to proceed further */
 		return STATUS_ERROR;
 	}
