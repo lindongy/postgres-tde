@@ -15,6 +15,7 @@
 
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/wait.h>
 
 #include "postgres_fe.h"
 
@@ -191,7 +192,7 @@ read_kdf_file(char *dir)
  */
 bool
 send_key_to_postmaster(const char *host, const char *port,
-					   const unsigned char *encryption_key)
+					   const unsigned char *encryption_key, long pm_pid)
 {
 	const char **keywords = pg_malloc0(3 * sizeof(*keywords));
 	const char **values = pg_malloc0(3 * sizeof(*values));
@@ -241,6 +242,17 @@ send_key_to_postmaster(const char *host, const char *port,
 			/* Sleep for 1 second. */
 			pg_usleep(1000000L);
 
+		/* Has the postmaster crashed? */
+#ifndef WIN32
+		{
+			int			exitstatus;
+
+			if (waitpid((pid_t) pm_pid, &exitstatus, WNOHANG) == (pid_t) pm_pid)
+				return false;
+		}
+#else
+#error "WIN32 not implemented"
+#endif
 		if (conn)
 		{
 			PQfinish(conn);

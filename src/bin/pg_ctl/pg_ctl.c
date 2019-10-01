@@ -921,11 +921,11 @@ do_start(void)
 	}
 
 	/*
-	 * Send the key to the postmaster, or NULL if we have no key. The latter
-	 * means that postmaster should try to get the key using a command that it
-	 * might find in postgresql.conf.
+	 * Send the key to the postmaster, or an empty message if we have no
+	 * key. The latter means that postmaster should try to get the key using a
+	 * command that it might find in postgresql.conf.
 	 */
-	if (!send_key_to_postmaster(host, port_str, key_to_send))
+	if (!send_key_to_postmaster(host, port_str, key_to_send, pm_pid))
 	{
 		write_stderr(_("%s: could not send encryption key to postmaster\n"),
 					 progname);
