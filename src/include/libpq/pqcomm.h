@@ -23,7 +23,7 @@
 #endif
 #include <netinet/in.h>
 
-#include "storage/encryption.h"
+#include "common/encryption.h"
 
 #ifdef HAVE_STRUCT_SOCKADDR_STORAGE
 

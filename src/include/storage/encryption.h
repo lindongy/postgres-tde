@@ -15,6 +15,7 @@
 #define ENCRYPTION_H
 
 #include "access/xlogdefs.h"
+#include "common/encryption.h"
 #include "miscadmin.h"
 #include "storage/block.h"
 #include "storage/relfilenode.h"
@@ -26,15 +27,6 @@
  */
 #define ENCRYPTION_NOT_SUPPORTED_MSG \
 	"compile postgres with --with-openssl to use encryption."
-
-/*
- * Full database encryption key.
- *
- * The key of EVP_aes_256_cbc() cipher is 256 bits long.
- */
-#define	ENCRYPTION_KEY_LENGTH	32
-/* Key length in characters (two characters per hexadecimal digit) */
-#define ENCRYPTION_KEY_CHARS	(ENCRYPTION_KEY_LENGTH * 2)
 
 /*
  * Cipher used to encrypt data.
@@ -62,11 +54,6 @@ typedef enum CipherKind
  */
 #define ENCRYPTION_PWD_MIN_LENGTH	8
 #define ENCRYPTION_PWD_MAX_LENGTH	16
-#define ENCRYPTION_KDF_NITER		1048576
-#define	ENCRYPTION_KDF_SALT_LEN		sizeof(uint64)
-
-/* Key to encrypt / decrypt data. */
-extern unsigned char encryption_key[];
 
 #ifndef FRONTEND
 /*

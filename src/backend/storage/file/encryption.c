@@ -51,8 +51,6 @@ EVP_CIPHER_CTX *ctx_encrypt,
 		   *ctx_decrypt_stream;
 #endif							/* USE_ENCRYPTION */
 
-unsigned char encryption_key[ENCRYPTION_KEY_LENGTH];
-
 #ifndef FRONTEND
 ShmemEncryptionKey *encryption_key_shmem = NULL;
 #endif							/* FRONTEND */

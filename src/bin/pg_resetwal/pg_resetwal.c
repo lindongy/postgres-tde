@@ -431,7 +431,7 @@ main(int argc, char *argv[])
 			 * encryption key command (possibly interactive application)
 			 * because we have no access to terminal.
 			 */
-			read_encryption_key_fe(stdin);
+			read_encryption_key_f(stdin);
 		}
 
 		setup_encryption();
