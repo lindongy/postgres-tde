@@ -1254,6 +1254,18 @@ setup_config(void)
 
 	snprintf(path, sizeof(path), "%s/postgresql.conf", pg_data);
 
+	if (encryption_key_command)
+#ifdef USE_ENCRYPTION
+	{
+		snprintf(repltok, sizeof(repltok), "encryption_key_command = '%s'",
+				 escape_quotes(encryption_key_command));
+		conflines = replace_token(conflines, "#encryption_key_command = ''", repltok);
+	}
+#else
+		/* encryption_key_command should not be set */
+		Assert(false);
+#endif
+
 	writefile(path, conflines);
 	if (chmod(path, pg_file_create_mode) != 0)
 	{

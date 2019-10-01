@@ -221,6 +221,10 @@ static void assign_recovery_target_lsn(const char *newval, void *extra);
 static bool check_primary_slot_name(char **newval, void **extra, GucSource source);
 static bool check_default_with_oids(bool *newval, void **extra, GucSource source);
 
+#ifdef USE_ENCRYPTION
+static const char *show_encryption_key_command(void);
+#endif
+
 /* Private functions in guc-file.l that need to be called from guc.c */
 static ConfigVariable *ProcessConfigFileInternal(GucContext context,
 												 bool applySettings, int elevel);
@@ -4226,6 +4230,19 @@ static struct config_string ConfigureNamesString[] =
 		"llvmjit",
 		NULL, NULL, NULL
 	},
+
+#ifdef USE_ENCRYPTION
+	{
+		{"encryption_key_command", PGC_POSTMASTER, 0,
+			gettext_noop("Sets the shell command that will be called to fetch database encryption key."),
+			NULL,
+			GUC_NO_SHOW_ALL | GUC_SUPERUSER_ONLY
+		},
+		&encryption_key_command,
+		NULL,
+		NULL, NULL, show_encryption_key_command
+	},
+#endif
 
 	/* End-of-list marker */
 	{
@@ -11772,5 +11789,16 @@ check_default_with_oids(bool *newval, void **extra, GucSource source)
 
 	return true;
 }
+
+#ifdef USE_ENCRYPTION
+static const char *
+show_encryption_key_command(void)
+{
+	if (encryption_key_command)
+		return encryption_key_command;
+	else
+		return "(disabled)";
+}
+#endif
 
 #include "guc-file.c"

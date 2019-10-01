@@ -1370,24 +1370,37 @@ PostmasterMain(int argc, char *argv[])
 	 * If encryption key is needed and we don't have it yet, call ServerLoop()
 	 * in a restricted mode which allows a client application to send us the
 	 * key. Regular client connections are not allowed yet.
+	 *
+	 * (If encryption_setup_done is true, it probably means that postmaster is
+	 * restarting after crash.)
 	 */
 	if (data_encrypted && !encryption_setup_done)
 	{
 		char	sample[ENCRYPTION_SAMPLE_SIZE];
 
-		status = ServerLoop(true);
-
-		/* No other return code should be seen here. */
-		Assert(status == STATUS_OK);
-
-		if (!encryption_key_shmem->received || encryption_key_shmem->empty)
-			ereport(FATAL, (errmsg("Encryption key not received.")));
-
 		/*
-		 * Take a local copy of the key so that we don't have to receive it
-		 * again if restarting after a crash.
+		 * If the key command is in the configuration file, just run it,
+		 * otherwise let frontend application deliver it via FE/BE protocol.
 		 */
-		memcpy(encryption_key, encryption_key_shmem, ENCRYPTION_KEY_LENGTH);
+		if (encryption_key_command)
+			run_encryption_key_command(DataDir);
+		else
+		{
+			status = ServerLoop(true);
+
+			/* No other return code should be seen here. */
+			Assert(status == STATUS_OK);
+
+			if (!encryption_key_shmem->received ||
+				encryption_key_shmem->empty)
+				ereport(FATAL, (errmsg("Encryption key not received.")));
+
+			/*
+			 * Take a local copy of the key so that we don't have to receive
+			 * it again if restarting after a crash.
+			 */
+			memcpy(encryption_key, encryption_key_shmem, ENCRYPTION_KEY_LENGTH);
+		}
 
 		/* Finalize the setup. */
 		setup_encryption();
