@@ -2565,12 +2565,27 @@ processEncryptionKey(void *pkt)
 	/* Backend to receive the key should not be launched otherwise. */
 	Assert(data_encrypted);
 
+	if (msg->version != 1)
+	{
+		ereport(COMMERROR,
+				(errmsg("unexpected version of encryption key message %d",
+					msg->version)));
+		return;
+	}
+
 	/*
-	 * The checks below would fire in this case too, but this error message is
-	 * clearer for the case like this.
+	 * The checks below would fire in this case too, but the error message is
+	 * clearer if this case is handled explicitly.
 	 */
 	if (pmState != PM_INIT)
 	{
+		/*
+		 * If pg_ctl sent an empty message, the encryption key command should
+		 * have already been read from postgresql.conf and processed.
+		 */
+		if (msg->empty)
+			return;
+
 		ereport(COMMERROR,
 				(errmsg("encryption key can only be setup during startup"),
 				 errhint("Check if the cluster is encrypted.")));
@@ -2588,14 +2603,6 @@ processEncryptionKey(void *pkt)
 	{
 		ereport(COMMERROR,
 				(errmsg("received encryption key more than once")));
-		return;
-	}
-
-	if (msg->version != 1)
-	{
-		ereport(COMMERROR,
-				(errmsg("unexpected version of encryption key message %d",
-					msg->version)));
 		return;
 	}
 
