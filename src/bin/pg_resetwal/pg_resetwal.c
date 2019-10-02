@@ -1285,8 +1285,7 @@ usage(void)
 	printf(_("  -e, --epoch=XIDEPOCH           set next transaction ID epoch\n"));
 	printf(_("  -f, --force                    force update to be done\n"));
 #ifdef	USE_ENCRYPTION
-	printf(_("  -K, --encryption-key-command\n"
-			 "					 command that returns encryption key\n"));
+	printf(_("  -K, --encryption-key-command   command that returns encryption key\n"));
 #endif							/* USE_ENCRYPTION */
 	printf(_("  -l, --next-wal-file=WALFILE    set minimum starting location for new WAL\n"));
 	printf(_("  -m, --multixact-ids=MXID,MXID  set next and oldest multitransaction ID\n"));
