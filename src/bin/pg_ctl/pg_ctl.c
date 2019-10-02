@@ -888,14 +888,6 @@ do_start(void)
 		 * postmaster.
 		 */
 		run_encryption_key_command(pg_data);
-
-		/*
-		 * Where should the key be sent?
-		 *
-		 * Retrieve the info now because the time the retrieval will take
-		 * should not overlap with waiting for the startup completion below.
-		 */
-		get_postmaster_address(&host, &port_str);
 	}
 #else
 	{
@@ -925,6 +917,7 @@ do_start(void)
 	 * key. The latter means that postmaster should try to get the key using a
 	 * command that it might find in postgresql.conf.
 	 */
+	get_postmaster_address(&host, &port_str);
 	if (!send_key_to_postmaster(host, port_str, key_to_send, pm_pid))
 	{
 		write_stderr(_("%s: could not send encryption key to postmaster\n"),
