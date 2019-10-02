@@ -73,6 +73,8 @@ char	   *output_files[] = {
 	NULL
 };
 
+char encryption_key_command_opt[MAXPGPATH];
+
 /*
  * Declare these locally so we don't have to link storage/file/encryption.c
  * here.
@@ -93,6 +95,7 @@ main(int argc, char **argv)
 	/* Set default restrictive mask until new cluster permissions are read */
 	umask(PG_MODE_MASK_OWNER);
 
+	encryption_key_command_opt[0] = '\0';
 	parseCommandLine(argc, argv);
 
 	get_restricted_token();
@@ -118,6 +121,56 @@ main(int argc, char **argv)
 	{
 		/* User should not be able to enable encryption. */
 		Assert(false);
+	}
+
+	/*
+	 * The clusters may be encrypted even if encryption_key_command hasn't
+	 * been passed on command line - in such a case the command should be in
+	 * postgresql.conf.
+	 *
+	 * Ideally we'd use get_control_data() to find out whether the encryption
+	 * is enabled, but that function assumes that postmaster lock file has
+	 * already been cleaned up.
+	 */
+	if (encryption_key_command == NULL)
+	{
+		char		cmd[MAXPGPATH],
+			cmd_output[MAX_STRING];
+		FILE *output;
+		bool	got_key_cmd;
+
+		/*
+		 * Retrieve the command from the old cluster: the command can
+		 * reference data directory because of the KDF file, but KDF files
+		 * haven't yet been synchronized.
+		 */
+		snprintf(cmd, sizeof(cmd), "\"%s/postgres\" -D \"%s\" -C encryption_key_command",
+				 old_cluster.bindir, old_cluster.pgconfig);
+
+		if ((output = popen(cmd, "r")) == NULL ||
+			fgets(cmd_output, sizeof(cmd_output), output) == NULL)
+			got_key_cmd = false;
+		else
+		{
+			/* Remove trailing newline */
+			if (strchr(cmd_output, '\n') != NULL)
+				*strchr(cmd_output, '\n') = '\0';
+
+			got_key_cmd = strlen(cmd_output) > 0;
+		}
+
+		/*
+		 * If the command is not there and the clusters are encrypted, we'll
+		 * fail later and user will need to provide the command either on
+		 * command line or via postgresql.conf.
+		 */
+		if (got_key_cmd)
+		{
+			encryption_key_command = pg_strdup(cmd_output);
+
+			run_encryption_key_command(old_cluster.pgdata);
+			encryption_setup_done = true;
+		}
 	}
 #endif	/* USE_ENCRYPTION */
 

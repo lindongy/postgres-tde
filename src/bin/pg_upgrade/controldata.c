@@ -202,6 +202,8 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 		got_data_checksum_version = true;
 	}
 
+	cluster->controldata.data_encrypted = false;
+
 	/* we have the result of cmd in "output". so parse it line by line now */
 	while (fgets(bufin, sizeof(bufin), output))
 	{

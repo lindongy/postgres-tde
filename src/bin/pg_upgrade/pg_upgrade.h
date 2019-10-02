@@ -338,7 +338,7 @@ extern UserOpts user_opts;
 extern ClusterInfo old_cluster,
 			new_cluster;
 extern OSInfo os_info;
-
+extern char encryption_key_command_opt[];
 
 /* check.c */
 
