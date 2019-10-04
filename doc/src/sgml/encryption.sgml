@@ -40,35 +40,54 @@ echo &lt;your key&gt;
  </para>
 
  <para>
-   If the DBA wants to enter password, he can use
+   <application>initdb</application> eventually puts the encryption key
+   command into <filename>postgresql.conf</filename> file, as the value
+   of <literal>encryption_key_command</literal> parameter. That ensures that
+   you don't need to pass it to <application>pg_ctl</application> each time
+   you want to start the server.
+ </para>
+
+ <para>
+   If the you want to enter password, you can use
    <xref linkend="app-pg-keytool"/> utility to derive ecryption key from
    it. For example, if the <option>-K</option> option looks like in the
    following example, the DBA will be asked for password interactively:
 
 <screen>
-<prompt>$</prompt> <userinput>initdb -K 'read -sp "Cluster encryption
-  password: " PGENCRPWD; echo $PGENCRPWD | pg_keytool -D %D -w' -D data
+<prompt>$</prompt> <userinput>initdb -K 'read -sp "Cluster encryption password: " PGENCRPWD; echo $PGENCRPWD | pg_keytool -D %D -w' -D data
 </userinput>
 </screen>
 
  </para>
 
  <para>
-   As long as the application is aware of the data directory, you can
-   put <literal>%D</literal> into the command and the
-   <application>initdb</application> application will replace it with the
-   actual directory path. Note however that only the actual value of
-   the <option>-K</option> option is subject to this replacement. No
-   replacement will take place if <application>pg_keytool</application> is
-   called from a shell script whose path is passed
-   to <application>initdb</application> via the <option>-K</option> option. In
-   such a case it may be easier to pass the data directory to
+   As long as <application>pg_keytool</application>, is called
+   by <application>initdb</application>, you can put <literal>%D</literal>
+   into the command and
+   <application>initdb</application> will replace it with the actual directory
+   path. Note however that only the actual value of the <option>-K</option>
+   option is subject to this replacement. No replacement will take place
+   if <application>pg_keytool</application> is called from a shell script
+   whose path is passed to <application>initdb</application> via
+   the <option>-K</option> option. In such a case it may be easier to pass the
+   data directory to
    <application>pg_keytool</application> via <envar>PGDATA</envar> environment
    variable.
  </para>
 
+ <note>
+   <para>
+     If the encryption key command needs to read the password from console
+     like this one, you need to comment out
+     the <literal>encryption_key_command</literal> parameter
+     in <filename>postgresql.conf</filename> and pass the command
+     to <application>pg_ctl</application> as explained below.
+   </para>
+ </note>
+
  <para>
-   Likewise, the same command needs to be passed to
+   If the <literal>encryption_key_command</literal> is not present
+   in <filename>postgresql.conf</filename>, it needs to be passed to
    <xref linkend="app-pg-ctl"/> in order to start the cluster:
 
 <screen>
