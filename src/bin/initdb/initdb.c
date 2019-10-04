@@ -3420,6 +3420,15 @@ main(int argc, char *argv[])
 	if (pwprompt || pwfilename)
 		get_su_pwd();
 
+	/*
+	 * Try to retrieve the command from environment variable. We do this
+	 * primarily to create encrypted clusters during automated tests. XXX Not
+	 * sure the variable should be documented. If we do, then pg_ctl should
+	 * probably accept it too.
+	 */
+	if (encryption_key_command == NULL)
+		encryption_key_command = getenv("PGENCRKEYCMD");
+
 	if (encryption_key_command)
 		printf(_("Data encryption is enabled.\n"));
 	else
