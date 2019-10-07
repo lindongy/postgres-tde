@@ -30,12 +30,11 @@ echo &lt;your key&gt;
 
  <para>
    The encryption key is expected in hexadecimal format, two characters
-   (hexadecimal digits) per
-   byte. Since <productname>PostgreSQL</productname> currently uses key
-   of length 32 bytes (256 bits), the expected length of the key string
-   is 64 characters. For example:
+   (hexadecimal digits) per byte. Since <productname>PostgreSQL</productname>
+   currently uses key of length 32 bytes (128 bits), the expected length of
+   the key string is 32 characters. For example:
    <computeroutput>
-     882fb7c12e80280fd664c69d2d636913e86c381ba487c82f77653c0fac8ffc69
+     882fb7c12e80280fd664c69d2d636913
    </computeroutput>
  </para>
 
@@ -61,7 +60,7 @@ echo &lt;your key&gt;
  </para>
 
  <para>
-   As long as <application>pg_keytool</application>, is called
+   As long as <application>pg_keytool</application> is called
    by <application>initdb</application>, you can put <literal>%D</literal>
    into the command and
    <application>initdb</application> will replace it with the actual directory

@@ -352,7 +352,7 @@ init_encryption_context(EVP_CIPHER_CTX **ctx_p, bool stream)
 	int			block_size;
 #endif							/* USE_ASSERT_CHECKING */
 
-	cipher = !stream ? EVP_aes_256_cbc() : EVP_aes_256_ctr();
+	cipher = !stream ? EVP_aes_128_cbc() : EVP_aes_128_ctr();
 
 	if ((*ctx_p = EVP_CIPHER_CTX_new()) == NULL)
 		evp_error();

@@ -44,9 +44,9 @@ typedef enum CipherKind
 
 	/*
 	 * AES (Rijndael) in CBC mode of operation as block cipher, and in CTR
-	 * mode as stream cipher. Key length is always 256 bits.
+	 * mode as stream cipher. Key length is always 128 bits.
 	 */
-	PG_CIPHER_AES_BLOCK_CBC_256_STREAM_CTR_256
+	PG_CIPHER_AES_BLOCK_CBC_128_STREAM_CTR_128
 }			CipherKind;
 
 /*

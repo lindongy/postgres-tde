@@ -5408,7 +5408,7 @@ BootStrapXLOG(void)
 	{
 		char	sample[ENCRYPTION_SAMPLE_SIZE];
 
-		ControlFile->data_cipher = PG_CIPHER_AES_BLOCK_CBC_256_STREAM_CTR_256;
+		ControlFile->data_cipher = PG_CIPHER_AES_BLOCK_CBC_128_STREAM_CTR_128;
 
 		sample_encryption(sample);
 

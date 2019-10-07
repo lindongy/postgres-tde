@@ -6,9 +6,9 @@
 /*
  * Full database encryption key.
  *
- * The key of EVP_aes_256_cbc() cipher is 256 bits long.
+ * The key of EVP_aes_128_cbc() cipher is 128 bits long.
  */
-#define	ENCRYPTION_KEY_LENGTH	32
+#define	ENCRYPTION_KEY_LENGTH	16
 /* Key length in characters (two characters per hexadecimal digit) */
 #define ENCRYPTION_KEY_CHARS	(ENCRYPTION_KEY_LENGTH * 2)
 
