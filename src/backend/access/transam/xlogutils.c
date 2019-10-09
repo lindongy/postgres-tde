@@ -800,7 +800,7 @@ XLogRead(char *buf, int segsize, TimeLineID tli, XLogRecPtr startptr,
 
 				XLogEncryptionTweak(tweak, tli, sendSegNo, decryptOff);
 				decrypt_block(decrypt_p, decrypt_p, XLOG_BLCKSZ, tweak,
-							  true);
+							  false);
 
 				decrypt_p += XLOG_BLCKSZ;
 				decryptOff += XLOG_BLCKSZ;

@@ -45,10 +45,8 @@
 #include <openssl/evp.h>
 #include <openssl/err.h>
 
-EVP_CIPHER_CTX *ctx_encrypt,
-		   *ctx_decrypt,
-		   *ctx_encrypt_stream,
-		   *ctx_decrypt_stream;
+EVP_CIPHER_CTX *ctx_encrypt, *ctx_decrypt,
+	*ctx_encrypt_buffile, *ctx_decrypt_buffile;
 #endif							/* USE_ENCRYPTION */
 
 #ifndef FRONTEND
@@ -65,7 +63,8 @@ PGAlignedBlock encrypt_buf;
 char	   *encrypt_buf_xlog = NULL;
 
 #ifdef USE_ENCRYPTION
-static void init_encryption_context(EVP_CIPHER_CTX **ctx_p, bool stream);
+static void init_encryption_context(EVP_CIPHER_CTX **ctx_p, bool encrypt,
+									bool buffile);
 static void evp_error(void);
 #endif							/* USE_ENCRYPTION */
 
@@ -161,11 +160,10 @@ setup_encryption(void)
 	 */
 	/* OPENSSL_config(NULL); */
 
-	init_encryption_context(&ctx_encrypt, false);
-	init_encryption_context(&ctx_decrypt, false);
-
-	init_encryption_context(&ctx_encrypt_stream, true);
-	init_encryption_context(&ctx_decrypt_stream, true);
+	init_encryption_context(&ctx_encrypt, true, false);
+	init_encryption_context(&ctx_decrypt, false, false);
+	init_encryption_context(&ctx_encrypt_buffile, true, true);
+	init_encryption_context(&ctx_decrypt_buffile, false, true);
 
 	/*
 	 * We need multiple pages here, so allocate the memory dynamically instead
@@ -226,9 +224,10 @@ sample_encryption(char *buf)
  *
  * "size" must be a (non-zero) multiple of ENCRYPTION_BLOCK.
  *
- * "tweak" value must be TWEAK_SIZE bytes long.
- *
- * If "stream" is set, stream cipher is used instead of block one.
+ * "tweak" value must be TWEAK_SIZE bytes long. If NULL is passed, we suppose
+ * that the input data start with a page LSN which we'll use as an encryption
+ * tweak. In such a case we don't encrypt the initial sizeof(PageXLogRecPtr)
+ * bytes so the tweak is preserved for decryption.
  *
  * All-zero blocks are not encrypted to correctly handle relation extension,
  * and also to simplify handling of holes created by seek past EOF and
@@ -236,33 +235,62 @@ sample_encryption(char *buf)
  */
 void
 encrypt_block(const char *input, char *output, Size size, char *tweak,
-			  bool stream)
+			  bool buffile)
 {
 #ifdef USE_ENCRYPTION
-	int			out_size;
 	EVP_CIPHER_CTX *ctx;
+	int			out_size;
+	char	tweak_loc[TWEAK_SIZE];
 
 	Assert(data_encrypted);
 
 	/*
-	 * Block cipher should only be used if the size is whole multiple of
-	 * encryption block size.
+	 * Empty page is not worth encryption, and encryption of zeroes wouldn't
+	 * even be secure.
 	 */
-	Assert((size >= ENCRYPTION_BLOCK && size % ENCRYPTION_BLOCK == 0) ||
-		   stream);
-
-	/*
-	 * Empty page is not worth encryption. Do not waste cycles checking for
-	 * stream cipher as this is currently used only for XLOG pages, and empty
-	 * XLOG page should not be written to disk.
-	 */
-	if (!stream && IsAllZero(input, size))
+	if (IsAllZero(input, size))
 	{
 		memset(output, 0, size);
 		return;
 	}
 
-	ctx = !stream ? ctx_encrypt : ctx_encrypt_stream;
+	/*
+	 * If caller passed no tweak, we assume this is relation page and LSN
+	 * should be used.
+	 */
+	if (tweak == NULL)
+	{
+		size_t	lsn_size = sizeof(PageXLogRecPtr);
+
+		memset(tweak_loc, 0, TWEAK_SIZE);
+
+		/*
+		 * The CTR mode counter is big endian (see crypto/modes/ctr128.c in
+		 * OpenSSL) and the lower part is used by OpenSSL internally.
+		 * Initialize the upper eight bytes and leave the lower eight to
+		 * OpenSSL - as the counter is increased once per 16 bytes of input,
+		 * and as we hardly ever encrypt more than BLCKSZ bytes at a time,
+		 * it's not possible for the lower part to overflow into the upper
+		 * one.
+		 *
+		 * Endian of the LSN does not matter: no one cares about the actual
+		 * value as long as it's unique for each encryption run.
+		 */
+		memcpy(tweak_loc, input, lsn_size);
+
+		tweak = tweak_loc;
+
+		/* Copy the LSN to the output. */
+		if (input != output)
+			memcpy(output, input, lsn_size);
+
+		/* Do not encrypt the LSN. */
+		input += lsn_size;
+		output += lsn_size;
+		size -= lsn_size;
+	}
+
+	ctx = !buffile ? ctx_encrypt : ctx_encrypt_buffile;
 
 	/* The remaining initialization. */
 	if (EVP_EncryptInit_ex(ctx, NULL, NULL, encryption_key,
@@ -274,6 +302,7 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
 						  &out_size, (unsigned char *) input, size) != 1)
 		evp_error();
 
+	/* TODO ereport() instead of Assert()? */
 	Assert(out_size == size);
 #else
 	/* data_encrypted should not be set */
@@ -291,23 +320,38 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
  */
 void
 decrypt_block(const char *input, char *output, Size size, char *tweak,
-			  bool stream)
+			  bool buffile)
 {
 #ifdef USE_ENCRYPTION
-	int			out_size;
 	EVP_CIPHER_CTX *ctx;
+	int			out_size;
+	char	tweak_loc[TWEAK_SIZE];
 
 	Assert(data_encrypted);
-	Assert((size >= ENCRYPTION_BLOCK && size % ENCRYPTION_BLOCK == 0) ||
-		   stream);
 
-	if (!stream && IsAllZero(input, size))
+	if (IsAllZero(input, size))
 	{
 		memset(output, 0, size);
 		return;
 	}
 
-	ctx = !stream ? ctx_decrypt : ctx_decrypt_stream;
+	if (tweak == NULL)
+	{
+		size_t	lsn_size = sizeof(PageXLogRecPtr);
+
+		memset(tweak_loc, 0, TWEAK_SIZE);
+		memcpy(tweak_loc, input, lsn_size);
+		tweak = tweak_loc;
+
+		if (input != output)
+			memcpy(output, input, lsn_size);
+
+		input += lsn_size;
+		output += lsn_size;
+		size -= lsn_size;
+	}
+
+	ctx = !buffile ? ctx_decrypt : ctx_decrypt_buffile;
 
 	/* The remaining initialization. */
 	if (EVP_DecryptInit_ex(ctx, NULL, NULL, encryption_key,
@@ -319,6 +363,7 @@ decrypt_block(const char *input, char *output, Size size, char *tweak,
 						  &out_size, (unsigned char *) input, size) != 1)
 		evp_error();
 
+	/* TODO ereport() instead of Assert()? */
 	Assert(out_size == size);
 #else
 	/* data_encrypted should not be set */
@@ -332,7 +377,7 @@ decrypt_block(const char *input, char *output, Size size, char *tweak,
  *
  * On server side this happens during postmaster startup, so other processes
  * inherit the initialized context via fork(). There's no reason to this again
- * and again in encrypt_block() / decrypt_block(), also because we cannot
+ * and again in encrypt_block() / decrypt_block(), also because we should not
  * handle out-of-memory conditions encountered by OpenSSL in another way than
  * ereport(FATAL). The OOM is much less likely to happen during postmaster
  * startup, and even if it happens, troubleshooting should be easier than if
@@ -344,40 +389,51 @@ decrypt_block(const char *input, char *output, Size size, char *tweak,
  * (e.g. files).
  */
 static void
-init_encryption_context(EVP_CIPHER_CTX **ctx_p, bool stream)
+init_encryption_context(EVP_CIPHER_CTX **ctx_p, bool encrypt, bool buffile)
 {
 	EVP_CIPHER_CTX *ctx;
 	const EVP_CIPHER *cipher;
-#ifdef USE_ASSERT_CHECKING
-	int			block_size;
-#endif							/* USE_ASSERT_CHECKING */
 
-	cipher = !stream ? EVP_aes_128_cbc() : EVP_aes_128_ctr();
+	/*
+	 * Currently we use CBC mode for buffile.c because CTR imposes much more
+	 * stringent requirements on IV (i.e. the same IV must not be used
+	 * repeatedly.)
+	 */
+	cipher = !buffile ? EVP_aes_128_ctr() : EVP_aes_128_cbc();
 
 	if ((*ctx_p = EVP_CIPHER_CTX_new()) == NULL)
 		evp_error();
 	ctx = *ctx_p;
-	if (EVP_EncryptInit_ex(ctx, cipher, NULL, NULL, NULL) != 1)
-		evp_error();
+
+	if (encrypt)
+	{
+		if (EVP_EncryptInit_ex(ctx, cipher, NULL, NULL, NULL) != 1)
+			evp_error();
+	}
+	else
+	{
+		if (EVP_DecryptInit_ex(ctx, cipher, NULL, NULL, NULL) != 1)
+			evp_error();
+	}
+
+	/* CTR mode is effectively a stream cipher. */
+	Assert((!buffile && EVP_CIPHER_CTX_block_size(ctx) == 1) ||
+		   (buffile && EVP_CIPHER_CTX_block_size(ctx) == 16));
 
 	/*
-	 * No padding is needed. For a block cipher, the input block size should
-	 * already be a multiple of ENCRYPTION_BLOCK. For stream cipher, we don't
-	 * need padding anyway. This might save some cycles at the OpenSSL end.
-	 * XXX Is it setting worth when we don't call EVP_DecryptFinal_ex()
-	 * anyway?
+	 * No padding is needed. For relation pages the input block size should
+	 * already be a multiple of ENCRYPTION_BLOCK, while for WAL we want to
+	 * avoid encryption of the unused (zeroed) part of the page, see
+	 * backend/storage/file/README.encryption.
+	 *
+	 * XXX Is this setting worth when we don't call EVP_EncryptFinal_ex()
+	 * anyway? (Given the block_size==1, EVP_EncryptFinal_ex() wouldn't do
+	 * anything.)
 	 */
 	EVP_CIPHER_CTX_set_padding(ctx, 0);
 
 	Assert(EVP_CIPHER_CTX_iv_length(ctx) == TWEAK_SIZE);
 	Assert(EVP_CIPHER_CTX_key_length(ctx) == ENCRYPTION_KEY_LENGTH);
-	block_size = EVP_CIPHER_CTX_block_size(ctx);
-#ifdef USE_ASSERT_CHECKING
-	if (!stream)
-		Assert(block_size == ENCRYPTION_BLOCK);
-	else
-		Assert(block_size == 1);
-#endif							/* USE_ASSERT_CHECKING */
 }
 
 #endif							/* USE_ENCRYPTION */
@@ -427,32 +483,6 @@ XLogEncryptionTweak(char *tweak, TimeLineID timeline, XLogSegNo segment,
 }
 
 /*
- * Copying relations between tablespaces/databases means that the tweak values
- * of each block will change. This function transcodes a series of blocks with
- * new tweak values. Returns the new block number for convenience.
- */
-BlockNumber
-ReencryptBlock(char *buffer, int blocks,
-			   RelFileNode *srcNode, RelFileNode *dstNode,
-			   ForkNumber srcForkNum, ForkNumber dstForkNum,
-			   BlockNumber blockNum)
-{
-	char	   *cur;
-	char		srcTweak[TWEAK_SIZE];
-	char		dstTweak[TWEAK_SIZE];
-
-	for (cur = buffer; cur < buffer + blocks * BLCKSZ; cur += BLCKSZ)
-	{
-		mdtweak(srcTweak, srcNode, srcForkNum, blockNum);
-		mdtweak(dstTweak, dstNode, dstForkNum, blockNum);
-		decrypt_block(cur, cur, BLCKSZ, srcTweak, false);
-		encrypt_block(cur, cur, BLCKSZ, dstTweak, false);
-		blockNum++;
-	}
-	return blockNum;
-}
-
-/*
  * md files are encrypted block at a time. Tweak will alias higher numbered
  * forks for huge tables.
  */
@@ -467,19 +497,15 @@ mdtweak(char *tweak, RelFileNode *relnode, ForkNumber forknum, BlockNumber block
 
 #ifndef FRONTEND
 /*
- * When page is encrypted using a cipher in the cipher-block chaining (CBC)
- * mode, the fact that the page starts with LSN makes it harder for adversary
- * to see which part of the plain (unencrypted) page changed: the LSN changes
- * even if only the plain data at the end of the page changed, and, due to the
- * chaining, the encrypted page becomes completely different.  Although no LSN
- * is needed for unlogged tables, we still want to keep the advantage
- * described here. So we set pd_lsn to "fake LSN" before each write.
+ * Page LSN is used as initialization vector (IV) so encrypted page needs some
+ * value here even if no real LSN is actually needed.
  *
  * Note that caller needs to restore InvalidXLogRecPtr after the write so that
  * it can be recognized later that the page needs to be treated specially.
  *
  * LW_SHARED on the buffer contents is sufficient because pd_lsn is not
- * expected to be used for other purposes.
+ * expected to be used for other purposes (gaps in the sequence of fake LSNs
+ * are fine).
  *
  * Returns true iff the LSN was updated.
  */

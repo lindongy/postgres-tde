@@ -590,11 +590,9 @@ BufFileLoadBuffer(BufFile *file)
 	File		thisfile;
 
 	/*
-	 * Only whole multiple of ENCRYPTION_BLOCK can be encrypted / decrypted.
+	 * Only whole multiple of BLCKSZ can be encrypted / decrypted.
 	 */
-	Assert((file->common.curOffset % BLCKSZ == 0 &&
-			file->common.curOffset % ENCRYPTION_BLOCK == 0) ||
-		   !data_encrypted);
+	Assert(file->common.curOffset % BLCKSZ == 0 || !data_encrypted);
 
 	/*
 	 * Advance to next component file if necessary and possible.
@@ -663,7 +661,7 @@ BufFileLoadBuffer(BufFile *file)
 					  file->common.buffer.data,
 					  BLCKSZ,
 					  tweak,
-					  false);
+					  true);
 
 #ifdef	USE_ASSERT_CHECKING
 
@@ -785,8 +783,7 @@ BufFileDumpBufferEncrypted(BufFile *file)
 	/*
 	 * See comments in BufFileLoadBuffer();
 	 */
-	Assert((file->common.curOffset % BLCKSZ == 0 &&
-			file->common.curOffset % ENCRYPTION_BLOCK == 0));
+	Assert(file->common.curOffset % BLCKSZ == 0);
 
 	/*
 	 * Advance to next component file if necessary and possible.
@@ -833,7 +830,7 @@ BufFileDumpBufferEncrypted(BufFile *file)
 				  encrypt_buf.data,
 				  BLCKSZ,
 				  tweak,
-				  false);
+				  true);
 
 	thisfile = file->files[file->common.curFile];
 	bytestowrite = FileWrite(thisfile,
@@ -1666,7 +1663,7 @@ retry:
 					  file->common.buffer.data,
 					  BLCKSZ,
 					  tweak,
-					  false);
+					  true);
 
 #ifdef	USE_ASSERT_CHECKING
 
@@ -1719,7 +1716,7 @@ BufFileDumpBufferTransient(TransientBufFile *file)
 					  encrypt_buf.data,
 					  BLCKSZ,
 					  tweak,
-					  false);
+					  true);
 		write_ptr = encrypt_buf.data;
 		bytestowrite = BLCKSZ;
 	}

@@ -325,7 +325,7 @@ SimpleXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr,
 
 		XLogEncryptionTweak(tweak, targetHistory[private->tliIndex].tli,
 							xlogreadsegno, targetPageOff);
-		decrypt_block(readBuf, readBuf, XLOG_BLCKSZ, tweak, true);
+		decrypt_block(readBuf, readBuf, XLOG_BLCKSZ, tweak, false);
 	}
 
 	Assert(targetSegNo == xlogreadsegno);

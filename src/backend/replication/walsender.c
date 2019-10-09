@@ -2550,7 +2550,7 @@ retry:
 							  encrypt_buf_xlog + i,
 							  nencrypt,
 							  tweak,
-							  true);
+							  false);
 			}
 
 			/*

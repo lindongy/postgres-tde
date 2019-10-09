@@ -29,7 +29,7 @@
 	"compile postgres with --with-openssl to use encryption."
 
 /*
- * Cipher used to encrypt data.
+ * Cipher used to encrypt data. This value is stored in the control file.
  *
  * Due to very specific requirements, the ciphers are not likely to change,
  * but we should be somewhat flexible.
@@ -43,10 +43,16 @@ typedef enum CipherKind
 	PG_CIPHER_NONE = 0,
 
 	/*
-	 * AES (Rijndael) in CBC mode of operation as block cipher, and in CTR
-	 * mode as stream cipher. Key length is always 128 bits.
+	 * AES (Rijndael) in CTR mode of operation. Only key length 128 bits is
+	 * supported now, so the constant name does not contain the key length.
+	 *
+	 * TODO Get rid of the CBC mode that we use for buffile.c before we use
+	 * buffile.c to encrypt any file that needs to be handled by
+	 * pg_upgrade. (As long as no file encrypted by buffile.c needs
+	 * pg_upgrade, the control file does not have to be aware of the CBC
+	 * mode.)
 	 */
-	PG_CIPHER_AES_BLOCK_CBC_128_STREAM_CTR_128
+	PG_CIPHER_AES_CTR_128
 }			CipherKind;
 
 /*
@@ -82,13 +88,6 @@ typedef struct ShmemEncryptionKey
  */
 extern ShmemEncryptionKey *encryption_key_shmem;
 #endif							/* FRONTEND */
-
-/*
- * The encrypted data is a series of blocks of size
- * ENCRYPTION_BLOCK. Currently we use the EVP_aes_256_xts implementation. Make
- * sure the following constants match if adopting another algorithm.
- */
-#define ENCRYPTION_BLOCK 16
 
 #define TWEAK_SIZE 16
 
@@ -136,17 +135,13 @@ extern void read_encryption_key(read_encryption_key_cb read_char);
 extern void setup_encryption(void);
 extern void sample_encryption(char *buf);
 extern void encrypt_block(const char *input, char *output, Size size,
-			  char *tweak, bool stream);
+						  char *tweak, bool buffile);
 extern void decrypt_block(const char *input, char *output, Size size,
-			  char *tweak, bool stream);
+						  char *tweak, bool buffile);
 extern void encryption_error(bool fatal, char *message);
 
 extern void XLogEncryptionTweak(char *tweak, TimeLineID timeline,
 					XLogSegNo segment, uint32 offset);
-extern BlockNumber ReencryptBlock(char *buffer, int blocks,
-			   RelFileNode *srcNode, RelFileNode *dstNode,
-			   ForkNumber srcForkNum, ForkNumber dstForkNum,
-			   BlockNumber blockNum);
 extern void mdtweak(char *tweak, RelFileNode *relnode, ForkNumber forknum,
 		BlockNumber blocknum);
 

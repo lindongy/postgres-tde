@@ -23,28 +23,23 @@
 #include <sys/stat.h>
 
 #include "storage/copydir.h"
-#include "storage/encryption.h"
 #include "storage/fd.h"
-#include "storage/reinit.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 
 /*
  * copydir: copy a directory
  *
- * RelFileNode values must specify tablespace and database oids for source
- * and target to support re-encryption if necessary. relNode value in provided
- * structs will be clobbered.
+ * If recurse is false, subdirectories are ignored.  Anything that's not
+ * a directory or a regular file is ignored.
  */
 void
-copydir(char *fromdir, char *todir, RelFileNode *fromNode, RelFileNode *toNode)
+copydir(char *fromdir, char *todir, bool recurse)
 {
 	DIR		   *xldir;
 	struct dirent *xlde;
 	char		fromfile[MAXPGPATH * 2];
 	char		tofile[MAXPGPATH * 2];
-
-	Assert(!data_encrypted || (fromNode != NULL && toNode != NULL));
 
 	if (MakePGDirectory(todir) != 0)
 		ereport(ERROR,
@@ -72,32 +67,14 @@ copydir(char *fromdir, char *todir, RelFileNode *fromNode, RelFileNode *toNode)
 					(errcode_for_file_access(),
 					 errmsg("could not stat file \"%s\": %m", fromfile)));
 
-		if (S_ISREG(fst.st_mode))
+		if (S_ISDIR(fst.st_mode))
 		{
-			int			oidchars;
-			ForkNumber	forkNum;
-			int			segment;
-
-			/*
-			 * For encrypted databases we need to reencrypt files with new
-			 * tweaks.
-			 */
-			if (data_encrypted &&
-				parse_filename_for_nontemp_relation(xlde->d_name,
-													&oidchars, &forkNum, &segment))
-			{
-				char		oidbuf[OIDCHARS + 1];
-
-				memcpy(oidbuf, xlde->d_name, oidchars);
-				oidbuf[oidchars] = '\0';
-
-				/* We scribble over the provided RelFileNodes here */
-				fromNode->relNode = toNode->relNode = atol(oidbuf);
-				copy_file(fromfile, tofile, fromNode, toNode, forkNum, forkNum, segment);
-			}
-			else
-				copy_file(fromfile, tofile, NULL, NULL, 0, 0, 0);
+			/* recurse to handle subdirectories */
+			if (recurse)
+				copydir(fromfile, tofile, true);
 		}
+		else if (S_ISREG(fst.st_mode))
+			copy_file(fromfile, tofile);
 	}
 	FreeDir(xldir);
 
@@ -144,22 +121,17 @@ copydir(char *fromdir, char *todir, RelFileNode *fromNode, RelFileNode *toNode)
 }
 
 /*
- * copy one file. If decryption and reencryption may be needed specify
- * relfilenodes for source and target.
+ * copy one file
  */
 void
-copy_file(char *fromfile, char *tofile, RelFileNode *fromNode,
-		  RelFileNode *toNode, ForkNumber fromForkNum, ForkNumber toForkNum,
-		  int segment)
+copy_file(char *fromfile, char *tofile)
 {
 	char	   *buffer;
 	int			srcfd;
 	int			dstfd;
 	int			nbytes;
-	int			bytesread;
 	off_t		offset;
 	off_t		flush_offset;
-	BlockNumber blockNum = segment * RELSEG_SIZE;
 
 	/* Size of copy buffer (read and write requests) */
 #define COPY_BUF_SIZE (8 * BLCKSZ)
@@ -214,50 +186,15 @@ copy_file(char *fromfile, char *tofile, RelFileNode *fromNode,
 			flush_offset = offset;
 		}
 
-		/*
-		 * Try to read as much as we fit in the buffer so we can deal with
-		 * complete blocks if we need to reencrypt.
-		 */
-		nbytes = 0;
-		while (nbytes < COPY_BUF_SIZE)
-		{
-			pgstat_report_wait_start(WAIT_EVENT_COPY_FILE_READ);
-			bytesread = read(srcfd, buffer + nbytes, COPY_BUF_SIZE - nbytes);
-			pgstat_report_wait_end();
-			if (bytesread < 0)
-				ereport(ERROR,
-						(errcode_for_file_access(),
-						 errmsg("could not read file \"%s\": %m", fromfile)));
-			nbytes += bytesread;
-			if (bytesread == 0)
-				break;
-		}
+		pgstat_report_wait_start(WAIT_EVENT_COPY_FILE_READ);
+		nbytes = read(srcfd, buffer, COPY_BUF_SIZE);
+		pgstat_report_wait_end();
+		if (nbytes < 0)
+			ereport(ERROR,
+					(errcode_for_file_access(),
+					 errmsg("could not read file \"%s\": %m", fromfile)));
 		if (nbytes == 0)
 			break;
-
-		/*
-		 * If the database is encrypted we need to decrypt the data here and
-		 * reencrypt it to adjust the tweak values of blocks.
-		 */
-		if (data_encrypted)
-		{
-			if (fromNode != NULL)
-			{
-				Assert(toNode != NULL);
-
-				/*
-				 * There's no reason not to have whole number of pages read
-				 * Computation of the number of blocks below relies on this
-				 * fact.
-				 */
-				Assert(nbytes % BLCKSZ == 0);
-
-				blockNum = ReencryptBlock(buffer, nbytes / BLCKSZ,
-										  fromNode, toNode, fromForkNum,
-										  toForkNum, blockNum);
-			}
-		}
-
 		errno = 0;
 		pgstat_report_wait_start(WAIT_EVENT_COPY_FILE_WRITE);
 		if ((int) write(dstfd, buffer, nbytes) != nbytes)

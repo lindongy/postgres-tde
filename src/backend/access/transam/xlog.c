@@ -2519,7 +2519,7 @@ XLogWrite(XLogwrtRqst WriteRqst, bool flexible)
 					else
 						nbytes = XLOG_BLCKSZ;
 
-					encrypt_block(from, to, nbytes, tweak, true);
+					encrypt_block(from, to, nbytes, tweak, false);
 					nencrypted++;
 					from += XLOG_BLCKSZ;
 					to += XLOG_BLCKSZ;
@@ -3545,10 +3545,10 @@ XLogFileCopy(XLogSegNo destsegno, TimeLineID srcTLI, XLogSegNo srcsegno,
 			char		tweak[TWEAK_SIZE];
 
 			XLogEncryptionTweak(tweak, srcTLI, srcsegno, nbytes);
-			decrypt_block(buffer.data, buffer.data, nread, tweak, true);
+			decrypt_block(buffer.data, buffer.data, nread, tweak, false);
 
 			XLogEncryptionTweak(tweak, ThisTimeLineID, destsegno, nbytes);
-			encrypt_block(buffer.data, buffer.data, nread, tweak, true);
+			encrypt_block(buffer.data, buffer.data, nread, tweak, false);
 		}
 
 		errno = 0;
@@ -5350,7 +5350,8 @@ BootStrapXLOG(void)
 		char		tweak[TWEAK_SIZE];
 
 		XLogEncryptionTweak(tweak, ThisTimeLineID, 1, 0);
-		encrypt_block((char *) page, (char *) page, XLOG_BLCKSZ, tweak, true);
+		encrypt_block((char *) page, (char *) page, XLOG_BLCKSZ, tweak,
+					  false);
 	}
 
 	/* Write the first page with the initial record */
@@ -5408,7 +5409,7 @@ BootStrapXLOG(void)
 	{
 		char	sample[ENCRYPTION_SAMPLE_SIZE];
 
-		ControlFile->data_cipher = PG_CIPHER_AES_BLOCK_CBC_128_STREAM_CTR_128;
+		ControlFile->data_cipher = PG_CIPHER_AES_CTR_128;
 
 		sample_encryption(sample);
 
@@ -11809,7 +11810,7 @@ retry:
 		char		tweak[TWEAK_SIZE];
 
 		XLogEncryptionTweak(tweak, curFileTLI, readSegNo, readOff);
-		decrypt_block(readBuf, readBuf, XLOG_BLCKSZ, tweak, true);
+		decrypt_block(readBuf, readBuf, XLOG_BLCKSZ, tweak, false);
 	}
 
 	*readTLI = curFileTLI;

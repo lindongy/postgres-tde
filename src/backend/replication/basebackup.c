@@ -1123,7 +1123,7 @@ sendDir(const char *path, int basepathlen, bool sizeonly, List *tablespaces,
 		/* Exclude all forks for unlogged tables except the init fork */
 		if (isDbDir &&
 			parse_filename_for_nontemp_relation(de->d_name, &relOidChars,
-												&relForkNum, NULL))
+												&relForkNum))
 		{
 			/* Never exclude init forks */
 			if (relForkNum != INIT_FORKNUM)

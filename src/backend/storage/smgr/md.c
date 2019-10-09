@@ -87,8 +87,6 @@ typedef struct _MdfdVec
 
 static MemoryContext MdCxt;		/* context for all MdfdVec objects */
 
-static char *md_encryption_tweak;
-
 /* Populate a file tag describing an md.c segment file. */
 #define INIT_MD_FILETAG(a,xx_rnode,xx_forknum,xx_segno) \
 ( \
@@ -153,8 +151,6 @@ mdinit(void)
 	MdCxt = AllocSetContextCreate(TopMemoryContext,
 								  "MdSmgr",
 								  ALLOCSET_DEFAULT_SIZES);
-
-	md_encryption_tweak = MemoryContextAllocZero(MdCxt, TWEAK_SIZE);
 }
 
 /*
@@ -1275,16 +1271,13 @@ _mdnblocks(SMgrRelation reln, ForkNumber forknum, MdfdVec *seg)
 static void
 mdencrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer)
 {
-	mdtweak(md_encryption_tweak, &(reln->smgr_rnode.node), forknum, blocknum);
-	encrypt_block(buffer, encrypt_buf.data, BLCKSZ, md_encryption_tweak,
-				  false);
+	encrypt_block(buffer, encrypt_buf.data, BLCKSZ, NULL, false);
 }
 
 static void
 mddecrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *dest)
 {
-	mdtweak(md_encryption_tweak, &(reln->smgr_rnode.node), forknum, blocknum);
-	decrypt_block(encrypt_buf.data, dest, BLCKSZ, md_encryption_tweak, false);
+	decrypt_block(encrypt_buf.data, dest, BLCKSZ, NULL, false);
 }
 
 /*
