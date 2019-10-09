@@ -868,6 +868,8 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 	{
 		/* new buffers are zero-filled */
 		MemSet((char *) bufBlock, 0, BLCKSZ);
+		if (data_encrypted)
+			EnforceLSNForEncryption(relpersistence, (char *) bufBlock);
 		/* don't set checksum for all-zero page */
 		smgrextend(smgr, forkNum, blockNum, (char *) bufBlock, false);
 
@@ -2678,7 +2680,6 @@ FlushBuffer(BufferDesc *buf, SMgrRelation reln)
 	Block		bufBlock;
 	char	   *bufToWrite;
 	uint32		buf_state;
-	bool	lsn_is_fake = false;
 
 	/*
 	 * Acquire the buffer's io_in_progress lock.  If StartBufferIO returns
@@ -2743,9 +2744,6 @@ FlushBuffer(BufferDesc *buf, SMgrRelation reln)
 	 */
 	bufBlock = BufHdrGetBlock(buf);
 
-	if (data_encrypted && !(buf_state & BM_PERMANENT))
-		lsn_is_fake = EnforceLSNUpdateForEncryption(bufBlock);
-
 	/*
 	 * Update page checksum if desired.  Since we have only shared lock on the
 	 * buffer, other processes might be updating hint bits in it, so we must
@@ -2774,9 +2772,6 @@ FlushBuffer(BufferDesc *buf, SMgrRelation reln)
 	}
 
 	pgBufferUsage.shared_blks_written++;
-
-	if (lsn_is_fake)
-		RestoreInvalidLSN(bufBlock);
 
 	/*
 	 * Mark the buffer as clean (unless BM_JUST_DIRTIED has become set) and
@@ -3216,7 +3211,6 @@ FlushRelationBuffers(Relation rel)
 			{
 				ErrorContextCallback errcallback;
 				Page		localpage;
-				bool	lsn_is_fake = false;
 
 				localpage = (char *) LocalBufHdrGetBlock(bufHdr);
 
@@ -3226,20 +3220,16 @@ FlushRelationBuffers(Relation rel)
 				errcallback.previous = error_context_stack;
 				error_context_stack = &errcallback;
 
-				if (data_encrypted)
-					lsn_is_fake = EnforceLSNUpdateForEncryption((char *)
-																localpage);
-
 				PageSetChecksumInplace(localpage, bufHdr->tag.blockNum);
 
+				if (data_encrypted)
+					EnforceLSNForEncryption(rel->rd_rel->relpersistence,
+											(char *) localpage);
 				smgrwrite(rel->rd_smgr,
 						  bufHdr->tag.forkNum,
 						  bufHdr->tag.blockNum,
 						  localpage,
 						  false);
-
-				if (lsn_is_fake)
-					RestoreInvalidLSN((char *) localpage);
 
 				buf_state &= ~(BM_DIRTY | BM_JUST_DIRTIED);
 				pg_atomic_unlocked_write_u32(&bufHdr->state, buf_state);

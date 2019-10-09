@@ -1029,6 +1029,8 @@ _hash_alloc_buckets(Relation rel, BlockNumber firstblock, uint32 nblocks)
 
 	RelationOpenSmgr(rel);
 	PageSetChecksumInplace(page, lastblock);
+	if (data_encrypted)
+		EnforceLSNForEncryption(rel->rd_rel->relpersistence, zerobuf.data);
 	smgrextend(rel->rd_smgr, MAIN_FORKNUM, lastblock, zerobuf.data, false);
 
 	return true;

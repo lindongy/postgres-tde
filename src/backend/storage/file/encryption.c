@@ -29,6 +29,7 @@
 #include "common/fe_memutils.h"
 #include "common/sha2.h"
 #include "common/string.h"
+#include "catalog/pg_class.h"
 #include "catalog/pg_control.h"
 #include "storage/bufpage.h"
 #include "storage/encryption.h"
@@ -500,57 +501,33 @@ mdtweak(char *tweak, RelFileNode *relnode, ForkNumber forknum, BlockNumber block
  * Page LSN is used as initialization vector (IV) so encrypted page needs some
  * value here even if no real LSN is actually needed.
  *
- * Note that caller needs to restore InvalidXLogRecPtr after the write so that
- * it can be recognized later that the page needs to be treated specially.
+ * Shared lock on the buffer contents is sufficient because unlogged /
+ * temporary relations do not use pd_lsn for other purposes (gaps in the
+ * sequence of fake LSNs are fine), however the most convenient use is before
+ * smgrwrite() / smgrextend(), so callers have exclusive lock anyway.
  *
- * LW_SHARED on the buffer contents is sufficient because pd_lsn is not
- * expected to be used for other purposes (gaps in the sequence of fake LSNs
- * are fine).
+ * Do not call this on pages of INIT_FORKNUM fork - these are subject to
+ * regular WAL.
  *
- * Returns true iff the LSN was updated.
- */
-bool
-EnforceLSNUpdateForEncryption(char	*buf_contents)
-{
-	PageHeader	hdr = (PageHeader) buf_contents;
-	XLogRecPtr	recptr;
-
-	/* Failure indicates incorrect user of the function. */
-	Assert(data_encrypted);
-
-	/*
-	 * All-zero page shouldn't be encrypted, so don't care about the fake LSN.
-	 */
-	if (PageIsNew(hdr))
-		return false;
-
-	recptr = PageXLogRecPtrGet(hdr->pd_lsn);
-
-	/*
-	 * Valid LSN indicates that the relation is either logged or it's a page
-	 * of unlogged GIST index. In either case we must not touch the LSN.
-	 */
-	if (!XLogRecPtrIsInvalid(recptr))
-		return false;
-
-	PageXLogRecPtrSet(hdr->pd_lsn, GetFakeLSNForUnloggedRel());
-
-	return true;
-}
-
-/*
- * If EnforceLSNUpdateForEncryption() returned true and if the function can be
- * passed that buffer again, use this function to restore the
- * InvalidXLogRecPtr value.
+ * TODO Introduce a separate key for temporary / unlogged relations to make
+ * sure that key+IV is not reused if the "fake LSN" is equal to a regular
+ * LSN. However make sure (in mdencrypt() / mddecrypt() mdextend() ?) that
+ * INIT_FORKNUM fork is encrypted using the regular key because it uses the
+ * regular LSN. (Warn users that the beta release implementing this requires
+ * user to drop the existing unlogged relations.)
  */
 void
-RestoreInvalidLSN(char	*buf_contents)
+EnforceLSNForEncryption(char relpersistence, char *buf_contents)
 {
 	PageHeader	hdr = (PageHeader) buf_contents;
 
-	/* Failure indicates incorrect user of the function. */
+	/* Failure indicates incorrect use of the function. */
 	Assert(data_encrypted);
 
-	PageXLogRecPtrSet(hdr->pd_lsn, (XLogRecPtr) InvalidXLogRecPtr);
+	/* Permanent relation should have regular LSN. */
+	if (relpersistence == RELPERSISTENCE_PERMANENT)
+		return;
+
+	PageXLogRecPtrSet(hdr->pd_lsn, GetFakeLSNForUnloggedRel());
 }
-#endif	/* FRONTEND */
+#endif	/* !FRONTEND */

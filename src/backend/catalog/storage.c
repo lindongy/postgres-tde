@@ -362,6 +362,8 @@ RelationCopyStorage(SMgrRelation src, SMgrRelation dst,
 		 * rel, because there's no need for smgr to schedule an fsync for this
 		 * write; we'll do it ourselves below.
 		 */
+		if (data_encrypted)
+			EnforceLSNForEncryption(relpersistence, buf.data);
 		smgrextend(dst, forkNum, blkno, buf.data, true);
 	}
 

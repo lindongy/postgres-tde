@@ -660,8 +660,6 @@ _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 		/* We use the heap NEWPAGE record type for this */
 		log_newpage(&wstate->index->rd_node, MAIN_FORKNUM, blkno, page, true);
 	}
-	else if (data_encrypted)
-		EnforceLSNUpdateForEncryption((char *) page);
 
 	/*
 	 * If we have to write pages nonsequentially, fill in the space with
@@ -674,6 +672,10 @@ _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 	{
 		if (!wstate->btws_zeropage)
 			wstate->btws_zeropage = (Page) palloc0(BLCKSZ);
+
+		if (data_encrypted)
+			EnforceLSNForEncryption(wstate->index->rd_rel->relpersistence,
+									(char *) wstate->btws_zeropage);
 		/* don't set checksum for all-zero page */
 		smgrextend(wstate->index->rd_smgr, MAIN_FORKNUM,
 				   wstate->btws_pages_written++,
@@ -690,6 +692,9 @@ _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 	if (blkno == wstate->btws_pages_written)
 	{
 		/* extending the file... */
+		if (data_encrypted)
+			EnforceLSNForEncryption(wstate->index->rd_rel->relpersistence,
+									(char *) page);
 		smgrextend(wstate->index->rd_smgr, MAIN_FORKNUM, blkno,
 				   (char *) page, true);
 		wstate->btws_pages_written++;
@@ -697,6 +702,9 @@ _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 	else
 	{
 		/* overwriting a block we zero-filled before */
+		if (data_encrypted)
+			EnforceLSNForEncryption(wstate->index->rd_rel->relpersistence,
+									(char *) page);
 		smgrwrite(wstate->index->rd_smgr, MAIN_FORKNUM, blkno,
 				  (char *) page, true);
 	}

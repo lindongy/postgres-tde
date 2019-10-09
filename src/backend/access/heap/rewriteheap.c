@@ -330,27 +330,21 @@ end_heap_rewrite(RewriteState state)
 	/* Write the last page, if any */
 	if (state->rs_buffer_valid)
 	{
-		bool	lsn_is_fake = false;
-
 		if (state->rs_use_wal)
 			log_newpage(&state->rs_new_rel->rd_node,
 						MAIN_FORKNUM,
 						state->rs_blockno,
 						state->rs_buffer,
 						true);
-		else if (data_encrypted)
-			lsn_is_fake = EnforceLSNUpdateForEncryption((char *)
-														state->rs_buffer);
-
 		RelationOpenSmgr(state->rs_new_rel);
 
 		PageSetChecksumInplace(state->rs_buffer, state->rs_blockno);
 
+		if (data_encrypted)
+			EnforceLSNForEncryption(state->rs_new_rel->rd_rel->relpersistence,
+									(char *) state->rs_buffer);
 		smgrextend(state->rs_new_rel->rd_smgr, MAIN_FORKNUM, state->rs_blockno,
 				   (char *) state->rs_buffer, true);
-
-		if (lsn_is_fake)
-			RestoreInvalidLSN((char *) state->rs_buffer);
 	}
 
 	/*
@@ -701,8 +695,6 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 
 		if (len + saveFreeSpace > pageFreeSpace)
 		{
-			bool	lsn_is_fake = false;
-
 			/* Doesn't fit, so write out the existing page */
 
 			/* XLOG stuff */
@@ -712,8 +704,6 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 							state->rs_blockno,
 							page,
 							true);
-			else if (data_encrypted)
-				lsn_is_fake = EnforceLSNUpdateForEncryption((char *) page);
 
 			/*
 			 * Now write the page. We say isTemp = true even if it's not a
@@ -725,11 +715,11 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 
 			PageSetChecksumInplace(page, state->rs_blockno);
 
+			if (data_encrypted)
+				EnforceLSNForEncryption(state->rs_new_rel->rd_rel->relpersistence,
+										(char *) page);
 			smgrextend(state->rs_new_rel->rd_smgr, MAIN_FORKNUM,
 					   state->rs_blockno, (char *) page, true);
-
-			if (lsn_is_fake)
-				RestoreInvalidLSN((char *) page);
 
 			state->rs_blockno++;
 			state->rs_buffer_valid = false;

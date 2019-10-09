@@ -146,8 +146,7 @@ extern void mdtweak(char *tweak, RelFileNode *relnode, ForkNumber forknum,
 		BlockNumber blocknum);
 
 #ifndef FRONTEND
-extern bool EnforceLSNUpdateForEncryption(char	*buf_contents);
-extern void RestoreInvalidLSN(char	*buf_contents);
+extern void EnforceLSNForEncryption(char relpersistence, char *buf_contents);
 #endif	/* FRONTEND */
 
 #endif							/* ENCRYPTION_H */
