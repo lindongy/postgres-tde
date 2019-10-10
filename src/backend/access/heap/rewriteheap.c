@@ -330,7 +330,21 @@ end_heap_rewrite(RewriteState state)
 	/* Write the last page, if any */
 	if (state->rs_buffer_valid)
 	{
+		bool	do_log = false;
+
 		if (state->rs_use_wal)
+			do_log = true;
+		else if (data_encrypted)
+		{
+			/*
+			 * LSN is needed as the encryption IV, so log the page even if
+			 * WAL_LEVEL_MINIMAL (i.e. !XLogIsNeeded()).
+			 */
+			if (RelationNeedsWAL(state->rs_new_rel))
+				do_log = true;
+		}
+
+		if (do_log)
 			log_newpage(&state->rs_new_rel->rd_node,
 						MAIN_FORKNUM,
 						state->rs_blockno,
@@ -340,9 +354,13 @@ end_heap_rewrite(RewriteState state)
 
 		PageSetChecksumInplace(state->rs_buffer, state->rs_blockno);
 
-		if (data_encrypted)
+		if (data_encrypted && !do_log)
+		{
+			Assert(!RelationNeedsWAL(state->rs_new_rel));
 			EnforceLSNForEncryption(state->rs_new_rel->rd_rel->relpersistence,
-									(char *) state->rs_buffer);
+									(char *) state->rs_buffer,
+									false);
+		}
 		smgrextend(state->rs_new_rel->rd_smgr, MAIN_FORKNUM, state->rs_blockno,
 				   (char *) state->rs_buffer, true);
 	}
@@ -696,9 +714,21 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 		if (len + saveFreeSpace > pageFreeSpace)
 		{
 			/* Doesn't fit, so write out the existing page */
+			bool	do_log = false;
 
-			/* XLOG stuff */
 			if (state->rs_use_wal)
+				do_log = true;
+			else if (data_encrypted)
+			{
+				/*
+				 * LSN is needed as the encryption IV, so log the page even if
+				 * WAL_LEVEL_MINIMAL (i.e. !XLogIsNeeded()).
+				 */
+				if (RelationNeedsWAL(state->rs_new_rel))
+					do_log = true;
+			}
+
+			if (do_log)
 				log_newpage(&state->rs_new_rel->rd_node,
 							MAIN_FORKNUM,
 							state->rs_blockno,
@@ -715,9 +745,13 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 
 			PageSetChecksumInplace(page, state->rs_blockno);
 
-			if (data_encrypted)
+			if (data_encrypted && !do_log)
+			{
+				Assert(!RelationNeedsWAL(state->rs_new_rel));
 				EnforceLSNForEncryption(state->rs_new_rel->rd_rel->relpersistence,
-										(char *) page);
+										(char *) page,
+										false);
+			}
 			smgrextend(state->rs_new_rel->rd_smgr, MAIN_FORKNUM,
 					   state->rs_blockno, (char *) page, true);
 

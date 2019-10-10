@@ -216,7 +216,9 @@ LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber blockNum,
 
 		/* And write... */
 		if (data_encrypted)
-			EnforceLSNForEncryption(RELPERSISTENCE_TEMP, (char *) localpage);
+			EnforceLSNForEncryption(RELPERSISTENCE_TEMP,
+									(char *) localpage,
+									false);
 		smgrwrite(oreln,
 				  bufHdr->tag.forkNum,
 				  bufHdr->tag.blockNum,

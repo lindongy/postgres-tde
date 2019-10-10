@@ -868,9 +868,11 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 	{
 		/* new buffers are zero-filled */
 		MemSet((char *) bufBlock, 0, BLCKSZ);
-		if (data_encrypted)
-			EnforceLSNForEncryption(relpersistence, (char *) bufBlock);
 		/* don't set checksum for all-zero page */
+		/*
+		 * Encryption: no need to set LSN (to become an IV) because
+		 * zero-filled page won't be encrypted.
+		 */
 		smgrextend(smgr, forkNum, blockNum, (char *) bufBlock, false);
 
 		/*
@@ -2757,6 +2759,15 @@ FlushBuffer(BufferDesc *buf, SMgrRelation reln)
 	/*
 	 * bufToWrite is either the shared buffer or a copy, as appropriate.
 	 */
+	if (data_encrypted)
+	{
+		char relpersistence = buf_state & BM_PERMANENT ?
+			RELPERSISTENCE_PERMANENT : RELPERSISTENCE_UNLOGGED;
+
+		EnforceLSNForEncryption(relpersistence,
+								(char *) bufToWrite,
+								false);
+	}
 	smgrwrite(reln,
 			  buf->tag.forkNum,
 			  buf->tag.blockNum,
@@ -3224,7 +3235,8 @@ FlushRelationBuffers(Relation rel)
 
 				if (data_encrypted)
 					EnforceLSNForEncryption(rel->rd_rel->relpersistence,
-											(char *) localpage);
+											(char *) localpage,
+											false);
 				smgrwrite(rel->rd_smgr,
 						  bufHdr->tag.forkNum,
 						  bufHdr->tag.blockNum,

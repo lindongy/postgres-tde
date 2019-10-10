@@ -673,10 +673,11 @@ _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 		if (!wstate->btws_zeropage)
 			wstate->btws_zeropage = (Page) palloc0(BLCKSZ);
 
-		if (data_encrypted)
-			EnforceLSNForEncryption(wstate->index->rd_rel->relpersistence,
-									(char *) wstate->btws_zeropage);
 		/* don't set checksum for all-zero page */
+		/*
+		 * Encryption: no need to enforce LSN, all-zero page won't be
+		 * encrypted anyway.
+		 */
 		smgrextend(wstate->index->rd_smgr, MAIN_FORKNUM,
 				   wstate->btws_pages_written++,
 				   (char *) wstate->btws_zeropage,
@@ -685,6 +686,9 @@ _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 
 	PageSetChecksumInplace(page, blkno);
 
+	/* LSN is used as encryption IV. */
+	Assert(!XLogRecPtrIsInvalid(PageGetLSN(page)));
+
 	/*
 	 * Now write the page.  There's no need for smgr to schedule an fsync for
 	 * this write; we'll do it ourselves before ending the build.
@@ -692,9 +696,6 @@ _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 	if (blkno == wstate->btws_pages_written)
 	{
 		/* extending the file... */
-		if (data_encrypted)
-			EnforceLSNForEncryption(wstate->index->rd_rel->relpersistence,
-									(char *) page);
 		smgrextend(wstate->index->rd_smgr, MAIN_FORKNUM, blkno,
 				   (char *) page, true);
 		wstate->btws_pages_written++;
@@ -702,9 +703,6 @@ _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 	else
 	{
 		/* overwriting a block we zero-filled before */
-		if (data_encrypted)
-			EnforceLSNForEncryption(wstate->index->rd_rel->relpersistence,
-									(char *) page);
 		smgrwrite(wstate->index->rd_smgr, MAIN_FORKNUM, blkno,
 				  (char *) page, true);
 	}
