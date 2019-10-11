@@ -3427,7 +3427,11 @@ main(int argc, char *argv[])
 	 * probably accept it too.
 	 */
 	if (encryption_key_command == NULL)
+	{
 		encryption_key_command = getenv("PGENCRKEYCMD");
+		if (encryption_key_command && strlen(encryption_key_command) == 0)
+			encryption_key_command = NULL;
+	}
 
 	if (encryption_key_command)
 		printf(_("Data encryption is enabled.\n"));
