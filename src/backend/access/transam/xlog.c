@@ -4871,7 +4871,7 @@ ReadControlFile(void)
 	{
 		/*
 		 * Set data_encryption for caller to know that he needs to retrieve
-		 * the key and initialize the encryption library.
+		 * the key and initialize the encryption context.
 		 */
 		SetConfigOption("data_encryption", "true", PGC_INTERNAL,
 						PGC_S_OVERRIDE);

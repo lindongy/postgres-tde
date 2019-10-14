@@ -1366,6 +1366,7 @@ PostmasterMain(int argc, char *argv[])
 	 */
 	AddToDataDirLockFile(LOCK_FILE_LINE_PM_STATUS, PM_STATUS_STARTING);
 
+#ifdef USE_ENCRYPTION
 	/*
 	 * If encryption key is needed and we don't have it yet, call ServerLoop()
 	 * in a restricted mode which allows a client application to send us the
@@ -1413,6 +1414,7 @@ PostmasterMain(int argc, char *argv[])
 					 errdetail("The passed encryption key does not match"
 							   " database encryption key.")));
 	}
+#endif /* USE_ENCRYPTION */
 
 	/*
 	 * We're ready to rock and roll...

@@ -839,8 +839,8 @@ do_start(void)
 #ifdef USE_ENCRYPTION
 	char	*host = NULL;
 	char	*port_str = NULL;
-#endif	/* USE_ENCRYPTION */
 	unsigned char	*key_to_send;
+#endif	/* USE_ENCRYPTION */
 
 	if (ctl_command != RESTART_COMMAND)
 	{

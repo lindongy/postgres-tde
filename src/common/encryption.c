@@ -4,15 +4,16 @@
 #include "postgres_fe.h"
 #endif
 
-#ifdef USE_ENCRYPTION
 #include "common/encryption.h"
 #include "common/logging.h"
 
+#ifdef USE_ENCRYPTION
 #include <openssl/evp.h>
 
-char	   *encryption_key_command = NULL;
-
 unsigned char encryption_key[ENCRYPTION_KEY_LENGTH];
+#endif	/* USE_ENCRYPTION */
+
+char	   *encryption_key_command = NULL;
 
 /*
  * Run the command that is supposed to generate encryption key and store it
@@ -155,5 +156,3 @@ read_encryption_key_f(FILE *f)
 
 	pfree(buf);
 }
-
-#endif	/* USE_ENCRYPTION */

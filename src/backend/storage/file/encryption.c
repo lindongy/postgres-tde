@@ -70,7 +70,7 @@ char	   *encrypt_buf_xlog = NULL;
 static void init_encryption_context(EVP_CIPHER_CTX **ctx_p, bool encrypt,
 									bool buffile);
 static void evp_error(void);
-#endif							/* USE_ENCRYPTION */
+#endif	/* USE_ENCRYPTION */
 
 #ifndef FRONTEND
 /*
@@ -111,6 +111,7 @@ EncryptionShmemInit(void)
 void
 read_encryption_key(read_encryption_key_cb read_char)
 {
+#ifdef USE_ENCRYPTION
 	char	*buf;
 	int		read_len, i, c;
 
@@ -140,8 +141,18 @@ read_encryption_key(read_encryption_key_cb read_char)
 	}
 
 	pfree(buf);
+#else  /* !USE_ENCRYPTION */
+	/*
+	 * If no encryption implementation is linked and caller requests
+	 * encryption, we should error out here and thus cause the calling process
+	 * to fail (preferably postmaster, so the child processes don't make the
+	 * same mistake).
+	 */
+	ereport(FATAL, (errmsg(ENCRYPTION_NOT_SUPPORTED_MSG)));
+#endif	/* USE_ENCRYPTION */
 }
-#endif							/* FRONTEND */
+#endif							/* !FRONTEND */
+
 
 /*
  * Initialize encryption subsystem for use. Must be called before any
@@ -464,7 +475,7 @@ evp_error(void)
 	exit(EXIT_FAILURE);
 #endif							/* FRONTEND */
 }
-#endif							/* USE_ENCRYPTION */
+#endif /* USE_ENCRYPTION */
 
 /*
  * Xlog is encrypted page at a time. Each xlog page gets a unique tweak via

@@ -55,11 +55,54 @@ typedef enum CipherKind
 	PG_CIPHER_AES_CTR_128
 }			CipherKind;
 
+/* Is the cluster encrypted? */
+extern PGDLLIMPORT bool data_encrypted;
+
 /*
- * TODO Tune these values.
+ * Number of bytes reserved to store encryption sample in ControlFileData.
  */
-#define ENCRYPTION_PWD_MIN_LENGTH	8
-#define ENCRYPTION_PWD_MAX_LENGTH	16
+#define ENCRYPTION_SAMPLE_SIZE 16
+
+typedef int (*read_encryption_key_cb) (void);
+/*
+ * This function raises ERROR if the cluster is encrypted but the binary does
+ * not support encryption, so it's compiled regardless the value of
+ * USE_ENCRYPTION. It's less invasive than if we had to ifdef each call.
+ */
+extern void read_encryption_key(read_encryption_key_cb read_char);
+
+/*
+ * Likewise, compile regardless USE_ENCRYPTION.
+ */
+extern void setup_encryption(void);
+
+#ifndef FRONTEND
+/* Copy of the same field of ControlFileData. */
+extern char encryption_verification[];
+
+extern void EnforceLSNForEncryption(char relpersistence, char *buf_contents,
+									bool lsn_historic);
+#endif	/* FRONTEND */
+
+#define TWEAK_SIZE 16
+
+/*
+ * In some cases we need a separate copy of the data because encryption
+ * in-place (typically in the shared buffers) would make the data unusable for
+ * backends.
+ */
+extern PGAlignedBlock encrypt_buf;
+
+/*
+ * The same for XLOG. This buffer spans multiple pages, in order to reduce the
+ * number of syscalls when doing I/O.
+ *
+ * XXX Fine tune the buffer size.
+ */
+#define ENCRYPT_BUF_XLOG_SIZE	(XLOG_ENCRYPT_BUF_PAGES * XLOG_BLCKSZ)
+extern char *encrypt_buf_xlog;
+
+#define	XLOG_ENCRYPT_BUF_PAGES	8
 
 #ifndef FRONTEND
 /*
@@ -89,65 +132,44 @@ typedef struct ShmemEncryptionKey
 extern ShmemEncryptionKey *encryption_key_shmem;
 #endif							/* FRONTEND */
 
-#define TWEAK_SIZE 16
-
-/* Is the cluster encrypted? */
-extern PGDLLIMPORT bool data_encrypted;
-
-/*
- * Number of bytes reserved to store encryption sample in ControlFileData.
- */
-#define ENCRYPTION_SAMPLE_SIZE 16
-
-#ifndef FRONTEND
-/* Copy of the same field of ControlFileData. */
-extern char encryption_verification[];
-#endif							/* FRONTEND */
-
 /* Do we have encryption_key and the encryption library initialized? */
 extern bool	encryption_setup_done;
-
-/*
- * In some cases we need a separate copy of the data because encryption
- * in-place (typically in the shared buffers) would make the data unusable for
- * backends.
- */
-extern PGAlignedBlock encrypt_buf;
-
-/*
- * The same for XLOG. This buffer spans multiple pages, in order to reduce the
- * number of syscalls when doing I/O.
- *
- * XXX Fine tune the buffer size.
- */
-extern char *encrypt_buf_xlog;
-#define	XLOG_ENCRYPT_BUF_PAGES	8
-#define ENCRYPT_BUF_XLOG_SIZE	(XLOG_ENCRYPT_BUF_PAGES * XLOG_BLCKSZ)
 
 #ifndef FRONTEND
 extern Size EncryptionShmemSize(void);
 extern void EncryptionShmemInit(void);
-
-typedef int (*read_encryption_key_cb) (void);
-extern void read_encryption_key(read_encryption_key_cb read_char);
 #endif							/* FRONTEND */
 
-extern void setup_encryption(void);
-extern void sample_encryption(char *buf);
+#ifdef USE_ENCRYPTION
+
+/*
+ * TODO Tune these values.
+ */
+#define ENCRYPTION_PWD_MIN_LENGTH	8
+#define ENCRYPTION_PWD_MAX_LENGTH	16
+
+extern void encryption_error(bool fatal, char *message);
+#endif	/* USE_ENCRYPTION */
+
+/*
+ * These functions do interact with OpenSSL, but we only enclose the relevant
+ * parts in "#ifdef USE_ENCRYPTION". Thus caller does not have to use #ifdef
+ * and the encryption code is less invasive.
+ */
 extern void encrypt_block(const char *input, char *output, Size size,
 						  char *tweak, bool buffile);
 extern void decrypt_block(const char *input, char *output, Size size,
 						  char *tweak, bool buffile);
-extern void encryption_error(bool fatal, char *message);
 
+/*
+ * The following functions do not interact with OpenSSL directly so they are
+ * not ifdef'd using USE_ENCRYPTION. If we ifdef'd them, caller would have to
+ * do the same.
+ */
+extern void sample_encryption(char *buf);
 extern void XLogEncryptionTweak(char *tweak, TimeLineID timeline,
 					XLogSegNo segment, uint32 offset);
 extern void mdtweak(char *tweak, RelFileNode *relnode, ForkNumber forknum,
 		BlockNumber blocknum);
-
-#ifndef FRONTEND
-extern void EnforceLSNForEncryption(char relpersistence, char *buf_contents,
-									bool lsn_historic);
-#endif	/* FRONTEND */
 
 #endif							/* ENCRYPTION_H */
