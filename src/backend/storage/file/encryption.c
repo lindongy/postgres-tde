@@ -47,6 +47,7 @@
 #include <openssl/conf.h>
 #include <openssl/evp.h>
 #include <openssl/err.h>
+#include <openssl/opensslv.h>
 
 EVP_CIPHER_CTX *ctx_encrypt, *ctx_decrypt,
 	*ctx_encrypt_buffile, *ctx_decrypt_buffile;
@@ -158,10 +159,9 @@ setup_encryption(void)
 	ERR_load_crypto_strings();
 	OpenSSL_add_all_algorithms();
 
-	/*
-	 * TODO Find out if this needs to be called for OpenSSL < 1.1.0.
-	 */
-	/* OPENSSL_config(NULL); */
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+	OPENSSL_config(NULL);
+#endif
 
 	init_encryption_context(&ctx_encrypt, true, false);
 	init_encryption_context(&ctx_decrypt, false, false);
