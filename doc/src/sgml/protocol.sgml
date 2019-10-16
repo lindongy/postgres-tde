@@ -2016,7 +2016,12 @@ The commands accepted in replication mode are:
   </varlistentry>
 
   <varlistentry>
-    <term><literal>START_REPLICATION</literal> [ <literal>SLOT</literal> <replaceable class="parameter">slot_name</replaceable> ] [ <literal>PHYSICAL</literal> ] <replaceable class="parameter">XXX/XXX</replaceable> [ <literal>TIMELINE</literal> <replaceable class="parameter">tli</replaceable> ]
+    <term><literal>START_REPLICATION</literal>
+    [ <literal>SLOT</literal> <replaceable class="parameter">slot_name</replaceable>
+    ] [ <literal>PHYSICAL</literal>
+    ] <replaceable class="parameter">XXX/XXX</replaceable>
+    [ <literal>TIMELINE</literal> <replaceable class="parameter">tli</replaceable>
+      ] [ <literal>DECRYPT</literal> ]
      <indexterm><primary>START_REPLICATION</primary></indexterm>
     </term>
     <listitem>
@@ -2068,6 +2073,11 @@ The commands accepted in replication mode are:
       an ErrorResponse message if it encounters a failure after beginning
       to stream.)  The payload of each CopyData message from server to the
       client contains a message of one of the following formats:
+     </para>
+
+     <para>
+      If the server is encrypted, <literal>DECRYPT</literal> option can be
+      passed to tell the server that decrypted WAL stream should be sent.
      </para>
 
      <para>
@@ -2573,6 +2583,21 @@ The commands accepted in replication mode are:
           By default, checksums are verified during a base backup if they are
           enabled. Specifying <literal>NOVERIFY_CHECKSUMS</literal> disables
           this verification.
+         </para>
+        </listitem>
+       </varlistentry>
+
+       <varlistentry>
+        <term><literal>DECRYPT</literal></term>
+        <listitem>
+         <para>
+          If the cluster is encrypted and this option is passed, relation and
+          WAL files are decrypted before they are sent to client. In addition,
+          the <literal>Data encryption</literal> field the control file is set
+          to <literal>off</literal>. This option also ensures that
+          the <file>global/kdf_params</file> file (containing parameters of
+          the the <term>key dervivation function</term>, which is used to
+          derive encryption key from password) is not sent to the client.
          </para>
         </listitem>
        </varlistentry>

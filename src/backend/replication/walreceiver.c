@@ -307,12 +307,30 @@ WalReceiverMain(void)
 		char	   *primary_sysid;
 		char		standby_sysid[32];
 		WalRcvStreamOptions options;
+		bool	master_encrypted, decrypt;
 
 		/*
 		 * Check that we're connected to a valid server using the
 		 * IDENTIFY_SYSTEM replication command.
 		 */
-		primary_sysid = walrcv_identify_system(wrconn, &primaryTLI);
+		primary_sysid = walrcv_identify_system(wrconn, &primaryTLI,
+											   &master_encrypted);
+
+		if (master_encrypted)
+			decrypt = !data_encrypted;
+		else
+		{
+			/*
+			 * User currently should not be able to arrange for this
+			 * situation, but let's be careful.
+			 */
+			if (data_encrypted)
+				ereport(ERROR,
+						(errmsg("walsender cannot encrypt the WAL stream")));
+
+			decrypt = false;
+		}
+		options.proto.physical.decrypt = decrypt;
 
 		snprintf(standby_sysid, sizeof(standby_sysid), UINT64_FORMAT,
 				 GetSystemIdentifier());

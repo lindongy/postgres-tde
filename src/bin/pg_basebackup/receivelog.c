@@ -442,6 +442,8 @@ ReceiveXlogStream(PGconn *conn, StreamCtl *stream)
 	char		slotcmd[128];
 	PGresult   *res;
 	XLogRecPtr	stoppos;
+	bool	encrypted = false;
+	char	*decrypt_cmd = "";
 
 	/*
 	 * The caller should've checked the server version already, but doesn't do
@@ -486,7 +488,7 @@ ReceiveXlogStream(PGconn *conn, StreamCtl *stream)
 			PQclear(res);
 			return false;
 		}
-		if (PQntuples(res) != 1 || PQnfields(res) < 3)
+		if (PQntuples(res) != 1 || PQnfields(res) < 4)
 		{
 			pg_log_error("could not identify system: got %d rows and %d fields, expected %d rows and %d or more fields",
 						 PQntuples(res), PQnfields(res), 1, 3);
@@ -506,7 +508,18 @@ ReceiveXlogStream(PGconn *conn, StreamCtl *stream)
 			PQclear(res);
 			return false;
 		}
+		if (atoi(PQgetvalue(res, 0, 4)) > 0)
+			encrypted = true;
+
 		PQclear(res);
+	}
+
+	if (stream->decrypt)
+	{
+		if (!encrypted)
+			pg_log_warning("decryption requested but the cluster is not encrypted");
+
+		decrypt_cmd = "DECRYPT";
 	}
 
 	/*
@@ -562,10 +575,11 @@ ReceiveXlogStream(PGconn *conn, StreamCtl *stream)
 			return true;
 
 		/* Initiate the replication stream at specified location */
-		snprintf(query, sizeof(query), "START_REPLICATION %s%X/%X TIMELINE %u",
+		snprintf(query, sizeof(query), "START_REPLICATION %s%X/%X TIMELINE %u %s",
 				 slotcmd,
 				 (uint32) (stream->startpos >> 32), (uint32) stream->startpos,
-				 stream->timeline);
+				 stream->timeline,
+				 decrypt_cmd);
 		res = PQexec(conn, query);
 		if (PQresultStatus(res) != PGRES_COPY_BOTH)
 		{

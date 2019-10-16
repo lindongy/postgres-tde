@@ -17,6 +17,7 @@
 #include <time.h>
 
 #include "access/xlog_internal.h"	/* for pg_start/stop_backup */
+#include "catalog/pg_control.h"
 #include "catalog/pg_type.h"
 #include "common/file_perm.h"
 #include "lib/stringinfo.h"
@@ -123,6 +124,9 @@ static int64 total_checksum_failures;
 /* Do not verify checksums. */
 static bool noverify_checksums = false;
 
+/* Decrypt relation files and WAL. */
+static bool decrypt = false;
+
 /*
  * The contents of these directories are removed or recreated during server
  * start so they are not included in backups.  The directories themselves are
@@ -210,6 +214,7 @@ static const char *const noChecksumFiles[] = {
 	"pg_filenode.map",
 	"pg_internal.init",
 	"PG_VERSION",
+	"kdf_params",
 #ifdef EXEC_BACKEND
 	"config_exec_params",
 	"config_exec_params.new",
@@ -244,6 +249,10 @@ perform_base_backup(basebackup_options *opt)
 	StringInfo	tblspc_map_file = NULL;
 	int			datadirpathlen;
 	List	   *tablespaces = NIL;
+
+	if (decrypt && !data_encrypted)
+		ereport(WARNING,
+				(errmsg("decryption requested but the cluster is not encrypted")));
 
 	datadirpathlen = strlen(DataDir);
 
@@ -507,6 +516,7 @@ perform_base_backup(basebackup_options *opt)
 			char		buf[TAR_SEND_SIZE];
 			size_t		cnt;
 			pgoff_t		len = 0;
+			uint32		seg_offset = 0;
 
 			snprintf(pathbuf, MAXPGPATH, XLOGDIR "/%s", walFiles[i]);
 			XLogFromFileName(walFiles[i], &tli, &segno, wal_segment_size);
@@ -550,6 +560,33 @@ perform_base_backup(basebackup_options *opt)
 								fp)) > 0)
 			{
 				CheckXLogRemoved(segno, tli);
+
+				if (decrypt && data_encrypted)
+				{
+					if (cnt % XLOG_BLCKSZ != 0)
+						ereport(ERROR,
+								(errmsg("could not decrypt page in file "
+										"\"%s\", offset %u: read buffer size "
+										"%d is not whole multiple of %d",
+										pathbuf, seg_offset, (int) cnt,
+										XLOG_BLCKSZ)));
+
+					/*
+					 * Decrypt the data, one XLOG page at a time because this
+					 * is how it was encrypted.
+					 */
+					while (seg_offset < cnt)
+					{
+						char		tweak[TWEAK_SIZE];
+						char	*data = buf + seg_offset;
+
+						XLogEncryptionTweak(tweak, tli, segno, seg_offset);
+						decrypt_block(data, data, XLOG_BLCKSZ, tweak, false);
+
+						seg_offset += XLOG_BLCKSZ;
+					}
+				}
+
 				/* Send the chunk as a CopyData message */
 				if (pq_putmessage('d', buf, cnt))
 					ereport(ERROR,
@@ -664,6 +701,7 @@ parse_basebackup_options(List *options, basebackup_options *opt)
 	bool		o_maxrate = false;
 	bool		o_tablespace_map = false;
 	bool		o_noverify_checksums = false;
+	bool		o_decrypt = false;
 
 	MemSet(opt, 0, sizeof(*opt));
 	foreach(lopt, options)
@@ -751,6 +789,15 @@ parse_basebackup_options(List *options, basebackup_options *opt)
 						 errmsg("duplicate option \"%s\"", defel->defname)));
 			noverify_checksums = true;
 			o_noverify_checksums = true;
+		}
+		else if (strcmp(defel->defname, "decrypt") == 0)
+		{
+			if (o_decrypt)
+				ereport(ERROR,
+						(errcode(ERRCODE_SYNTAX_ERROR),
+						 errmsg("duplicate option \"%s\"", defel->defname)));
+			decrypt = true;
+			o_decrypt = true;
 		}
 		else
 			elog(ERROR, "option \"%s\" not recognized",
@@ -1397,6 +1444,7 @@ sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf
 	int			segmentno = 0;
 	char	   *segmentpath;
 	bool		verify_checksum = false;
+	bool		decrypt_file = false;
 
 	fp = AllocateFile(readfilename, "rb");
 	if (fp == NULL)
@@ -1410,7 +1458,12 @@ sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf
 
 	_tarWriteHeader(tarfilename, NULL, statbuf, false);
 
-	if (!noverify_checksums && DataChecksumsEnabled())
+	/*
+	 * Encryption can be applied to pages for which checksum can be computed
+	 * and only to those.
+	 */
+	if ((!noverify_checksums && DataChecksumsEnabled()) ||
+		(decrypt && data_encrypted))
 	{
 		char	   *filename;
 
@@ -1423,6 +1476,7 @@ sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf
 
 		if (is_checksummed_file(readfilename, filename))
 		{
+			decrypt_file = true;
 			verify_checksum = true;
 
 			/*
@@ -1444,6 +1498,27 @@ sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf
 	while ((cnt = fread(buf, 1, Min(sizeof(buf), statbuf->st_size - len), fp)) > 0)
 	{
 		/*
+		 * Adjust control file if the backup is not encrypted.
+		 *
+		 * TODO Move this into a separate function and use get_controlfile().
+		 */
+		if (decrypt && data_encrypted &&
+			strcmp(readfilename, XLOG_CONTROL_FILE) == 0)
+		{
+			ControlFileData	*cfile = (ControlFileData *) buf;
+
+			Assert(sizeof(ControlFileData) <= cnt);
+			cfile->data_cipher = PG_CIPHER_NONE;
+			cfile->encryption_verification[0] = '\0';
+
+			/* Recalculate CRC of control file */
+			INIT_CRC32C(cfile->crc);
+			COMP_CRC32C(cfile->crc, (char *) cfile,
+						offsetof(ControlFileData, crc));
+			FIN_CRC32C(cfile->crc);
+		}
+
+		/*
 		 * The checksums are verified at block level, so we iterate over the
 		 * buffer in chunks of BLCKSZ, after making sure that
 		 * TAR_SEND_SIZE/buf is divisible by BLCKSZ and we read a multiple of
@@ -1451,14 +1526,38 @@ sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf
 		 */
 		Assert(TAR_SEND_SIZE % BLCKSZ == 0);
 
-		if (verify_checksum && (cnt % BLCKSZ != 0))
+		if ((verify_checksum || decrypt_file) && (cnt % BLCKSZ != 0))
 		{
-			ereport(WARNING,
-					(errmsg("could not verify checksum in file \"%s\", block "
-							"%d: read buffer size %d and page size %d "
-							"differ",
-							readfilename, blkno, (int) cnt, BLCKSZ)));
+			const char	*action;
+			int	elevel;
+
+			action = verify_checksum ? "verify checksum" : "decrypt page";
+			elevel = verify_checksum ? WARNING : ERROR;
+
+			ereport(elevel,
+					(errmsg("could not %s in file \"%s\", block "
+							"%d: read buffer size %d is not whole "
+							"multiple of %d ",
+							action, readfilename, blkno, (int) cnt,
+							BLCKSZ)));
 			verify_checksum = false;
+		}
+
+		/*
+		 * Decrypt the file if needed.
+		 *
+		 * Unlike the checksum verification (see below), we don't need to care
+		 * about LSN. As long as we use AES cipher in CTR mode, torn page
+		 * write should not affect the successfully written part of the page,
+		 * and crash recovery on cluster startup will fix the rest.
+		 */
+		if (decrypt_file)
+		{
+			for (i = 0; i < cnt / BLCKSZ; i++)
+			{
+				page = buf + BLCKSZ * i;
+				decrypt_block(page, page, BLCKSZ, NULL, false);
+			}
 		}
 
 		if (verify_checksum)

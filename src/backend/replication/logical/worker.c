@@ -1674,6 +1674,7 @@ ApplyWorkerMain(Datum main_arg)
 		RepOriginId originid;
 		TimeLineID	startpointTLI;
 		char	   *err;
+		bool	encrypted;
 
 		myslotname = MySubscription->slotname;
 
@@ -1707,8 +1708,7 @@ ApplyWorkerMain(Datum main_arg)
 		 * We don't really use the output identify_system for anything but it
 		 * does some initializations on the upstream so let's still call it.
 		 */
-		(void) walrcv_identify_system(wrconn, &startpointTLI);
-
+		(void) walrcv_identify_system(wrconn, &startpointTLI, &encrypted);
 	}
 
 	/*

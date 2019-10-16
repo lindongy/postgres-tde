@@ -29,6 +29,7 @@
 #include "access/xlog_internal.h"
 #include "common/file_perm.h"
 #include "common/file_utils.h"
+#include "common/encryption.h"
 #include "common/logging.h"
 #include "common/string.h"
 #include "fe_utils/string_utils.h"
@@ -99,6 +100,7 @@ static bool writerecoveryconf = false;
 static bool do_sync = true;
 static int	standby_message_timeout = 10 * 1000;	/* 10 sec = default */
 static pg_time_t last_progress_report = 0;
+static bool decrypt = false;
 static int32 maxrate = 0;		/* no limit by default */
 static char *replication_slot = NULL;
 static bool temp_replication_slot = true;
@@ -339,6 +341,9 @@ usage(void)
 	printf(_("      --waldir=WALDIR    location for the write-ahead log directory\n"));
 	printf(_("  -X, --wal-method=none|fetch|stream\n"
 			 "                         include required WAL files with specified method\n"));
+#ifdef	USE_ENCRYPTION
+	printf(_("  -y, --decrypt          receive the data decrypted\n"));
+#endif	/* USE_ENCRYPTION */
 	printf(_("  -z, --gzip             compress tar output\n"));
 	printf(_("  -Z, --compress=0-9     compress tar output with given compression level\n"));
 	printf(_("\nGeneral options:\n"));
@@ -488,6 +493,7 @@ LogStreamerMain(logstreamer_param *param)
 	stream.synchronous = false;
 	/* fsync happens at the end of pg_basebackup for all data */
 	stream.do_sync = false;
+	stream.decrypt = decrypt;
 	stream.mark_done = true;
 	stream.partial_suffix = NULL;
 	stream.replication_slot = replication_slot;
@@ -1868,7 +1874,7 @@ BaseBackup(void)
 	}
 
 	basebkp =
-		psprintf("BASE_BACKUP LABEL '%s' %s %s %s %s %s %s %s",
+		psprintf("BASE_BACKUP LABEL '%s' %s %s %s %s %s %s %s %s",
 				 escaped_label,
 				 showprogress ? "PROGRESS" : "",
 				 includewal == FETCH_WAL ? "WAL" : "",
@@ -1876,7 +1882,8 @@ BaseBackup(void)
 				 includewal == NO_WAL ? "" : "NOWAIT",
 				 maxrate_clause ? maxrate_clause : "",
 				 format == 't' ? "TABLESPACE_MAP" : "",
-				 verify_checksums ? "" : "NOVERIFY_CHECKSUMS");
+				 verify_checksums ? "" : "NOVERIFY_CHECKSUMS",
+				 decrypt ? "DECRYPT" : "");
 
 	if (PQsendQuery(conn, basebkp) == 0)
 	{
@@ -2178,6 +2185,9 @@ main(int argc, char **argv)
 		{"slot", required_argument, NULL, 'S'},
 		{"tablespace-mapping", required_argument, NULL, 'T'},
 		{"wal-method", required_argument, NULL, 'X'},
+#ifdef	USE_ENCRYPTION
+		{"decrypt", no_argument, NULL, 'y'},
+#endif							/* USE_ENCRYPTION */
 		{"gzip", no_argument, NULL, 'z'},
 		{"compress", required_argument, NULL, 'Z'},
 		{"label", required_argument, NULL, 'l'},
@@ -2222,7 +2232,7 @@ main(int argc, char **argv)
 
 	atexit(cleanup_directories_atexit);
 
-	while ((c = getopt_long(argc, argv, "CD:F:r:RS:T:X:l:nNzZ:d:c:h:p:U:s:wWkvP",
+	while ((c = getopt_long(argc, argv, "CD:F:r:RS:T:X:l:nNyzZ:d:c:h:p:U:s:wWkvP",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -2289,6 +2299,11 @@ main(int argc, char **argv)
 					exit(1);
 				}
 				break;
+#ifdef	USE_ENCRYPTION
+			case 'y':
+				decrypt = true;
+				break;
+#endif							/* USE_ENCRYPTION */
 			case 1:
 				xlog_dir = pg_strdup(optarg);
 				break;

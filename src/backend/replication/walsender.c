@@ -354,8 +354,8 @@ IdentifySystem(void)
 	DestReceiver *dest;
 	TupOutputState *tstate;
 	TupleDesc	tupdesc;
-	Datum		values[4];
-	bool		nulls[4];
+	Datum		values[5];
+	bool		nulls[5];
 
 	/*
 	 * Reply with a result set with one row, four columns. First col is system
@@ -395,7 +395,7 @@ IdentifySystem(void)
 	MemSet(nulls, false, sizeof(nulls));
 
 	/* need a tuple descriptor representing four columns */
-	tupdesc = CreateTemplateTupleDesc(4);
+	tupdesc = CreateTemplateTupleDesc(5);
 	TupleDescInitBuiltinEntry(tupdesc, (AttrNumber) 1, "systemid",
 							  TEXTOID, -1, 0);
 	TupleDescInitBuiltinEntry(tupdesc, (AttrNumber) 2, "timeline",
@@ -404,6 +404,11 @@ IdentifySystem(void)
 							  TEXTOID, -1, 0);
 	TupleDescInitBuiltinEntry(tupdesc, (AttrNumber) 4, "dbname",
 							  TEXTOID, -1, 0);
+	/*
+	 * XXX BOOLID would be better but printsimple() does not support it.
+	 */
+	TupleDescInitBuiltinEntry(tupdesc, (AttrNumber) 5, "encrypted",
+							  INT4OID, -1, 0);
 
 	/* prepare for projection of tuples */
 	tstate = begin_tup_output_tupdesc(dest, tupdesc, &TTSOpsVirtual);
@@ -422,6 +427,8 @@ IdentifySystem(void)
 		values[3] = CStringGetTextDatum(dbname);
 	else
 		nulls[3] = true;
+
+	values[4] = Int32GetDatum(data_encrypted ? 1 : 0);
 
 	/* send it to dest */
 	do_tup_output(tstate, values, nulls);
@@ -532,6 +539,8 @@ SendTimeLineHistory(TimeLineHistoryCmd *cmd)
 
 	pq_endmessage(&buf);
 }
+
+static bool decrypt_stream = false;
 
 /*
  * Handle START_REPLICATION command.
@@ -697,6 +706,20 @@ StartReplication(StartReplicationCmd *cmd)
 		/* Main loop of walsender */
 		replication_active = true;
 
+		if (cmd->decrypt)
+		{
+			if (data_encrypted)
+				decrypt_stream = true;
+			else
+			{
+				ereport(WARNING,
+						(errmsg("decryption requested but the cluster is not encrypted")));
+				decrypt_stream = false;
+			}
+		}
+		else
+			decrypt_stream = false;
+
 		WalSndLoop(XLogSendPhysical);
 
 		replication_active = false;
@@ -790,7 +813,7 @@ logical_read_xlog_page(XLogReaderState *state, XLogRecPtr targetPagePtr, int req
 		count = flushptr - targetPagePtr;	/* part of the page available */
 
 	/* now actually read the data, we know it's there */
-	XLogRead(cur_page, targetPagePtr, XLOG_BLCKSZ, data_encrypted);
+	XLogRead(cur_page, targetPagePtr, XLOG_BLCKSZ, false);
 
 	return count;
 }
@@ -2851,7 +2874,7 @@ XLogSendPhysical(void)
 	 */
 	enlargeStringInfo(&output_message, nbytes);
 	XLogRead(&output_message.data[output_message.len], startptr, nbytes,
-			 false);
+			 decrypt_stream);
 	output_message.len += nbytes;
 	output_message.data[output_message.len] = '\0';
 
