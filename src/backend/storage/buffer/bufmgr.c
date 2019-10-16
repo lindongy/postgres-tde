@@ -2746,6 +2746,16 @@ FlushBuffer(BufferDesc *buf, SMgrRelation reln)
 	 */
 	bufBlock = BufHdrGetBlock(buf);
 
+	if (data_encrypted)
+	{
+		char relpersistence = buf_state & BM_PERMANENT ?
+			RELPERSISTENCE_PERMANENT : RELPERSISTENCE_UNLOGGED;
+
+		EnforceLSNForEncryption(relpersistence,
+								(char *) bufBlock,
+								false);
+	}
+
 	/*
 	 * Update page checksum if desired.  Since we have only shared lock on the
 	 * buffer, other processes might be updating hint bits in it, so we must
@@ -2759,15 +2769,6 @@ FlushBuffer(BufferDesc *buf, SMgrRelation reln)
 	/*
 	 * bufToWrite is either the shared buffer or a copy, as appropriate.
 	 */
-	if (data_encrypted)
-	{
-		char relpersistence = buf_state & BM_PERMANENT ?
-			RELPERSISTENCE_PERMANENT : RELPERSISTENCE_UNLOGGED;
-
-		EnforceLSNForEncryption(relpersistence,
-								(char *) bufToWrite,
-								false);
-	}
 	smgrwrite(reln,
 			  buf->tag.forkNum,
 			  buf->tag.blockNum,
@@ -3231,12 +3232,12 @@ FlushRelationBuffers(Relation rel)
 				errcallback.previous = error_context_stack;
 				error_context_stack = &errcallback;
 
-				PageSetChecksumInplace(localpage, bufHdr->tag.blockNum);
-
 				if (data_encrypted)
 					EnforceLSNForEncryption(rel->rd_rel->relpersistence,
 											(char *) localpage,
 											false);
+
+				PageSetChecksumInplace(localpage, bufHdr->tag.blockNum);
 				smgrwrite(rel->rd_smgr,
 						  bufHdr->tag.forkNum,
 						  bufHdr->tag.blockNum,

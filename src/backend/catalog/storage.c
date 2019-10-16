@@ -370,13 +370,12 @@ RelationCopyStorage(SMgrRelation src, SMgrRelation dst,
 		if (do_log)
 			log_newpage(&dst->smgr_rnode.node, forkNum, blkno, page, false);
 
-		PageSetChecksumInplace(page, blkno);
-
 		if (data_encrypted && !do_log)
 		{
 			Assert(relpersistence != RELPERSISTENCE_PERMANENT);
 			EnforceLSNForEncryption(relpersistence, buf.data, false);
 		}
+		PageSetChecksumInplace(page, blkno);
 
 		/*
 		 * Now write the page.  We say isTemp = true even if it's not a temp

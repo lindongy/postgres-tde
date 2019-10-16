@@ -212,13 +212,12 @@ LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber blockNum,
 		/* Find smgr relation for buffer */
 		oreln = smgropen(bufHdr->tag.rnode, MyBackendId);
 
-		PageSetChecksumInplace(localpage, bufHdr->tag.blockNum);
-
 		/* And write... */
 		if (data_encrypted)
 			EnforceLSNForEncryption(RELPERSISTENCE_TEMP,
 									(char *) localpage,
 									false);
+		PageSetChecksumInplace(localpage, bufHdr->tag.blockNum);
 		smgrwrite(oreln,
 				  bufHdr->tag.forkNum,
 				  bufHdr->tag.blockNum,

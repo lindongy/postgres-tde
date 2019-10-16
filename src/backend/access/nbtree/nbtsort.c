@@ -698,8 +698,6 @@ _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 				   true);
 	}
 
-	PageSetChecksumInplace(page, blkno);
-
 	if (data_encrypted && !do_log)
 	{
 		Assert(!RelationNeedsWAL(wstate->index));
@@ -707,6 +705,7 @@ _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 								(char *) page,
 								false);
 	}
+	PageSetChecksumInplace(page, blkno);
 
 	/*
 	 * Now write the page.  There's no need for smgr to schedule an fsync for
