@@ -1443,8 +1443,10 @@ sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf
 	PageHeader	phdr;
 	int			segmentno = 0;
 	char	   *segmentpath;
+	bool		decrypt_files = decrypt && data_encrypted;
+	bool	decrypt_file = false;
+	bool	verify_checksums = !noverify_checksums && DataChecksumsEnabled();
 	bool		verify_checksum = false;
-	bool		decrypt_file = false;
 
 	fp = AllocateFile(readfilename, "rb");
 	if (fp == NULL)
@@ -1462,8 +1464,7 @@ sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf
 	 * Encryption can be applied to pages for which checksum can be computed
 	 * and only to those.
 	 */
-	if ((!noverify_checksums && DataChecksumsEnabled()) ||
-		(decrypt && data_encrypted))
+	if (verify_checksums || decrypt_files)
 	{
 		char	   *filename;
 
@@ -1476,8 +1477,8 @@ sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf
 
 		if (is_checksummed_file(readfilename, filename))
 		{
-			decrypt_file = true;
-			verify_checksum = true;
+			verify_checksum = verify_checksums;
+			decrypt_file = decrypt_files;
 
 			/*
 			 * Cut off at the segment boundary (".") to get the segment number
@@ -1502,8 +1503,7 @@ sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf
 		 *
 		 * TODO Move this into a separate function and use get_controlfile().
 		 */
-		if (decrypt && data_encrypted &&
-			strcmp(readfilename, XLOG_CONTROL_FILE) == 0)
+		if (decrypt_files && strcmp(readfilename, XLOG_CONTROL_FILE) == 0)
 		{
 			ControlFileData	*cfile = (ControlFileData *) buf;
 
@@ -1562,9 +1562,28 @@ sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf
 
 		if (verify_checksum)
 		{
+			static char	*buf_encrypted = NULL;
+			bool	decrypt_temp = false;
+
+			/*
+			 * If decryption is needed only due to checksum verification, put
+			 * the encrypted data aside.
+			 */
+			if (data_encrypted && !decrypt_file)
+			{
+				if (buf_encrypted == NULL)
+					buf_encrypted = (char *) palloc(TAR_SEND_SIZE);
+				memcpy(buf_encrypted, buf, cnt);
+
+				decrypt_temp = true;
+			}
+
 			for (i = 0; i < cnt / BLCKSZ; i++)
 			{
 				page = buf + BLCKSZ * i;
+
+				if (decrypt_temp)
+					decrypt_block(page, page, BLCKSZ, NULL, false);
 
 				/*
 				 * Only check pages which have not been modified since the
@@ -1631,6 +1650,15 @@ sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf
 												readfilename)));
 							}
 
+							/*
+							 * If only checksum verification requires
+							 * decryption, backup the encrypted data. (The
+							 * actual decryption will take place in the next
+							 * loop.)
+							 */
+							if (decrypt_temp)
+								memcpy(buf_encrypted + BLCKSZ * i, page, BLCKSZ);
+
 							/* Set flag so we know a retry was attempted */
 							block_retry = true;
 
@@ -1658,6 +1686,10 @@ sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf
 				block_retry = false;
 				blkno++;
 			}
+
+			/* Make sure we send the encrypted data. */
+			if (decrypt_temp)
+				memcpy(buf, buf_encrypted, cnt);
 		}
 
 		/* Send the chunk as a CopyData message */
