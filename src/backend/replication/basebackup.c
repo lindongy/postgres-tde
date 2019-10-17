@@ -251,7 +251,7 @@ perform_base_backup(basebackup_options *opt)
 	List	   *tablespaces = NIL;
 
 	if (decrypt && !data_encrypted)
-		ereport(WARNING,
+		ereport(NOTICE,
 				(errmsg("decryption requested but the cluster is not encrypted")));
 
 	datadirpathlen = strlen(DataDir);

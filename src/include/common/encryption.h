@@ -23,5 +23,4 @@ extern unsigned char encryption_key[];
 
 extern void run_encryption_key_command(char *data_dir);
 extern void read_encryption_key_f(FILE *f);
-
 #endif /* COMMON_ENCRYPTION_H */

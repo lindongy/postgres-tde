@@ -354,8 +354,8 @@ IdentifySystem(void)
 	DestReceiver *dest;
 	TupOutputState *tstate;
 	TupleDesc	tupdesc;
-	Datum		values[5];
-	bool		nulls[5];
+	Datum		values[4];
+	bool		nulls[4];
 
 	/*
 	 * Reply with a result set with one row, four columns. First col is system
@@ -395,7 +395,7 @@ IdentifySystem(void)
 	MemSet(nulls, false, sizeof(nulls));
 
 	/* need a tuple descriptor representing four columns */
-	tupdesc = CreateTemplateTupleDesc(5);
+	tupdesc = CreateTemplateTupleDesc(4);
 	TupleDescInitBuiltinEntry(tupdesc, (AttrNumber) 1, "systemid",
 							  TEXTOID, -1, 0);
 	TupleDescInitBuiltinEntry(tupdesc, (AttrNumber) 2, "timeline",
@@ -404,11 +404,6 @@ IdentifySystem(void)
 							  TEXTOID, -1, 0);
 	TupleDescInitBuiltinEntry(tupdesc, (AttrNumber) 4, "dbname",
 							  TEXTOID, -1, 0);
-	/*
-	 * XXX BOOLID would be better but printsimple() does not support it.
-	 */
-	TupleDescInitBuiltinEntry(tupdesc, (AttrNumber) 5, "encrypted",
-							  INT4OID, -1, 0);
 
 	/* prepare for projection of tuples */
 	tstate = begin_tup_output_tupdesc(dest, tupdesc, &TTSOpsVirtual);
@@ -427,8 +422,6 @@ IdentifySystem(void)
 		values[3] = CStringGetTextDatum(dbname);
 	else
 		nulls[3] = true;
-
-	values[4] = Int32GetDatum(data_encrypted ? 1 : 0);
 
 	/* send it to dest */
 	do_tup_output(tstate, values, nulls);
@@ -712,7 +705,7 @@ StartReplication(StartReplicationCmd *cmd)
 				decrypt_stream = true;
 			else
 			{
-				ereport(WARNING,
+				ereport(NOTICE,
 						(errmsg("decryption requested but the cluster is not encrypted")));
 				decrypt_stream = false;
 			}

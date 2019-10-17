@@ -442,7 +442,6 @@ ReceiveXlogStream(PGconn *conn, StreamCtl *stream)
 	char		slotcmd[128];
 	PGresult   *res;
 	XLogRecPtr	stoppos;
-	bool	encrypted = false;
 	char	*decrypt_cmd = "";
 
 	/*
@@ -488,7 +487,7 @@ ReceiveXlogStream(PGconn *conn, StreamCtl *stream)
 			PQclear(res);
 			return false;
 		}
-		if (PQntuples(res) != 1 || PQnfields(res) < 4)
+		if (PQntuples(res) != 1 || PQnfields(res) < 3)
 		{
 			pg_log_error("could not identify system: got %d rows and %d fields, expected %d rows and %d or more fields",
 						 PQntuples(res), PQnfields(res), 1, 3);
@@ -508,19 +507,15 @@ ReceiveXlogStream(PGconn *conn, StreamCtl *stream)
 			PQclear(res);
 			return false;
 		}
-		if (atoi(PQgetvalue(res, 0, 4)) > 0)
-			encrypted = true;
-
 		PQclear(res);
 	}
 
+	/*
+	 * If user requested decryption, we blindly pass the DECRYPT option and
+	 * let server ignore it if the cluster is not encrypted.
+	 */
 	if (stream->decrypt)
-	{
-		if (!encrypted)
-			pg_log_warning("decryption requested but the cluster is not encrypted");
-
 		decrypt_cmd = "DECRYPT";
-	}
 
 	/*
 	 * initialize flush position to starting point, it's the caller's

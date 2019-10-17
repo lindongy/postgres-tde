@@ -1873,6 +1873,10 @@ BaseBackup(void)
 			fprintf(stderr, "\n");
 	}
 
+	/*
+	 * If user requested decryption, we blindly pass the DECRYPT option and
+	 * let server ignore it if the cluster is not encrypted.
+	 */
 	basebkp =
 		psprintf("BASE_BACKUP LABEL '%s' %s %s %s %s %s %s %s %s",
 				 escaped_label,
