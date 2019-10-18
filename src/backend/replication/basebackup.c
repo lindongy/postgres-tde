@@ -61,8 +61,10 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly,
 					 List *tablespaces, bool sendtblspclinks);
 static bool sendFile(const char *readfilename, const char *tarfilename,
 					 struct stat *statbuf, bool missing_ok, Oid dboid);
-static void sendFileWithContent(const char *filename, const char *content,
-								struct stat *statbuf);
+static void sendFileWithContent(const char *filename, const char *content);
+static void sendFileWithContentGeneric(const char *filename,
+									   const char *content,
+									   size_t len, struct stat *statbuf);
 static int64 _tarWriteHeader(const char *filename, const char *linktarget,
 							 struct stat *statbuf, bool sizeonly);
 static int64 _tarWriteDir(const char *pathbuf, int basepathlen, struct stat *statbuf,
@@ -345,7 +347,7 @@ perform_base_backup(basebackup_options *opt)
 				struct stat statbuf;
 
 				/* In the main tar, include the backup_label first... */
-				sendFileWithContent(BACKUP_LABEL_FILE, labelfile->data, NULL);
+				sendFileWithContent(BACKUP_LABEL_FILE, labelfile->data);
 
 				/*
 				 * Send tablespace_map file if required and then the bulk of
@@ -353,8 +355,7 @@ perform_base_backup(basebackup_options *opt)
 				 */
 				if (tblspc_map_file && opt->sendtblspcmapfile)
 				{
-					sendFileWithContent(TABLESPACE_MAP, tblspc_map_file->data,
-										NULL);
+					sendFileWithContent(TABLESPACE_MAP, tblspc_map_file->data);
 					sendDir(".", 1, false, tablespaces, false);
 				}
 				else
@@ -385,12 +386,15 @@ perform_base_backup(basebackup_options *opt)
 								offsetof(ControlFileData, crc));
 					FIN_CRC32C(cfile->crc);
 
-					sendFileWithContent(XLOG_CONTROL_FILE, (char *) cfile,
-										&statbuf);
+					sendFileWithContentGeneric(XLOG_CONTROL_FILE,
+											   (char *) cfile,
+											   statbuf.st_size,
+											   &statbuf);
 					pfree(cfile);
 				}
 				else
-					sendFile(XLOG_CONTROL_FILE, XLOG_CONTROL_FILE, &statbuf, false, InvalidOid);
+					sendFile(XLOG_CONTROL_FILE, XLOG_CONTROL_FILE, &statbuf,
+							 false, InvalidOid);
 			}
 			else
 				sendTablespace(ti->path, false);
@@ -647,7 +651,7 @@ perform_base_backup(basebackup_options *opt)
 			 * complete segment.
 			 */
 			StatusFilePath(pathbuf, walFiles[i], ".done");
-			sendFileWithContent(pathbuf, "", NULL);
+			sendFileWithContent(pathbuf, "");
 		}
 
 		/*
@@ -674,7 +678,7 @@ perform_base_backup(basebackup_options *opt)
 
 			/* unconditionally mark file as archived */
 			StatusFilePath(pathbuf, fname, ".done");
-			sendFileWithContent(pathbuf, "", NULL);
+			sendFileWithContent(pathbuf, "");
 		}
 
 		/* Send CopyDone message for the last tar file */
@@ -1003,42 +1007,43 @@ SendXlogRecPtrResult(XLogRecPtr ptr, TimeLineID tli)
 	pq_puttextmessage('C', "SELECT");
 }
 
+static void
+sendFileWithContent(const char *filename, const char *content)
+{
+	struct stat statbuf;
+
+	/*
+	 * Construct a stat struct for the backup_label file we're injecting in
+	 * the tar.
+	 */
+	/* Windows doesn't have the concept of uid and gid */
+#ifdef WIN32
+	statbuf.st_uid = 0;
+	statbuf.st_gid = 0;
+#else
+	statbuf.st_uid = geteuid();
+	statbuf.st_gid = getegid();
+#endif
+	statbuf.st_mtime = time(NULL);
+	statbuf.st_mode = pg_file_create_mode;
+	statbuf.st_size = strlen(content);
+
+	sendFileWithContentGeneric(filename, content, 0, &statbuf);
+}
+
 /*
  * Inject a file with given name and content in the output tar stream.
  *
- * If statbuf is NULL, the function assumes this is a new file and will
- * initialize the structure accordingly.
+ * If "len" is zero, content is considered a NULL-terminated string.
  */
 static void
-sendFileWithContent(const char *filename, const char *content,
-					struct stat *statbuf)
+sendFileWithContentGeneric(const char *filename, const char *content,
+						   size_t len, struct stat *statbuf)
 {
-	struct stat statbuf_loc;
-	int			pad,
-				len;
+	int			pad;
 
-	len = strlen(content);
-
-	if (statbuf == NULL)
-	{
-		statbuf = &statbuf_loc;
-
-		/*
-		 * Construct a stat struct for the backup_label file we're injecting
-		 * in the tar.
-		 */
-		/* Windows doesn't have the concept of uid and gid */
-#ifdef WIN32
-		statbuf->st_uid = 0;
-		statbuf->st_gid = 0;
-#else
-		statbuf->st_uid = geteuid();
-		statbuf->st_gid = getegid();
-#endif
-		statbuf->st_mtime = time(NULL);
-		statbuf->st_mode = pg_file_create_mode;
-		statbuf->st_size = len;
-	}
+	if (len == 0)
+		len = strlen(content);
 
 	_tarWriteHeader(filename, NULL, statbuf, false);
 	/* Send the contents as a CopyData message */
