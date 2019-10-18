@@ -101,6 +101,7 @@ static const char *const skip[] = {
 	"pg_filenode.map",
 	"pg_internal.init",
 	"PG_VERSION",
+	"kdf_params",
 #ifdef EXEC_BACKEND
 	"config_exec_params",
 	"config_exec_params.new",
