@@ -12,6 +12,9 @@
 /* Key length in characters (two characters per hexadecimal digit) */
 #define ENCRYPTION_KEY_CHARS	(ENCRYPTION_KEY_LENGTH * 2)
 
+#define KDF_PARAMS_FILE			"global/kdf_params"
+#define KDF_PARAMS_FILE_SIZE	512
+
 #define ENCRYPTION_KDF_NITER		1048576
 #define	ENCRYPTION_KDF_SALT_LEN		sizeof(uint64)
 

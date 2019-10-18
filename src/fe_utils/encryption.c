@@ -29,9 +29,6 @@
 
 #ifdef USE_ENCRYPTION
 
-#define KDF_PARAMS_FILE			"global/kdf_params"
-#define KDF_PARAMS_FILE_SIZE	512
-
 /*
  * Key derivation function.
  */

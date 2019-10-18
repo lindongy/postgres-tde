@@ -1205,6 +1205,25 @@ sendDir(const char *path, int basepathlen, bool sizeonly, List *tablespaces,
 			}
 		}
 
+		/*
+		 * KDF_PARAMS_FILE should only be excluded if the backup will be
+		 * decrypted.
+		 */
+		if (decrypt && data_encrypted)
+		{
+			char	*fn;
+
+			fn = last_dir_separator(KDF_PARAMS_FILE);
+			Assert(fn != NULL);
+			fn++;
+
+			if (strcmp(de->d_name, fn) == 0)
+			{
+				elog(DEBUG1, "file \"%s\" excluded from backup", de->d_name);
+				excludeFound = true;
+			}
+		}
+
 		if (excludeFound)
 			continue;
 
