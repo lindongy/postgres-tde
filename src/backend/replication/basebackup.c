@@ -19,6 +19,7 @@
 #include "access/xlog_internal.h"	/* for pg_start/stop_backup */
 #include "catalog/pg_control.h"
 #include "catalog/pg_type.h"
+#include "common/controldata_utils.h"
 #include "common/file_perm.h"
 #include "lib/stringinfo.h"
 #include "libpq/libpq.h"
@@ -60,7 +61,8 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly,
 					 List *tablespaces, bool sendtblspclinks);
 static bool sendFile(const char *readfilename, const char *tarfilename,
 					 struct stat *statbuf, bool missing_ok, Oid dboid);
-static void sendFileWithContent(const char *filename, const char *content);
+static void sendFileWithContent(const char *filename, const char *content,
+								struct stat *statbuf);
 static int64 _tarWriteHeader(const char *filename, const char *linktarget,
 							 struct stat *statbuf, bool sizeonly);
 static int64 _tarWriteDir(const char *pathbuf, int basepathlen, struct stat *statbuf,
@@ -343,7 +345,7 @@ perform_base_backup(basebackup_options *opt)
 				struct stat statbuf;
 
 				/* In the main tar, include the backup_label first... */
-				sendFileWithContent(BACKUP_LABEL_FILE, labelfile->data);
+				sendFileWithContent(BACKUP_LABEL_FILE, labelfile->data, NULL);
 
 				/*
 				 * Send tablespace_map file if required and then the bulk of
@@ -351,7 +353,8 @@ perform_base_backup(basebackup_options *opt)
 				 */
 				if (tblspc_map_file && opt->sendtblspcmapfile)
 				{
-					sendFileWithContent(TABLESPACE_MAP, tblspc_map_file->data);
+					sendFileWithContent(TABLESPACE_MAP, tblspc_map_file->data,
+										NULL);
 					sendDir(".", 1, false, tablespaces, false);
 				}
 				else
@@ -363,7 +366,31 @@ perform_base_backup(basebackup_options *opt)
 							(errcode_for_file_access(),
 							 errmsg("could not stat file \"%s\": %m",
 									XLOG_CONTROL_FILE)));
-				sendFile(XLOG_CONTROL_FILE, XLOG_CONTROL_FILE, &statbuf, false, InvalidOid);
+
+				/*
+				 * Adjust control file if the backup is not encrypted.
+				 */
+				if (decrypt && data_encrypted)
+				{
+					ControlFileData	*cfile;
+					bool	crc_ok;
+
+					cfile = get_controlfile(".", &crc_ok);
+					cfile->data_cipher = PG_CIPHER_NONE;
+					cfile->encryption_verification[0] = '\0';
+
+					/* Recalculate CRC of control file */
+					INIT_CRC32C(cfile->crc);
+					COMP_CRC32C(cfile->crc, (char *) cfile,
+								offsetof(ControlFileData, crc));
+					FIN_CRC32C(cfile->crc);
+
+					sendFileWithContent(XLOG_CONTROL_FILE, (char *) cfile,
+										&statbuf);
+					pfree(cfile);
+				}
+				else
+					sendFile(XLOG_CONTROL_FILE, XLOG_CONTROL_FILE, &statbuf, false, InvalidOid);
 			}
 			else
 				sendTablespace(ti->path, false);
@@ -620,7 +647,7 @@ perform_base_backup(basebackup_options *opt)
 			 * complete segment.
 			 */
 			StatusFilePath(pathbuf, walFiles[i], ".done");
-			sendFileWithContent(pathbuf, "");
+			sendFileWithContent(pathbuf, "", NULL);
 		}
 
 		/*
@@ -647,7 +674,7 @@ perform_base_backup(basebackup_options *opt)
 
 			/* unconditionally mark file as archived */
 			StatusFilePath(pathbuf, fname, ".done");
-			sendFileWithContent(pathbuf, "");
+			sendFileWithContent(pathbuf, "", NULL);
 		}
 
 		/* Send CopyDone message for the last tar file */
@@ -978,33 +1005,42 @@ SendXlogRecPtrResult(XLogRecPtr ptr, TimeLineID tli)
 
 /*
  * Inject a file with given name and content in the output tar stream.
+ *
+ * If statbuf is NULL, the function assumes this is a new file and will
+ * initialize the structure accordingly.
  */
 static void
-sendFileWithContent(const char *filename, const char *content)
+sendFileWithContent(const char *filename, const char *content,
+					struct stat *statbuf)
 {
-	struct stat statbuf;
+	struct stat statbuf_loc;
 	int			pad,
 				len;
 
 	len = strlen(content);
 
-	/*
-	 * Construct a stat struct for the backup_label file we're injecting in
-	 * the tar.
-	 */
-	/* Windows doesn't have the concept of uid and gid */
-#ifdef WIN32
-	statbuf.st_uid = 0;
-	statbuf.st_gid = 0;
-#else
-	statbuf.st_uid = geteuid();
-	statbuf.st_gid = getegid();
-#endif
-	statbuf.st_mtime = time(NULL);
-	statbuf.st_mode = pg_file_create_mode;
-	statbuf.st_size = len;
+	if (statbuf == NULL)
+	{
+		statbuf = &statbuf_loc;
 
-	_tarWriteHeader(filename, NULL, &statbuf, false);
+		/*
+		 * Construct a stat struct for the backup_label file we're injecting
+		 * in the tar.
+		 */
+		/* Windows doesn't have the concept of uid and gid */
+#ifdef WIN32
+		statbuf->st_uid = 0;
+		statbuf->st_gid = 0;
+#else
+		statbuf->st_uid = geteuid();
+		statbuf->st_gid = getegid();
+#endif
+		statbuf->st_mtime = time(NULL);
+		statbuf->st_mode = pg_file_create_mode;
+		statbuf->st_size = len;
+	}
+
+	_tarWriteHeader(filename, NULL, statbuf, false);
 	/* Send the contents as a CopyData message */
 	pq_putmessage('d', content, len);
 
@@ -1498,26 +1534,6 @@ sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf
 
 	while ((cnt = fread(buf, 1, Min(sizeof(buf), statbuf->st_size - len), fp)) > 0)
 	{
-		/*
-		 * Adjust control file if the backup is not encrypted.
-		 *
-		 * TODO Move this into a separate function and use get_controlfile().
-		 */
-		if (decrypt_files && strcmp(readfilename, XLOG_CONTROL_FILE) == 0)
-		{
-			ControlFileData	*cfile = (ControlFileData *) buf;
-
-			Assert(sizeof(ControlFileData) <= cnt);
-			cfile->data_cipher = PG_CIPHER_NONE;
-			cfile->encryption_verification[0] = '\0';
-
-			/* Recalculate CRC of control file */
-			INIT_CRC32C(cfile->crc);
-			COMP_CRC32C(cfile->crc, (char *) cfile,
-						offsetof(ControlFileData, crc));
-			FIN_CRC32C(cfile->crc);
-		}
-
 		/*
 		 * The checksums are verified at block level, so we iterate over the
 		 * buffer in chunks of BLCKSZ, after making sure that
