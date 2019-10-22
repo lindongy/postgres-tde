@@ -57,7 +57,9 @@ parseCommandLine(int argc, char *argv[])
 		{"verbose", no_argument, NULL, 'v'},
 		{"clone", no_argument, NULL, 1},
 #ifdef USE_ENCRYPTION
+#ifdef HAVE_UNIX_SOCKETS
 		{"encryption-key-command", required_argument, NULL, 'K'},
+#endif	/* HAVE_UNIX_SOCKETS */
 #endif	/* USE_ENCRYPTION */
 
 		{NULL, 0, NULL, 0}
@@ -213,6 +215,7 @@ parseCommandLine(int argc, char *argv[])
 				break;
 
 #ifdef USE_ENCRYPTION
+#ifdef HAVE_UNIX_SOCKETS
 			case 'K':
 				encryption_key_command = pg_strdup(optarg);
 
@@ -220,11 +223,15 @@ parseCommandLine(int argc, char *argv[])
 				 * If the command is a command line option, it probably means
 				 * that the clusters do not have it in postgresql.conf, and
 				 * therefore we must pass it to pg_ctl when starting them.
+				 *
+				 * Unix socket is necessary for the key to be delivered to the
+				 * clusters safely, see pg_ctl.c.
 				 */
 				snprintf(encryption_key_command_opt,
 						 strlen(encryption_key_command) + 7,
 						 " -K '%s'", encryption_key_command);
 				break;
+#endif	/* HAVE_UNIX_SOCKETS */
 #endif	/* USE_ENCRYPTION */
 
 			default:

@@ -50,10 +50,9 @@ PostgreSQL documentation
     started other way than using <xref linkend="app-pg-ctl"/>, typically
     via <firstterm>systemd</firstterm> or a custom script. In this
     case <application>pg_keytool</application> can be used to send the key to
-    specified TCP/IP port or to an Unix socket, on which the server
-    listens. This is the same port or socket to which applications will
-    eventually connect, but when the encrypted cluster starts up, it only
-    accepts the key.
+    specified server via Unix socket on which the server listens. This is the
+    same port or socket to which applications will eventually connect, but
+    when the encrypted cluster starts up, it only accepts the key.
   </para>
  </refsect1>
 
@@ -84,9 +83,8 @@ PostgreSQL documentation
        <term><option>--host=<replaceable class="parameter">hostname</replaceable></option></term>
        <listitem>
          <para>
-           Specifies the host name of the machine on which the server is
-           listening. If the value begins with a slash, it is used as the
-           directory for the Unix-domain socket.
+           Specifies the Unix-domain socket on which the server is
+           listening. The value must start with a slash.
          </para>
        </listitem>
      </varlistentry>
@@ -95,11 +93,10 @@ PostgreSQL documentation
        <term><option>-p <replaceable class="parameter">port</replaceable></option></term>
        <listitem>
          <para>
-           Specifies the TCP port or the local Unix-domain socket file
-           extension on which the server is listening for
-           connections. Defaults to the value of the <envar>PGPORT</envar>
-           environment variable or, if not set, to the port specified at
-           compile time, usually 5432.
+           Specifies the local Unix-domain socket file extension on which the
+           server is listening for connections. Defaults to the value of
+           the <envar>PGPORT</envar> environment variable or, if not set, to
+           the port specified at compile time, usually 5432.
          </para>
        </listitem>
      </varlistentry>
@@ -110,6 +107,11 @@ PostgreSQL documentation
          <para>
            Send the key to <productname>PostgreSQL</productname> server rather
            than to standard output.
+         </para>
+
+         <para>
+           This option is only available if the OS the database server runs on
+           supports Unix-domain sockets.
          </para>
        </listitem>
      </varlistentry>

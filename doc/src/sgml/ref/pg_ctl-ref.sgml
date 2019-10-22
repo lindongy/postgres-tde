@@ -298,7 +298,13 @@ PostgreSQL documentation
       <listitem>
        <para>
         If the cluster is encrypted, run this command to retrieve the
-        encryption key. See <xref linkend="encryption"/> for details.
+        encryption key, see <xref linkend="encryption"/> for details.
+       </para>
+
+       <para>
+         This option is only available if the OS the database server runs on
+         supports Unix-domain sockets. On other platforms you need to use
+         the <varname>encryption_key_command</varname> parameter.
        </para>
       </listitem>
      </varlistentry>

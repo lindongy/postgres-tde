@@ -247,6 +247,7 @@ derive_key_from_password(unsigned char *encryption_key, const char *password,
 	}
 }
 
+#ifdef HAVE_UNIX_SOCKETS
 /*
  * Send the contents of encryption_key in the form of special startup packet
  * to a server that is being started.
@@ -258,8 +259,6 @@ derive_key_from_password(unsigned char *encryption_key, const char *password,
  * Returns true if we could send the message and false if not, however even
  * success does not guarantee that server started up - caller should
  * eventually test server connection himself.
- *
- * TODO Windows stuff?
  */
 bool
 send_key_to_postmaster(const char *host, const char *port,
@@ -323,6 +322,10 @@ send_key_to_postmaster(const char *host, const char *port,
 				return false;
 		}
 #else
+/*
+ * As the whole function requires HAVE_UNIX_SOCKETS, this part does not have
+ * to be implemented so far anyway.
+ */
 #error "WIN32 not implemented"
 #endif
 		if (conn)
@@ -347,7 +350,8 @@ send_key_to_postmaster(const char *host, const char *port,
 	retry:
 		/*
 		 * Send the packet. Here we need to use low level API because the
-		 * server is not fully up, so libpq cannot be used properly.
+		 * server is not fully up, so libpq connection cannot be setup
+		 * properly (server does not accept connections yet).
 		 */
 		if (send(sock, (char *) packet, packet_size, 0) != packet_size)
 		{
@@ -369,4 +373,5 @@ send_key_to_postmaster(const char *host, const char *port,
 
 	return res;
 }
+#endif	/* HAVE_UNIX_SOCKETS */
 #endif	/* USE_ENCRYPTION */

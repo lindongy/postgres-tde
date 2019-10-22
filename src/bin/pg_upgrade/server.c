@@ -255,13 +255,14 @@ start_postmaster(ClusterInfo *cluster, bool report_and_exit_on_error)
 
 	/*
 	 * If encryption key needs to be sent, run a separate process now and let
-	 * it send the password to the postmaster.  We cannot send the key later
-	 * in the current process because the exec_prog call below blocks until
-	 * the postmaster succeeds or fails to start (and it will definitely fail
-	 * if it receives no key).
+	 * it send the key to the postmaster.  We cannot send the key later in the
+	 * current process because the exec_prog call below blocks until the
+	 * postmaster succeeds or fails to start (and it will definitely fail if
+	 * it receives no key).
 	 */
 	if (encryption_setup_done)
 #ifdef USE_ENCRYPTION
+#ifdef HAVE_UNIX_SOCKETS
 	{
 #ifndef WIN32
 		pid_t sender;
@@ -285,10 +286,14 @@ start_postmaster(ClusterInfo *cluster, bool report_and_exit_on_error)
 			exit(EXIT_FAILURE);
 		}
 #else	/* WIN32 */
-		/* TODO  */
+		/*
+		 * As the whole function requires HAVE_UNIX_SOCKETS, this part does
+		 * not have to be implemented so far anyway.
+		 */
 		#error "W32 not implemented yet"
 #endif	/* WIN32 */
 	}
+#endif	/* HAVE_UNIX_SOCKETS */
 #else	/* USE_ENCRYPTION */
 	{
 		/* User should not be able to enable encryption. */

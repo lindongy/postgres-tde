@@ -132,6 +132,13 @@
         string, it does not matter which cluster the command comes from.
        </para>
 
+       <para>
+         This option is only available if the OS the database server runs on
+         supports Unix-domain sockets. On other platforms, both old and new
+         cluster must have the <varname>encryption_key_command</varname>
+         parameter set.
+       </para>
+
        <note>
          <para>
            If you are using <xref linkend="app-pg-keytool"/> to derive the

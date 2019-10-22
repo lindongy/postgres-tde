@@ -143,7 +143,9 @@ static void adjust_data_dir(void);
 static char *get_config_variable(const char *var_name, size_t res_size);
 #ifdef USE_ENCRYPTION
 static char *get_first_csv_item(char *csv_list);
+#ifdef HAVE_UNIX_SOCKETS
 static void get_postmaster_address(char **host_p, char **port_str_p);
+#endif	/* HAVE_UNIX_SOCKETS */
 #endif	/* USE_ENCRYPTION */
 
 #ifdef WIN32
@@ -899,6 +901,7 @@ do_start(void)
 	pm_pid = start_postmaster();
 
 #ifdef USE_ENCRYPTION
+#ifdef HAVE_UNIX_SOCKETS
 	if (encryption_key_command)
 		key_to_send = encryption_key;
 	else
@@ -914,8 +917,9 @@ do_start(void)
 
 	/*
 	 * Send the key to the postmaster, or an empty message if we have no
-	 * key. The latter means that postmaster should try to get the key using a
-	 * command that it might find in postgresql.conf.
+	 * key. The latter means that postmaster should have tried to get the key
+	 * using a command that it might find in postgresql.conf, so we shouldn't
+	 * send it again.
 	 */
 	get_postmaster_address(&host, &port_str);
 	if (!send_key_to_postmaster(host, port_str, key_to_send, pm_pid))
@@ -924,6 +928,7 @@ do_start(void)
 					 progname);
 		exit(1);
 	}
+#endif	/* HAVE_UNIX_SOCKETS */
 #endif	/* USE_ENCRYPTION */
 
 	if (do_wait)
@@ -2107,9 +2112,11 @@ do_help(void)
 	printf(_("  -e SOURCE              event source for logging when running as a service\n"));
 #endif
 #ifdef	USE_ENCRYPTION
+#ifdef HAVE_UNIX_SOCKETS
 	printf(_("  -K, --encryption-key-command\n"
 			 "                         command that returns encryption key\n\n"));
-#endif							/* USE_ENCRYPTION */
+#endif	/* HAVE_UNIX_SOCKETS */
+#endif	/* USE_ENCRYPTION */
 	printf(_("  -s, --silent           only print errors, no informational messages\n"));
 	printf(_("  -t, --timeout=SECS     seconds to wait when using -w option\n"));
 	printf(_("  -V, --version          output version information, then exit\n"));
@@ -2350,9 +2357,10 @@ get_first_csv_item(char *csv_list)
 	return result;
 }
 
+#ifdef HAVE_UNIX_SOCKETS
 /*
- * Retrieve host name and port to which the encryption key should be
- * sent. host can remain NULL, which will make libpq assume "localhost".
+ * Retrieve host name and port to which the encryption key should be sent. For
+ * security reasons, only unix socket directory is accepted as the host name.
  */
 static void
 get_postmaster_address(char **host_p, char **port_str_p)
@@ -2369,8 +2377,8 @@ get_postmaster_address(char **host_p, char **port_str_p)
 	}
 	else
 	{
-		/* Let libpq assume "localhost".*/
-		*host_p = NULL;
+		pg_log_fatal("could not find unix socket directory to send the encryption key to");
+		exit(1);
 	}
 
 	/*
@@ -2379,6 +2387,7 @@ get_postmaster_address(char **host_p, char **port_str_p)
 	 */
 	*port_str_p = get_config_variable("port", 7);
 }
+#endif	/* HAVE_UNIX_SOCKETS */
 #endif	/* USE_ENCRYPTION */
 
 static DBState
@@ -2412,7 +2421,11 @@ main(int argc, char **argv)
 		{"options", required_argument, NULL, 'o'},
 		{"silent", no_argument, NULL, 's'},
 		{"timeout", required_argument, NULL, 't'},
+#ifdef USE_ENCRYPTION
+#ifdef HAVE_UNIX_SOCKETS
 		{"encryption-key-command", required_argument, NULL, 'K'},
+#endif	/* HAVE_UNIX_SOCKETS */
+#endif	/* USE_ENCRYPTION */
 		{"core-files", no_argument, NULL, 'c'},
 		{"wait", no_argument, NULL, 'w'},
 		{"no-wait", no_argument, NULL, 'W'},
@@ -2510,9 +2523,11 @@ main(int argc, char **argv)
 					event_source = pg_strdup(optarg);
 					break;
 #ifdef USE_ENCRYPTION
+#ifdef HAVE_UNIX_SOCKETS
 				case 'K':
 					encryption_key_command = pg_strdup(optarg);
 					break;
+#endif	/* HAVE_UNIX_SOCKETS */
 #endif	/* USE_ENCRYPTION */
 				case 'l':
 					log_file = pg_strdup(optarg);

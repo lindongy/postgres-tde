@@ -2595,8 +2595,8 @@ The commands accepted in replication mode are:
           WAL files are decrypted before they are sent to client. In addition,
           the <literal>Data encryption</literal> field the control file is set
           to <literal>off</literal>. This option also ensures that
-          the <file>global/kdf_params</file> file (containing parameters of
-          the the <term>key dervivation function</term>, which is used to
+          the <filename>global/kdf_params</filename> file (containing
+          parameters of the the key dervivation function, which is used to
           derive encryption key from password) is not sent to the client.
          </para>
         </listitem>

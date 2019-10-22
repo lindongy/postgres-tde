@@ -52,7 +52,9 @@ usage(const char *progname)
 	env = getenv("PGPORT");
 	printf(_("  -p, --port=PORT        database server port (default: \"%s\")\n"),
 			env ? env : DEF_PGPORT_STR);
+#ifdef HAVE_UNIX_SOCKETS
 	printf(_("  -s,                    send output to database server\n"));
+#endif	/* HAVE_UNIX_SOCKETS */
 	printf(_("  -w                     expect password on input, not a key\n"));
 	printf(_("  -?, --help             show this help, then exit\n\n"));
 	printf(_("Password or key is read from stdin. Key is sent to PostgreSQL server being started\n"));
@@ -153,10 +155,63 @@ main(int argc, char **argv)
 		exit(1);
 	}
 
+#ifndef HAVE_UNIX_SOCKETS
+	/*
+	 * Since we currently cannot send the encryption key via SSL connection,
+	 * the unix socket is the only secure channel to send the key.
+	 *
+	 * Maybe this limitation will be relaxed for Windows one day:
+	 *
+	 * https://www.postgresql.org/message-id/54bde68c-d134-4eb8-5bd3-8af33b72a010@2ndquadrant.com
+	 */
+	if (to_server)
+	{
+		pg_log_error("the -s option requires unix domain socket");
+		exit(1);
+	}
+#endif
+
 	if ((host || port_str) && !to_server)
 	{
 		pg_log_error("host and port can only be passed along with the -s option");
 		exit(1);
+	}
+
+	if (to_server)
+	{
+#ifdef HAVE_UNIX_SOCKETS
+		/*
+		 * If no hostname is specified, libpq can use "localhost" as the
+		 * default value if the OS does not support unix domain sockets. Since
+		 * we currently cannot send the encryption key via SSL connection,
+		 * such approach is not secure.
+		 */
+		if (host == NULL)
+		{
+			pg_log_error("host not specified");
+			exit(1);
+		}
+
+		/*
+		 * If connection via the unix socket is required, we only accept
+		 * absolute path. Otherwise libpq could consider the string a host
+		 * name and initiate TCP/IP connection.
+		 */
+		if (!is_absolute_path(host))
+		{
+			/*
+			 * In fact the socket directory can be a relative path in
+			 * postgresql.conf, but such would be considered a hostname by
+			 * libpq.
+			 */
+			pg_log_error("\"%s\" does not look like an unix socket directory",
+						 host);
+			exit(1);
+		}
+#else  /* !HAVE_UNIX_SOCKETS */
+		/* See above */
+		Assert(false);
+#endif /* HAVE_UNIX_SOCKETS */
 	}
 
 	/* Try to initialize DataDir using environment variable. */
@@ -255,9 +310,14 @@ main(int argc, char **argv)
 	}
 	else
 	{
+#ifdef HAVE_UNIX_SOCKETS
 		/* XXX Try to find the postmaster PID? */
 		if (!send_key_to_postmaster(host, port_str, encryption_key, 0))
 			pg_log_error("could not send encryption key to server");
+#else
+		/* to_server should have caused early exit. */
+		Assert(false);
+#endif	/* HAVE_UNIX_SOCKETS */
 	}
 
 #else

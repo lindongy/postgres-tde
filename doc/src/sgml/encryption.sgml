@@ -86,8 +86,9 @@ echo &lt;your key&gt;
 
  <para>
    If the <literal>encryption_key_command</literal> is not present
-   in <filename>postgresql.conf</filename>, it needs to be passed to
-   <xref linkend="app-pg-ctl"/> in order to start the cluster:
+   in <filename>postgresql.conf</filename>, and if the server supports
+   Unix-domain sockets, the command can be passed to
+   <xref linkend="app-pg-ctl"/> when starting the cluster:
 
 <screen>
 <prompt>$</prompt> <userinput>pg_ctl -K 'read -sp "Cluster encryption
@@ -113,7 +114,7 @@ echo &lt;your key&gt;
 
  <para>
   Since WAL is encrypted, any replication solution based on log shipping
-  (<xref linkend="warm-standby"/>) assume that all standby servers are
+  (<xref linkend="warm-standby"/>) assumes that all standby servers are
   encrypted using the same key as their primary server. On the other hand,
   <xref linkend="logical-replication"/> allows replication between encrypted
   and unencrypted clusters, or between clusters encrypted with different keys.
