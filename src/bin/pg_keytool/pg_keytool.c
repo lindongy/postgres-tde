@@ -52,9 +52,6 @@ usage(const char *progname)
 	env = getenv("PGPORT");
 	printf(_("  -p, --port=PORT        database server port (default: \"%s\")\n"),
 			env ? env : DEF_PGPORT_STR);
-#ifdef HAVE_UNIX_SOCKETS
-	printf(_("  -s,                    send output to database server\n"));
-#endif	/* HAVE_UNIX_SOCKETS */
 	printf(_("  -w                     expect password on input, not a key\n"));
 	printf(_("  -?, --help             show this help, then exit\n\n"));
 	printf(_("Password or key is read from stdin. Key is sent to PostgreSQL server being started\n"));
@@ -106,7 +103,7 @@ main(int argc, char **argv)
 		}
 	}
 
-	while ((c = getopt_long(argc, argv, "h:D:p:sw",
+	while ((c = getopt_long(argc, argv, "h:D:p:w",
 							long_options, &optindex)) != -1)
 	{
 		switch (c)
@@ -121,10 +118,6 @@ main(int argc, char **argv)
 
 			case 'p':
 				port_str = pg_strdup(optarg);
-				break;
-
-			case 's':
-				to_server = true;
 				break;
 
 			case 'w':
@@ -155,6 +148,28 @@ main(int argc, char **argv)
 		exit(1);
 	}
 
+	if (host || port_str)
+	{
+		/*
+		 * We deliberately don't assume default values of host and port (which
+		 * does not necessarily mean that we cannot read them from environment
+		 * variables in future versions) to minimize the risk that the key is
+		 * sent to wrong server.
+		 */
+		if (port_str == NULL)
+		{
+			pg_log_error("if host name is passed, port number must be passed too");
+			exit(1);
+		}
+		else if (host == NULL)
+		{
+			pg_log_error("if port number is passed, host name must be passed too");
+			exit(1);
+		}
+
+		to_server = true;
+	}
+
 #ifndef HAVE_UNIX_SOCKETS
 	/*
 	 * Since we currently cannot send the encryption key via SSL connection,
@@ -166,16 +181,10 @@ main(int argc, char **argv)
 	 */
 	if (to_server)
 	{
-		pg_log_error("the -s option requires unix domain socket");
+		pg_log_error("unix domain sockets not supported, cannot send key to server");
 		exit(1);
 	}
 #endif
-
-	if ((host || port_str) && !to_server)
-	{
-		pg_log_error("host and port can only be passed along with the -s option");
-		exit(1);
-	}
 
 	if (to_server)
 	{
