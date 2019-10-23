@@ -702,7 +702,7 @@ check_control_data(ControlData *oldctrl,
 	if (oldctrl->data_encrypted && !newctrl->data_encrypted)
 		pg_fatal("old cluster is encrypted, but the new one is not\n");
 	else if (!oldctrl->data_encrypted && newctrl->data_encrypted)
-		pg_fatal("old cluster is not encrypted, but the new one is\n");
+		pg_fatal("old cluster is not encrypted, upgrading to an encrypted cluster is not possible\n");
 	else if (oldctrl->data_encrypted)
 	{
 		if (memcmp(oldctrl->encryption_verification,
