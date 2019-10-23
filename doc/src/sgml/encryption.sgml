@@ -85,7 +85,7 @@ echo &lt;your key&gt;
  </note>
 
  <para>
-   If the <literal>encryption_key_command</literal> is not present
+   If the <literal>encryption_key_command</literal> setting is not present
    in <filename>postgresql.conf</filename>, and if the server supports
    Unix-domain sockets, the command can be passed to
    <xref linkend="app-pg-ctl"/> when starting the cluster:

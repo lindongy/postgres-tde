@@ -32,10 +32,15 @@ PostgreSQL documentation
   <para>
    <application>pg_keytool</application> reads encryption key or password from
    the standard input. If it received password, it runs <firstterm>key
-   derivation function</firstterm> on it in order to derive the key. The
-   encryption key is written either to the standard output (the default
-   behavior) or sent to via frontend/backend protocol to postmaster process
-   which is being started up.
+   derivation function</firstterm> (<acronym>KDF</acronym>) on it in order to
+   derive the key. If encryption key was read, it's used without any further
+   processing.
+  </para>
+
+  <para>
+   The encryption key is written either to the standard output (the default
+   behavior) or (if both host name and port number are specified) sent to via
+   frontend/backend protocol to postmaster process which is being started up.
   </para>
 
   <para>
@@ -50,9 +55,9 @@ PostgreSQL documentation
     started other way than using <xref linkend="app-pg-ctl"/>, typically
     via <firstterm>systemd</firstterm> or a custom script. In this
     case <application>pg_keytool</application> can be used to send the key to
-    specified server via Unix socket on which the server listens. This is the
-    same port or socket to which applications will eventually connect, but
-    when the encrypted cluster starts up, it only accepts the key.
+    specified server via Unix-domain socket on which the server listens. This
+    is the same port or socket to which applications will eventually connect,
+    but when the encrypted cluster starts up, it only accepts the key.
   </para>
  </refsect1>
 
@@ -65,9 +70,12 @@ PostgreSQL documentation
       <term><option>-D <replaceable>directory</replaceable></option></term>
       <listitem>
        <para>
-        Specifies the directory where the database cluster is
-        stored. Different directory generally means that a different key will
-        be derived from the same password.
+        Specifies the directory where the database cluster is stored. In
+        particular, <application>pg_keytool</application> looks
+        for <filename>kdf_params</filename> file here. This file contains
+        parameters of key derivation function and is needed to derive the
+        encryption key from password. Thus different data directory generally
+        means that a different key will be derived from the same password.
        </para>
 
        <para>
