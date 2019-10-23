@@ -84,25 +84,34 @@ run_encryption_key_command(char *data_dir)
 	if (fp == NULL)
 	{
 #ifdef FRONTEND
-		pg_log_fatal("Failed to execute \"%s\"", cmd);
+		pg_log_fatal("could not execute \"%s\"", cmd);
 		exit(EXIT_FAILURE);
 #else
 		ereport(FATAL,
-				(errmsg("Failed to execute \"%s\"", cmd)));
+				(errmsg("could not execute \"%s\"", cmd)));
 #endif	/* FRONTEND */
 	}
 
 	/* Read the key. */
-	read_encryption_key_f(fp);
+	read_encryption_key_f(fp, cmd);
 
-	pclose(fp);
+	if (pclose(fp) != 0)
+	{
+#ifdef FRONTEND
+		pg_log_fatal("could not close pipe to \"%s\"", cmd);
+		exit(EXIT_FAILURE);
+#else
+		ereport(FATAL,
+				(errmsg("could not close pipe to \"%s\"", cmd)));
+#endif	/* FRONTEND */
+	}
 }
 
 /*
  * Read the encryption key from a file stream.
  */
 void
-read_encryption_key_f(FILE *f)
+read_encryption_key_f(FILE *f, char *command)
 {
 	char	   *buf;
 	int		read_len, i, c;
@@ -115,25 +124,44 @@ read_encryption_key_f(FILE *f)
 		if (read_len >= ENCRYPTION_KEY_CHARS)
 		{
 #ifdef FRONTEND
-			pg_log_fatal("Encryption key is too long");
+			pg_log_fatal("encryption key is too long");
 			exit(EXIT_FAILURE);
 #else
 			ereport(FATAL,
-					(errmsg("Encryption key is too long")));
+					(errmsg("encryption key is too long")));
 #endif	/* FRONTEND */
 		}
 
 		buf[read_len++] = c;
 	}
 
-	if (read_len < ENCRYPTION_KEY_CHARS)
+	if (c == EOF && read_len == 0)
 	{
+		char	src[MAXPGPATH];
+
+		if (command)
+			snprintf(src, MAXPGPATH, "command \"%s\"", command);
+		else
+			snprintf(src, MAXPGPATH, "stdin");
+
 #ifdef FRONTEND
-		pg_log_fatal("Encryption key is too short");
+		pg_log_fatal("could not read encryption key from %s: %m", src);
 		exit(EXIT_FAILURE);
 #else
 		ereport(FATAL,
-				(errmsg("Encryption key is too short")));
+				(errmsg("could not read encryption key from %s: %m",
+						src)));
+#endif	/* FRONTEND */
+	}
+
+	if (read_len < ENCRYPTION_KEY_CHARS)
+	{
+#ifdef FRONTEND
+		pg_log_fatal("encryption key is too short");
+		exit(EXIT_FAILURE);
+#else
+		ereport(FATAL,
+				(errmsg("encryption key is too short")));
 #endif	/* FRONTEND */
 	}
 
@@ -143,12 +171,12 @@ read_encryption_key_f(FILE *f)
 		if (sscanf(buf + 2 * i, "%2hhx", encryption_key + i) == 0)
 		{
 #ifdef FRONTEND
-			pg_log_fatal("Invalid character in encryption key at position %d",
+			pg_log_fatal("invalid character in encryption key at position %d",
 						 2 * i);
 			exit(EXIT_FAILURE);
 #else
 			ereport(FATAL,
-					(errmsg("Invalid character in encryption key at position %d",
+					(errmsg("invalid character in encryption key at position %d",
 							2 * i)));
 #endif	/* FRONTEND */
 		}
