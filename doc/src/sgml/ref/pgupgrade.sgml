@@ -149,7 +149,7 @@
          <para>
            If you are using <xref linkend="app-pg-keytool"/> to derive the
            encryption key (see <xref linkend="app-initdb-data-encr-cmd"/>),
-           make sure the <option>-D</option> points to
+           make sure the <option>-D</option> option points to
            the <emphasis>old</emphasis> cluster. If it pointed to the new
            one then the new cluster would derive a different key from the same
            password and thus <xref linkend="pgupgrade"/> would fail to start
