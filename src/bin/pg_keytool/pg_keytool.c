@@ -178,11 +178,8 @@ main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	if ((host || port_str) && !to_server)
-	{
-		pg_log_error("host and port can only be passed along with the -s option");
-		exit(1);
-	}
+	if ((host || port_str))
+		to_server = true;
 
 	/*
 	 * Read the credentials (key or password).

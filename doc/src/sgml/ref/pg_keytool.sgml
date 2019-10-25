@@ -129,7 +129,10 @@ PostgreSQL documentation
        <listitem>
          <para>
            Send the key to <productname>PostgreSQL</productname> server rather
-           than to standard output.
+           than to standard output. This option does not have to be specified
+           explicitly if
+           <literal>--host</literal> or <literal>--port</literal> option is
+           passed.
          </para>
        </listitem>
      </varlistentry>
