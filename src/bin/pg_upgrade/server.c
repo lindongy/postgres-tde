@@ -262,7 +262,6 @@ start_postmaster(ClusterInfo *cluster, bool report_and_exit_on_error)
 	 */
 	if (encryption_setup_done)
 #ifdef USE_ENCRYPTION
-#ifdef HAVE_UNIX_SOCKETS
 	{
 #ifndef WIN32
 		pid_t sender;
@@ -289,14 +288,9 @@ start_postmaster(ClusterInfo *cluster, bool report_and_exit_on_error)
 			exit(EXIT_FAILURE);
 		}
 #else	/* WIN32 */
-		/*
-		 * As the whole function requires HAVE_UNIX_SOCKETS, this part does
-		 * not have to be implemented so far anyway.
-		 */
 		#error "W32 not implemented yet"
 #endif	/* WIN32 */
 	}
-#endif	/* HAVE_UNIX_SOCKETS */
 #else	/* USE_ENCRYPTION */
 	{
 		/* User should not be able to enable encryption. */

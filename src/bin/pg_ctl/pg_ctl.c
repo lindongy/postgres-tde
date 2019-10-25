@@ -902,7 +902,6 @@ do_start(void)
 	pm_pid = start_postmaster();
 
 #ifdef USE_ENCRYPTION
-#ifdef HAVE_UNIX_SOCKETS
 	if (encryption_key_command)
 		key_to_send = encryption_key;
 	else
@@ -932,7 +931,6 @@ do_start(void)
 			write_stderr("%s\n", send_key_error);
 		exit(1);
 	}
-#endif	/* HAVE_UNIX_SOCKETS */
 #endif	/* USE_ENCRYPTION */
 
 	if (do_wait)
