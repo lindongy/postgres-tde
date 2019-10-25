@@ -903,7 +903,18 @@ do_start(void)
 
 #ifdef USE_ENCRYPTION
 	if (encryption_key_command)
+	{
+		char	*keycmd_conf_file;
+
 		key_to_send = encryption_key;
+
+		/* Is the key command also configured in postgresql.conf ? */
+		keycmd_conf_file = get_config_variable("encryption_key_command",
+											   MAXPGPATH);
+
+		if (keycmd_conf_file)
+			print_msg(_("ignoring the -K option due to presence of encryption_key_command in configuration file\n"));
+	}
 	else
 	{
 		/*
