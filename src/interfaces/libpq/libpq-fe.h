@@ -258,6 +258,8 @@ extern PGconn *PQconnectStart(const char *conninfo);
 extern PGconn *PQconnectStartParams(const char *const *keywords,
 									const char *const *values, int expand_dbname);
 extern PostgresPollingStatusType PQconnectPoll(PGconn *conn);
+extern bool PQconnectSSLHandshake(PGconn *conn);
+extern bool PQpacketSend(PGconn *conn, char *data, size_t len);
 
 /* Synchronous (blocking) */
 extern PGconn *PQconnectdb(const char *conninfo);

@@ -2135,7 +2135,12 @@ ProcessStartupPacket(Port *port, bool secure_done)
 	if (proto == ENCRYPTION_KEY_MSG_CODE)
 	{
 		if (data_encrypted)
+		{
+			if (secure_done)
+				ereport(DEBUG1,
+						(errmsg_internal("receiving encryption key via SSL")));
 			processEncryptionKey(buf);
+		}
 
 		/* Not really an error, but we don't want to proceed further */
 		return STATUS_ERROR;
@@ -2625,7 +2630,7 @@ processEncryptionKey(void *pkt)
 	pg_write_barrier();
 	encryption_key_shmem->received = true;
 
-	ereport(DEBUG1, (errmsg_internal("encryption key received")));
+	ereport(LOG, (errmsg_internal("encryption key received")));
 }
 
 /*

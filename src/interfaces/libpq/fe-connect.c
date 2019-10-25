@@ -373,7 +373,7 @@ static const char short_uri_designator[] = "postgres://";
 static bool connectOptions1(PGconn *conn, const char *conninfo);
 static bool connectOptions2(PGconn *conn);
 static int	connectDBStart(PGconn *conn);
-static int	connectDBComplete(PGconn *conn);
+static int	connectDBComplete(PGconn *conn, bool ssl_handshake_only);
 static PGPing internal_ping(PGconn *conn);
 static PGconn *makeEmptyPGconn(void);
 static bool fillPGconn(PGconn *conn, PQconninfoOption *connOptions);
@@ -616,7 +616,7 @@ PQconnectdbParams(const char *const *keywords,
 	PGconn	   *conn = PQconnectStartParams(keywords, values, expand_dbname);
 
 	if (conn && conn->status != CONNECTION_BAD)
-		(void) connectDBComplete(conn);
+		(void) connectDBComplete(conn, false);
 
 	return conn;
 
@@ -670,7 +670,7 @@ PQconnectdb(const char *conninfo)
 	PGconn	   *conn = PQconnectStart(conninfo);
 
 	if (conn && conn->status != CONNECTION_BAD)
-		(void) connectDBComplete(conn);
+		(void) connectDBComplete(conn, false);
 
 	return conn;
 }
@@ -824,6 +824,48 @@ PQconnectStart(const char *conninfo)
 	}
 
 	return conn;
+}
+
+
+/*
+ * Bring a connection created earlier by PQconnectStart / PQconnectStartParams
+ * into CONNECTION_MADE state with SSL handshake complete.
+ *
+ * Returns true on success, false on failure.
+ */
+bool
+PQconnectSSLHandshake(PGconn *conn)
+{
+	if (!connectDBComplete(conn, true))
+		return false;
+
+	if (conn->status != CONNECTION_MADE || !conn->ssl_in_use)
+		return false;
+
+	return true;
+}
+
+/*
+ * This function only exposes pqPacketSend() to libpq users.
+ *
+ * XXX Currently it's only used to send the encryption key to postmaster, so
+ * we might want to rename the function (PQsendEncryptionKey) and let it
+ * construct the packet. However that would introduce dependency on the
+ * encryption specific code.
+ */
+bool
+PQpacketSend(PGconn *conn, char *data, size_t len)
+{
+	if (pqPacketSend(conn, 0, data, len) != STATUS_OK)
+	{
+		char		sebuf[PG_STRERROR_R_BUFLEN];
+
+		appendPQExpBuffer(&conn->errorMessage, "%s\n",
+						  SOCK_STRERROR(SOCK_ERRNO, sebuf, sizeof(sebuf)));
+		return false;
+	}
+
+	return true;
 }
 
 /*
@@ -1486,7 +1528,7 @@ PQsetdbLogin(const char *pghost, const char *pgport, const char *pgoptions,
 	 * Connect to the database
 	 */
 	if (connectDBStart(conn))
-		(void) connectDBComplete(conn);
+		(void) connectDBComplete(conn, false);
 
 	return conn;
 
@@ -1954,10 +1996,15 @@ connect_errReturn:
  *
  * Block and complete a connection.
  *
+ * If ssl_handshake_only is set, caller is only interested in the
+ * CONNECTION_MADE status preceded by CONNECTION_SSL_STARTUP. In such a case
+ * caller is not interested in PostgresPollingStatusType - typically because
+ * he'll use the socket in blocking mode.
+ *
  * Returns 1 on success, 0 on failure.
  */
 static int
-connectDBComplete(PGconn *conn)
+connectDBComplete(PGconn *conn, bool ssl_handshake_only)
 {
 	PostgresPollingStatusType flag = PGRES_POLLING_WRITING;
 	time_t		finish_time = ((time_t) -1);
@@ -2008,6 +2055,23 @@ connectDBComplete(PGconn *conn)
 			finish_time = time(NULL) + timeout;
 			last_whichhost = conn->whichhost;
 			last_addr_cur = conn->addr_cur;
+		}
+
+		if (ssl_handshake_only)
+		{
+			if (conn->status == CONNECTION_MADE)
+			{
+				if (conn->ssl_in_use)
+					return 1;
+
+				/*
+				 * If we got that far and SSL is not allowed, it will never be
+				 * enabled. (XXX Actually it can be if sslmode is "allow", but
+				 * we don't consider this mode useful for key transfer.)
+				 */
+				if (!conn->allow_ssl_try)
+					return 0;
+			}
 		}
 
 		/*
@@ -3709,7 +3773,7 @@ internal_ping(PGconn *conn)
 
 	/* Attempt to complete the connection */
 	if (conn->status != CONNECTION_BAD)
-		(void) connectDBComplete(conn);
+		(void) connectDBComplete(conn, false);
 
 	/* Definitely OK if we succeeded */
 	if (conn->status != CONNECTION_BAD)
@@ -4096,7 +4160,7 @@ PQreset(PGconn *conn)
 	{
 		closePGconn(conn);
 
-		if (connectDBStart(conn) && connectDBComplete(conn))
+		if (connectDBStart(conn) && connectDBComplete(conn, false))
 		{
 			/*
 			 * Notify event procs of successful reset.  We treat an event proc

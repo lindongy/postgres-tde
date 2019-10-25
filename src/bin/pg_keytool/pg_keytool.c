@@ -52,6 +52,9 @@ usage(const char *progname)
 	env = getenv("PGPORT");
 	printf(_("  -p, --port=PORT        database server port (default: \"%s\")\n"),
 			env ? env : DEF_PGPORT_STR);
+#ifdef HAVE_UNIX_SOCKETS
+	printf(_("  -s,                    send output to database server\n"));
+#endif	/* HAVE_UNIX_SOCKETS */
 	printf(_("  -w                     expect password on input, not a key\n"));
 	printf(_("  -?, --help             show this help, then exit\n\n"));
 	printf(_("Password or key is read from stdin. Key is sent to PostgreSQL server being started\n"));
@@ -77,6 +80,7 @@ main(int argc, char **argv)
 	int			optindex;
 	char		password[ENCRYPTION_PWD_MAX_LENGTH];
 	char		key_chars[ENCRYPTION_KEY_CHARS];
+	char	*send_key_error = NULL;
 
 	static struct option long_options[] =
 	{
@@ -103,7 +107,7 @@ main(int argc, char **argv)
 		}
 	}
 
-	while ((c = getopt_long(argc, argv, "h:D:p:w",
+	while ((c = getopt_long(argc, argv, "h:D:p:sw",
 							long_options, &optindex)) != -1)
 	{
 		switch (c)
@@ -118,6 +122,10 @@ main(int argc, char **argv)
 
 			case 'p':
 				port_str = pg_strdup(optarg);
+				break;
+
+			case 's':
+				to_server = true;
 				break;
 
 			case 'w':
@@ -148,81 +156,6 @@ main(int argc, char **argv)
 		exit(1);
 	}
 
-	if (host || port_str)
-	{
-		/*
-		 * We deliberately don't assume default values of host and port (which
-		 * does not necessarily mean that we cannot read them from environment
-		 * variables in future versions) to minimize the risk that the key is
-		 * sent to wrong server.
-		 */
-		if (port_str == NULL)
-		{
-			pg_log_error("if host name is passed, port number must be passed too");
-			exit(1);
-		}
-		else if (host == NULL)
-		{
-			pg_log_error("if port number is passed, host name must be passed too");
-			exit(1);
-		}
-
-		to_server = true;
-	}
-
-#ifndef HAVE_UNIX_SOCKETS
-	/*
-	 * Since we currently cannot send the encryption key via SSL connection,
-	 * the unix socket is the only secure channel to send the key.
-	 *
-	 * Maybe this limitation will be relaxed for Windows one day:
-	 *
-	 * https://www.postgresql.org/message-id/54bde68c-d134-4eb8-5bd3-8af33b72a010@2ndquadrant.com
-	 */
-	if (to_server)
-	{
-		pg_log_error("unix domain sockets not supported, cannot send key to server");
-		exit(1);
-	}
-#endif
-
-	if (to_server)
-	{
-#ifdef HAVE_UNIX_SOCKETS
-		/*
-		 * If no hostname is specified, libpq can use "localhost" as the
-		 * default value if the OS does not support unix domain sockets. Since
-		 * we currently cannot send the encryption key via SSL connection,
-		 * such approach is not secure.
-		 */
-		if (host == NULL)
-		{
-			pg_log_error("host not specified");
-			exit(1);
-		}
-
-		/*
-		 * If connection via the unix socket is required, we only accept
-		 * absolute path. Otherwise libpq could consider the string a host
-		 * name and initiate TCP/IP connection.
-		 */
-		if (!is_absolute_path(host))
-		{
-			/*
-			 * In fact the socket directory can be a relative path in
-			 * postgresql.conf, but such would be considered a hostname by
-			 * libpq.
-			 */
-			pg_log_error("\"%s\" does not look like an unix socket directory",
-						 host);
-			exit(1);
-		}
-#else  /* !HAVE_UNIX_SOCKETS */
-		/* See above */
-		Assert(false);
-#endif /* HAVE_UNIX_SOCKETS */
-	}
-
 	/* Try to initialize DataDir using environment variable. */
 	if (DataDir == NULL)
 	{
@@ -243,6 +176,12 @@ main(int argc, char **argv)
 		pg_log_error("%s: no data directory specified", progname);
 		pg_log_error("Try \"%s --help\" for more information.", progname);
 		exit(EXIT_FAILURE);
+	}
+
+	if ((host || port_str) && !to_server)
+	{
+		pg_log_error("host and port can only be passed along with the -s option");
+		exit(1);
 	}
 
 	/*
@@ -319,16 +258,15 @@ main(int argc, char **argv)
 	}
 	else
 	{
-#ifdef HAVE_UNIX_SOCKETS
 		/* XXX Try to find the postmaster PID? */
-		if (!send_key_to_postmaster(host, port_str, encryption_key, 0))
+		if (!send_key_to_postmaster(host, port_str, encryption_key, 0,
+				&send_key_error))
+		{
 			pg_log_error("could not send encryption key to server");
-#else
-		/* to_server should have caused early exit. */
-		Assert(false);
-#endif	/* HAVE_UNIX_SOCKETS */
+			if (send_key_error)
+				pg_log_error("%s", send_key_error);
+		}
 	}
-
 #else
 	pg_log_fatal(ENCRYPTION_NOT_SUPPORTED_MSG);
 	exit(EXIT_FAILURE);

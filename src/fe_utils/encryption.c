@@ -247,10 +247,10 @@ derive_key_from_password(unsigned char *encryption_key, const char *password,
 	}
 }
 
-#ifdef HAVE_UNIX_SOCKETS
 /*
  * Send the contents of encryption_key in the form of special startup packet
- * to a server that is being started.
+ * to a server that is being started. If host or port are NULL, we expect
+ * libpq to use its defaults.
  *
  * If encryption_key is NULL, send an "empty message". This tells postmaster
  * that the client (typically pg_ctl) has no key, so postmaster should stop
@@ -258,21 +258,20 @@ derive_key_from_password(unsigned char *encryption_key, const char *password,
  *
  * Returns true if we could send the message and false if not, however even
  * success does not guarantee that server started up - caller should
- * eventually test server connection himself.
+ * eventually test server connection himself. On failure, save pointer to
+ * error message into *error_msg if error_msg is a valid pointer.
  */
 bool
 send_key_to_postmaster(const char *host, const char *port,
-					   const unsigned char *encryption_key, long pm_pid)
+					   const unsigned char *encryption_key, long pm_pid,
+					   char **error_msg)
 {
 	const char **keywords = pg_malloc0(3 * sizeof(*keywords));
 	const char **values = pg_malloc0(3 * sizeof(*values));
 	int	i;
 	PGconn *conn = NULL;
-	int	sock = -1;
 	EncryptionKeyMsg	message;
-	int	msg_size, packet_size;
-	char	*packet = NULL;
-	bool	res = true;
+	int	msg_size;
 
 /* How many seconds we can wait for the postmaster to receive the key. */
 #define SEND_ENCRYPT_KEY_TIMEOUT	60
@@ -282,8 +281,11 @@ send_key_to_postmaster(const char *host, const char *port,
 		keywords[0] = "host";
 		values[0] = host;
 	}
-	keywords[1] = "port";
-	values[1] = port;
+	if (port)
+	{
+		keywords[1] = "port";
+		values[1] = port;
+	}
 
 	/* Compose the message. */
 	message.encryptionKeyCode = pg_hton32(ENCRYPTION_KEY_MSG_CODE);
@@ -297,17 +299,10 @@ send_key_to_postmaster(const char *host, const char *port,
 		message.empty = true;
 	msg_size = offsetof(EncryptionKeyMsg, data) + ENCRYPTION_KEY_LENGTH;
 
-	packet_size = msg_size + 4;
-	packet = (char *) palloc(packet_size);
-	*((int32 *) packet) = pg_hton32(packet_size);
-	memcpy(packet + 4, &message, msg_size);
-
-	/*
-	 * Although we don't expect the server to accept regular libpq messages,
-	 * we try to get at least a valid socket.
-	 */
 	for (i = 0; i < SEND_ENCRYPT_KEY_TIMEOUT + 1; i++)
 	{
+		char	sslmode;
+
 		if (i > 0)
 			/* Sleep for 1 second. */
 			pg_usleep(1000000L);
@@ -322,10 +317,6 @@ send_key_to_postmaster(const char *host, const char *port,
 				return false;
 		}
 #else
-/*
- * As the whole function requires HAVE_UNIX_SOCKETS, this part does not have
- * to be implemented so far anyway.
- */
 #error "WIN32 not implemented"
 #endif
 		if (conn)
@@ -334,44 +325,68 @@ send_key_to_postmaster(const char *host, const char *port,
 			conn = NULL;
 		}
 
+		/*
+		 * Although we don't expect the server to accept regular libpq
+		 * messages, we try to get at least a valid socket.
+		 */
 		conn = PQconnectStartParams(keywords, values, false);
 		if (conn == NULL)
 			continue;
 
-		sock = PQsocket(conn);
-		/* Cannot send the key if there's no valid socket. */
-		if (sock == -1)
-			continue;
-
-		/* Non-blocking write would only make this simple case tricky. */
-		if (!pg_set_block(sock))
-			continue;
-
-	retry:
-		/*
-		 * Send the packet. Here we need to use low level API because the
-		 * server is not fully up, so libpq connection cannot be setup
-		 * properly (server does not accept connections yet).
-		 */
-		if (send(sock, (char *) packet, packet_size, 0) != packet_size)
+		if (conn->status != CONNECTION_STARTED &&
+			conn->status != CONNECTION_MADE)
 		{
-			if (SOCK_ERRNO == EINTR)
-				/* Interrupted system call - we'll just try again */
-				goto retry;
+			char	*msg = PQerrorMessage(conn);
+
+			if (error_msg && msg && strlen(msg) > 0)
+				*error_msg = pstrdup(msg);
+
 			continue;
 		}
-		else
-			/* Success */
-			break;
+
+		/*
+		 * Unless we're sending the key via unix socket, take SSL mode into
+		 * account ('d' ~ "disable", 'a' ~ "allow", 'p' ~ "prefer"). "allow"
+		 * and "prefer" modes are not useful in terms of security, and
+		 * especially "allow" would be much trickier for
+		 * PQconnectSSLHandshake() to handle.
+		 */
+		sslmode = conn->sslmode[0];
+		if (sslmode != 'd' && sslmode != 'a' && sslmode != 'p' &&
+			conn->connhost[0].type != CHT_UNIX_SOCKET)
+		{
+			if (!PQconnectSSLHandshake(conn))
+			{
+				char	*msg = PQerrorMessage(conn);
+
+				if (error_msg && msg && strlen(msg) > 0)
+					*error_msg = pstrdup(msg);
+
+				/*
+				 * If the socket could be opened but SSL is not available, the
+				 * next try probably won't help.
+				 */
+				PQfinish(conn);
+				return false;
+			}
+		}
+
+		/* Send the packet. */
+		if (!PQpacketSend(conn, (char *) &message, msg_size))
+		{
+			*error_msg = pstrdup(PQerrorMessage(conn));
+			return false;
+		}
+
+		/* Success */
+		break;
 	}
 
 	pg_free(keywords);
 	pg_free(values);
 	if (conn)
 		PQfinish(conn);
-	pfree(packet);
 
-	return res;
+	return true;
 }
-#endif	/* HAVE_UNIX_SOCKETS */
 #endif	/* USE_ENCRYPTION */

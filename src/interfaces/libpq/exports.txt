@@ -176,3 +176,5 @@ PQresultMemorySize        173
 PQhostaddr                174
 PQgssEncInUse             175
 PQgetgssctx               176
+PQconnectSSLHandshake     177
+PQpacketSend              178

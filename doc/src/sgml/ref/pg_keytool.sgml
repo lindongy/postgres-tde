@@ -90,12 +90,26 @@ PostgreSQL documentation
        <term><option>-h <replaceable class="parameter">hostname</replaceable></option></term>
        <term><option>--host=<replaceable class="parameter">hostname</replaceable></option></term>
        <listitem>
+        <para>
+          Specifies the host name of the machine on which the server is
+          running. If the value begins with a slash, it is used as the
+          directory for the Unix-domain socket.
+        </para>
+
+        <note>
          <para>
-           Specifies the host name of the machine on which the server is
-           listening. (Currently the key can only be sent via Unix-domain
-           socket, so the port number is the Unix-domain socket directory.)
-           The value must start with a slash.
+          If you specify host name or network address (for example because the
+          machine on which the database server runs does not support
+          Unix-domain sockets), consider setting <envar>PGSSLMODE</envar>
+          environment variable to <literal>require</literal> or higher before
+          you run
+          <application>pg_keytool</application>. Otherwise the key may be
+          subject to eavesdropping. See
+          <xref linkend="libpq-connect-sslmode"/> or
+          <xref linkend="libpq-ssl-sslmode-statements"/> for more information
+          on encrypted connections.
          </para>
+        </note>
        </listitem>
      </varlistentry>
 
@@ -103,12 +117,19 @@ PostgreSQL documentation
        <term><option>-p <replaceable class="parameter">port</replaceable></option></term>
        <listitem>
          <para>
-           Specifies the port on which the server is listening for
-           connections. (Currently the key can only be sent via Unix-domain
-           socket, so the port number is actually the Unix-domain socket file
-           extension. In any case, it is the value of
-           the <literal>port</literal> configuration parameter, set
-           in <filename>postgresql.conf</filename>.)
+           Specifies the TCP port or the local Unix-domain socket file
+           extension on which the server is listening for connections. If not
+           set, to the port specified at compile time, usually 5432.
+         </para>
+       </listitem>
+     </varlistentry>
+
+     <varlistentry>
+       <term><option>-s</option></term>
+       <listitem>
+         <para>
+           Send the key to <productname>PostgreSQL</productname> server rather
+           than to standard output.
          </para>
        </listitem>
      </varlistentry>

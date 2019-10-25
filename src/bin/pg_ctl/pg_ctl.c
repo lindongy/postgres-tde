@@ -842,6 +842,7 @@ do_start(void)
 	char	*host = NULL;
 	char	*port_str = NULL;
 	unsigned char	*key_to_send;
+	char	*send_key_error = NULL;
 #endif	/* USE_ENCRYPTION */
 
 	if (ctl_command != RESTART_COMMAND)
@@ -922,10 +923,13 @@ do_start(void)
 	 * send it again.
 	 */
 	get_postmaster_address(&host, &port_str);
-	if (!send_key_to_postmaster(host, port_str, key_to_send, pm_pid))
+	if (!send_key_to_postmaster(host, port_str, key_to_send, pm_pid,
+			&send_key_error))
 	{
 		write_stderr(_("%s: could not send encryption key to postmaster\n"),
 					 progname);
+		if (send_key_error)
+			write_stderr("%s\n", send_key_error);
 		exit(1);
 	}
 #endif	/* HAVE_UNIX_SOCKETS */
@@ -2359,8 +2363,7 @@ get_first_csv_item(char *csv_list)
 
 #ifdef HAVE_UNIX_SOCKETS
 /*
- * Retrieve host name and port to which the encryption key should be sent. For
- * security reasons, only unix socket directory is accepted as the host name.
+ * Retrieve host name and port to which the encryption key should be sent.
  */
 static void
 get_postmaster_address(char **host_p, char **port_str_p)
@@ -2377,8 +2380,8 @@ get_postmaster_address(char **host_p, char **port_str_p)
 	}
 	else
 	{
-		pg_log_fatal("could not find unix socket directory to send the encryption key to");
-		exit(1);
+		/* Let libpq use the default value.*/
+		*host_p = NULL;
 	}
 
 	/*

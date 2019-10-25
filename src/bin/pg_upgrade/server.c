@@ -271,13 +271,16 @@ start_postmaster(ClusterInfo *cluster, bool report_and_exit_on_error)
 		if (sender == 0)
 		{
 			char	port_str[6];
+			char	*send_key_error = NULL;
 
 			snprintf(port_str, sizeof(port_str), "%d", cluster->port);
 
 			/* in child process */
 			/* XXX Find out the postmaster PID ? */
 			send_key_to_postmaster(cluster->sockdir, port_str,
-								   encryption_key, 0);
+								   encryption_key, 0, &send_key_error);
+			if (send_key_error)
+				pg_fatal("%s", send_key_error);
 			exit(EXIT_SUCCESS);
 		}
 		else if (sender < 0)
