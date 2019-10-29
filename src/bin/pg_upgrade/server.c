@@ -275,11 +275,11 @@ start_postmaster(ClusterInfo *cluster, bool report_and_exit_on_error)
 			snprintf(port_str, sizeof(port_str), "%d", cluster->port);
 
 			/* in child process */
-			/* XXX Find out the postmaster PID ? */
 			sk_args.host = cluster->sockdir; /* If NULL, then libpq will use
 											  * its default. */
 			sk_args.port = port_str;
 			sk_args.encryption_key = encryption_key;
+			/* XXX Find out the postmaster PID ? */
 			sk_args.pm_pid = 0;
 			sk_args.error_msg = NULL;
 			send_key_to_postmaster(&sk_args);
@@ -288,12 +288,11 @@ start_postmaster(ClusterInfo *cluster, bool report_and_exit_on_error)
 			exit(EXIT_SUCCESS);
 		}
 		else if (sender < 0)
-		{
 			pg_fatal("could not create key sender process");
-			exit(EXIT_FAILURE);
-		}
 #else	/* WIN32 */
-		#error "W32 not implemented yet"
+		sender = _beginthreadex(NULL, 0, (void *) send_key_to_postmaster, &sk_args, 0, NULL);
+		if (sender == 0)
+			pg_fatal("could not create background thread: %m");
 #endif	/* WIN32 */
 	}
 #else	/* USE_ENCRYPTION */

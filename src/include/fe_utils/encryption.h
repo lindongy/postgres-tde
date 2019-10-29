@@ -35,7 +35,16 @@ typedef struct SendKeyArgs
 	char	*host;
 	char	*port;
 	const unsigned char *encryption_key;
+
 	long pm_pid;
+#ifdef WIN32
+	/*
+	 * Set this *in addition to* pm_pid, otherwise it's hard to tell whether
+	 * the handle is valid.
+	 */
+	HANDLE	postmasterProcess;
+#endif
+
 	char *error_msg;
 } SendKeyArgs;
 

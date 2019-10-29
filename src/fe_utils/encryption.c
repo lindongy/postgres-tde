@@ -301,18 +301,20 @@ send_key_to_postmaster(SendKeyArgs *args)
 			pg_usleep(1000000L);
 
 		/* Has the postmaster crashed? */
-#ifndef WIN32
 		if (args->pm_pid != 0)
 		{
+#ifndef WIN32
 			int			exitstatus;
 
 			if (waitpid((pid_t) args->pm_pid, &exitstatus, WNOHANG) ==
 				(pid_t) args->pm_pid)
 				return false;
-		}
 #else
-#error "WIN32 not implemented"
+			if (WaitForSingleObject(args->postmasterProcess, 0) == WAIT_OBJECT_0)
+				return POSTMASTER_FAILED;
 #endif
+		}
+
 		if (conn)
 		{
 			PQfinish(conn);

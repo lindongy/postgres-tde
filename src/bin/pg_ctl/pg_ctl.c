@@ -897,6 +897,9 @@ do_start(void)
 #endif	/* USE_ENCRYPTION */
 
 	sk_args.pm_pid = pm_pid = start_postmaster();
+#ifdef WIN32
+	sk_args.postmasterProcess = postmasterProcess;
+#endif
 
 #ifdef USE_ENCRYPTION
 	if (encryption_key_command)
