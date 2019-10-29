@@ -24,6 +24,7 @@ PostgreSQL documentation
    <command>pg_ctl</command>
    <arg choice="plain"><option>init[db]</option></arg>
    <arg choice="opt"><option>-D</option> <replaceable>datadir</replaceable></arg>
+   <arg choice="opt"><option>-K</option> <replaceable>command</replaceable></arg>
    <arg choice="opt"><option>-s</option></arg>
    <arg choice="opt"><option>-o</option> <replaceable>initdb-options</replaceable></arg>
   </cmdsynopsis>
@@ -32,6 +33,7 @@ PostgreSQL documentation
    <command>pg_ctl</command>
    <arg choice="plain"><option>start</option></arg>
    <arg choice="opt"><option>-D</option> <replaceable>datadir</replaceable></arg>
+   <arg choice="opt"><option>-K</option> <replaceable>command</replaceable></arg>
    <arg choice="opt"><option>-l</option> <replaceable>filename</replaceable></arg>
    <arg choice="opt"><option>-W</option></arg>
    <arg choice="opt"><option>-t</option> <replaceable>seconds</replaceable></arg>
@@ -61,6 +63,7 @@ PostgreSQL documentation
    <command>pg_ctl</command>
    <arg choice="plain"><option>restart</option></arg>
    <arg choice="opt"><option>-D</option> <replaceable>datadir</replaceable></arg>
+   <arg choice="opt"><option>-K</option> <replaceable>command</replaceable></arg>
    <arg choice="opt"><option>-m</option>
      <group choice="plain">
        <arg choice="plain"><option>s[mart]</option></arg>
@@ -293,7 +296,7 @@ PostgreSQL documentation
      </varlistentry>
 
      <varlistentry>
-      <term><option>-K</option></term>
+      <term><option>-K <replaceable class="parameter">command</replaceable></option></term>
       <term><option>--encryption-key-command=<replaceable class="parameter">command</replaceable></option></term>
       <listitem>
        <para>

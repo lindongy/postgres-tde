@@ -809,6 +809,23 @@ static void
 do_init(void)
 {
 	char		cmd[MAXPGPATH];
+	char *encr_opt_str;
+
+	/* Prepare the -K option for initdb. */
+	if (encryption_key_command)
+	{
+		size_t		len;
+
+		len = strlen(encryption_key_command) + 5;
+		encr_opt_str = (char *) pg_malloc(len);
+		snprintf(encr_opt_str, len, " -K %s",
+				 encryption_key_command);
+	}
+	else
+	{
+		encr_opt_str = (char *) pg_malloc(1);
+		encr_opt_str[0] = '\0';
+	}
 
 	if (exec_path == NULL)
 		exec_path = find_other_exec_or_die(argv0, "initdb", "initdb (PostgreSQL) " PG_VERSION "\n");
@@ -820,11 +837,11 @@ do_init(void)
 		post_opts = "";
 
 	if (!silent_mode)
-		snprintf(cmd, MAXPGPATH, "\"%s\" %s%s",
-				 exec_path, pgdata_opt, post_opts);
+		snprintf(cmd, MAXPGPATH, "\"%s\" %s%s%s",
+				 exec_path, pgdata_opt, post_opts, encr_opt_str);
 	else
-		snprintf(cmd, MAXPGPATH, "\"%s\" %s%s > \"%s\"",
-				 exec_path, pgdata_opt, post_opts, DEVNULL);
+		snprintf(cmd, MAXPGPATH, "\"%s\" %s%s%s > \"%s\"",
+				 exec_path, pgdata_opt, post_opts, encr_opt_str, DEVNULL);
 
 	if (system(cmd) != 0)
 	{
@@ -2718,7 +2735,8 @@ main(int argc, char **argv)
 	}
 
 	if (encryption_key_command && ctl_command !=
-		START_COMMAND && ctl_command != RESTART_COMMAND)
+		START_COMMAND && ctl_command != RESTART_COMMAND &&
+		ctl_command != INIT_COMMAND)
 		write_stderr(_("%s: ignoring the -K option, it's only useful for start or restart commands\n"), progname);
 
 	switch (ctl_command)

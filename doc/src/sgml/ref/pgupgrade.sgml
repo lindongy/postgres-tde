@@ -120,7 +120,7 @@
      </varlistentry>
 
      <varlistentry>
-      <term><option>-K</option></term>
+      <term><option>-K</option> <replaceable class="parameter">command</replaceable></term>
       <term><option>--encryption-key-command=<replaceable class="parameter">command</replaceable></option></term>
       <listitem>
        <para>
