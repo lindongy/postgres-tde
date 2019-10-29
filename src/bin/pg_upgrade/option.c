@@ -57,9 +57,7 @@ parseCommandLine(int argc, char *argv[])
 		{"verbose", no_argument, NULL, 'v'},
 		{"clone", no_argument, NULL, 1},
 #ifdef USE_ENCRYPTION
-#ifdef HAVE_UNIX_SOCKETS
 		{"encryption-key-command", required_argument, NULL, 'K'},
-#endif	/* HAVE_UNIX_SOCKETS */
 #endif	/* USE_ENCRYPTION */
 
 		{NULL, 0, NULL, 0}

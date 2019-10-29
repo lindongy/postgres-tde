@@ -48,6 +48,10 @@
 #include <langinfo.h>
 #endif
 
+#ifdef USE_ENCRYPTION
+static char *get_encryption_key_command(char *bindir, char *pgconfig);
+#endif	/* USE_ENCRYPTION */
+
 static void prepare_new_cluster(void);
 static void prepare_new_globals(void);
 static void create_new_objects(void);
@@ -86,6 +90,9 @@ main(int argc, char **argv)
 	char	   *analyze_script_file_name = NULL;
 	char	   *deletion_script_file_name = NULL;
 	bool		live_check = false;
+#ifdef USE_ENCRYPTION
+	char	*key_cmd_pgconf;
+#endif
 
 	pg_logging_init(argv[0]);
 	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_upgrade"));
@@ -101,77 +108,60 @@ main(int argc, char **argv)
 	adjust_data_dir(&old_cluster);
 	adjust_data_dir(&new_cluster);
 
+#ifdef USE_ENCRYPTION
+	/* Try to get the encryption key command from postgresql.conf. */
+	key_cmd_pgconf = get_encryption_key_command(old_cluster.bindir,
+												old_cluster.pgconfig);
+	old_cluster.has_encr_key_cmd = key_cmd_pgconf != NULL;
+#endif
+
 	/*
-	 * The encryption key is needed to start the clusters.
+	 * Is the key passed as command line option?
 	 */
 	if (encryption_key_command)
 #ifdef USE_ENCRYPTION
+	{
+		/* The command in postgresql.conf takes precedence. */
+		if (key_cmd_pgconf)
+		{
+			pg_log(PG_WARNING,
+				   "ignoring the -K option due to presence of encryption_key_command in configuration file\n");
+			encryption_key_command = key_cmd_pgconf;
+		}
+	}
+	else
+	{
+		/* Only specified in postgresql.conf, so use that value. */
+		encryption_key_command = key_cmd_pgconf;
+	}
+
+	/*
+	 * Setup the encryption if we have the command.
+	 *
+	 * Ideally we'd use get_control_data() to find out whether the encryption
+	 * is enabled, but that function assumes that postmaster lock file has
+	 * already been cleaned up.
+	 */
+	if (encryption_key_command)
 	{
 		/*
 		 * Both clusters should have the same KDF parameters, so we can pass
 		 * pgdata of any one.
 		 */
 		run_encryption_key_command(old_cluster.pgdata);
-
 		encryption_setup_done = true;
 	}
+
+	/* Check if the new cluster has the key command in postgresql.conf. */
+	key_cmd_pgconf = get_encryption_key_command(new_cluster.bindir,
+												new_cluster.pgconfig);
+	new_cluster.has_encr_key_cmd = key_cmd_pgconf != NULL;
 #else
 	{
-		/* User should not be able to enable encryption. */
+		/* User should not be able to pass the -K option. */
 		Assert(false);
 	}
-
-	/*
-	 * The clusters may be encrypted even if encryption_key_command hasn't
-	 * been passed on command line - in such a case the command should be in
-	 * postgresql.conf.
-	 *
-	 * Ideally we'd use get_control_data() to find out whether the encryption
-	 * is enabled, but that function assumes that postmaster lock file has
-	 * already been cleaned up.
-	 */
-	if (encryption_key_command == NULL)
-	{
-		char		cmd[MAXPGPATH],
-			cmd_output[MAX_STRING];
-		FILE *output;
-		bool	got_key_cmd;
-
-		/*
-		 * Retrieve the command from the old cluster: the command can
-		 * reference data directory because of the KDF file, but KDF files
-		 * haven't yet been synchronized.
-		 */
-		snprintf(cmd, sizeof(cmd), "\"%s/postgres\" -D \"%s\" -C encryption_key_command",
-				 old_cluster.bindir, old_cluster.pgconfig);
-
-		if ((output = popen(cmd, "r")) == NULL ||
-			fgets(cmd_output, sizeof(cmd_output), output) == NULL)
-			got_key_cmd = false;
-		else
-		{
-			/* Remove trailing newline */
-			if (strchr(cmd_output, '\n') != NULL)
-				*strchr(cmd_output, '\n') = '\0';
-
-			got_key_cmd = strlen(cmd_output) > 0;
-		}
-
-		/*
-		 * If the command is not there and the clusters are encrypted, we'll
-		 * fail later and user will need to provide the command either on
-		 * command line or via postgresql.conf.
-		 */
-		if (got_key_cmd)
-		{
-			encryption_key_command = pg_strdup(cmd_output);
-
-			run_encryption_key_command(old_cluster.pgdata);
-			encryption_setup_done = true;
-		}
-	}
 #endif	/* USE_ENCRYPTION */
-
 
 	setup(argv[0], &live_check);
 
@@ -300,6 +290,44 @@ main(int argc, char **argv)
 	return 0;
 }
 
+#ifdef USE_ENCRYPTION
+/*
+ * Retrieve the value of encryption_key_command parameter from postgresql.conf
+ * and return it. Return NULL if the parameter is not set.
+ */
+static char *
+get_encryption_key_command(char	*bindir, char *pgconfig)
+{
+	char		cmd[MAXPGPATH],
+		cmd_output[MAX_STRING];
+	FILE *output = NULL;
+	char	*result = NULL;
+
+	/*
+	 * Retrieve the command from the old cluster: the command can reference
+	 * data directory because of the KDF file, but KDF files haven't yet been
+	 * synchronized.
+	 */
+	snprintf(cmd, sizeof(cmd), "\"%s/postgres\" -D \"%s\" -C encryption_key_command",
+			 bindir, pgconfig);
+
+	if ((output = popen(cmd, "r")) != NULL &&
+		fgets(cmd_output, sizeof(cmd_output), output) != NULL)
+	{
+		/* Remove trailing newline */
+		if (strchr(cmd_output, '\n') != NULL)
+			*strchr(cmd_output, '\n') = '\0';
+
+		if (strlen(cmd_output) > 0)
+			result = pg_strdup(cmd_output);
+	}
+
+	if (output && pclose(output) != 0)
+		pg_fatal("could not close pipe to \"%s\"", cmd);
+
+	return result;
+}
+#endif	/* USE_ENCRYPTION */
 
 static void
 setup(char *argv0, bool *live_check)

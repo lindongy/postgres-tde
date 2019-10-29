@@ -260,12 +260,13 @@ start_postmaster(ClusterInfo *cluster, bool report_and_exit_on_error)
 	 * postmaster succeeds or fails to start (and it will definitely fail if
 	 * it receives no key).
 	 */
-	if (encryption_setup_done)
+	if (encryption_setup_done && !cluster->has_encr_key_cmd)
 #ifdef USE_ENCRYPTION
 	{
 #ifndef WIN32
 		pid_t sender;
 
+		pg_log(PG_VERBOSE, "sending encryption key to postmaster\n");
 		sender = fork();
 		if (sender == 0)
 		{
@@ -290,6 +291,7 @@ start_postmaster(ClusterInfo *cluster, bool report_and_exit_on_error)
 		else if (sender < 0)
 			pg_fatal("could not create key sender process");
 #else	/* WIN32 */
+		pg_log(PG_VERBOSE, "sending encryption key to postmaster\n");
 		sender = _beginthreadex(NULL, 0, (void *) send_key_to_postmaster, &sk_args, 0, NULL);
 		if (sender == 0)
 			pg_fatal("could not create background thread: %m");
