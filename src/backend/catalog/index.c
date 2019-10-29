@@ -83,7 +83,6 @@
 
 /* Potentially set by pg_upgrade_support functions */
 Oid			binary_upgrade_next_index_pg_class_oid = InvalidOid;
-Oid			binary_upgrade_next_index_pg_class_relfilenode = InvalidOid;
 
 /*
  * Pointer-free representation of variables used when reindexing system

@@ -89,7 +89,6 @@
 char	   *default_tablespace = NULL;
 char	   *temp_tablespaces = NULL;
 
-Oid	binary_upgrade_next_pg_tablespace_oid = InvalidOid;
 
 static void create_tablespace_directories(const char *location,
 										  const Oid tablespaceoid);
@@ -337,18 +336,7 @@ CreateTableSpace(CreateTableSpaceStmt *stmt)
 
 	MemSet(nulls, false, sizeof(nulls));
 
-	if (IsBinaryUpgrade)
-	{
-		if (!OidIsValid(binary_upgrade_next_pg_tablespace_oid))
-			ereport(ERROR,
-					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-					 errmsg("pg_tablespace OID value not set when in binary upgrade mode")));
-
-		tablespaceoid = binary_upgrade_next_pg_tablespace_oid;
-		binary_upgrade_next_pg_tablespace_oid = InvalidOid;
-	}
-	else
-		tablespaceoid = GetNewOidWithIndex(rel, TablespaceOidIndexId,
+	tablespaceoid = GetNewOidWithIndex(rel, TablespaceOidIndexId,
 									   Anum_pg_tablespace_oid);
 	values[Anum_pg_tablespace_oid - 1] = ObjectIdGetDatum(tablespaceoid);
 	values[Anum_pg_tablespace_spcname - 1] =
