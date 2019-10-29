@@ -249,22 +249,15 @@ derive_key_from_password(unsigned char *encryption_key, const char *password,
 
 /*
  * Send the contents of encryption_key in the form of special startup packet
- * to a server that is being started. If host or port are NULL, we expect
- * libpq to use its defaults.
- *
- * If encryption_key is NULL, send an "empty message". This tells postmaster
- * that the client (typically pg_ctl) has no key, so postmaster should stop
- * waiting for it and try to get the key elsewhere.
+ * to a server that is being started.
  *
  * Returns true if we could send the message and false if not, however even
  * success does not guarantee that server started up - caller should
  * eventually test server connection himself. On failure, save pointer to
- * error message into *error_msg if error_msg is a valid pointer.
+ * error message into args->error_msg.
  */
 bool
-send_key_to_postmaster(const char *host, const char *port,
-					   const unsigned char *encryption_key, long pm_pid,
-					   char **error_msg)
+send_key_to_postmaster(SendKeyArgs *args)
 {
 	const char **keywords = pg_malloc0(3 * sizeof(*keywords));
 	const char **values = pg_malloc0(3 * sizeof(*values));
@@ -276,23 +269,23 @@ send_key_to_postmaster(const char *host, const char *port,
 /* How many seconds we can wait for the postmaster to receive the key. */
 #define SEND_ENCRYPT_KEY_TIMEOUT	60
 
-	if (host)
+	if (args->host)
 	{
 		keywords[0] = "host";
-		values[0] = host;
+		values[0] = args->host;
 	}
-	if (port)
+	if (args->port)
 	{
 		keywords[1] = "port";
-		values[1] = port;
+		values[1] = args->port;
 	}
 
 	/* Compose the message. */
 	message.encryptionKeyCode = pg_hton32(ENCRYPTION_KEY_MSG_CODE);
 	message.version = 1;
-	if (encryption_key)
+	if (args->encryption_key)
 	{
-		memcpy(message.data, encryption_key, ENCRYPTION_KEY_LENGTH);
+		memcpy(message.data, args->encryption_key, ENCRYPTION_KEY_LENGTH);
 		message.empty = false;
 	}
 	else
@@ -309,11 +302,12 @@ send_key_to_postmaster(const char *host, const char *port,
 
 		/* Has the postmaster crashed? */
 #ifndef WIN32
-		if (pm_pid != 0)
+		if (args->pm_pid != 0)
 		{
 			int			exitstatus;
 
-			if (waitpid((pid_t) pm_pid, &exitstatus, WNOHANG) == (pid_t) pm_pid)
+			if (waitpid((pid_t) args->pm_pid, &exitstatus, WNOHANG) ==
+				(pid_t) args->pm_pid)
 				return false;
 		}
 #else
@@ -338,8 +332,8 @@ send_key_to_postmaster(const char *host, const char *port,
 		{
 			char	*msg = PQerrorMessage(conn);
 
-			if (error_msg && msg && strlen(msg) > 0)
-				*error_msg = pstrdup(msg);
+			if (msg && strlen(msg) > 0)
+				args->error_msg = pstrdup(msg);
 
 			continue;
 		}
@@ -359,8 +353,8 @@ send_key_to_postmaster(const char *host, const char *port,
 			{
 				char	*msg = PQerrorMessage(conn);
 
-				if (error_msg && msg && strlen(msg) > 0)
-					*error_msg = pstrdup(msg);
+				if (msg && strlen(msg) > 0)
+					args->error_msg = pstrdup(msg);
 
 				/*
 				 * If the socket could be opened but SSL is not available, the
@@ -374,7 +368,7 @@ send_key_to_postmaster(const char *host, const char *port,
 		/* Send the packet. */
 		if (!PQpacketSend(conn, (char *) &message, msg_size))
 		{
-			*error_msg = pstrdup(PQerrorMessage(conn));
+			args->error_msg = pstrdup(PQerrorMessage(conn));
 			return false;
 		}
 

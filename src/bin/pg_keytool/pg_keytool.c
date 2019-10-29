@@ -80,7 +80,6 @@ main(int argc, char **argv)
 	int			optindex;
 	char		password[ENCRYPTION_PWD_MAX_LENGTH];
 	char		key_chars[ENCRYPTION_KEY_CHARS];
-	char	*send_key_error = NULL;
 
 	static struct option long_options[] =
 	{
@@ -255,13 +254,20 @@ main(int argc, char **argv)
 	}
 	else
 	{
+		SendKeyArgs	sk_args;
+
+		sk_args.host = host;
+		sk_args.port = port_str;
+		sk_args.encryption_key = encryption_key;
+		sk_args.pm_pid = 0;
+		sk_args.error_msg = NULL;
+
 		/* XXX Try to find the postmaster PID? */
-		if (!send_key_to_postmaster(host, port_str, encryption_key, 0,
-				&send_key_error))
+		if (!send_key_to_postmaster(&sk_args))
 		{
 			pg_log_error("could not send encryption key to server");
-			if (send_key_error)
-				pg_log_error("%s", send_key_error);
+			if (sk_args.error_msg)
+				pg_log_error("%s", sk_args.error_msg);
 		}
 	}
 #else

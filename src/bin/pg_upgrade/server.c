@@ -270,16 +270,21 @@ start_postmaster(ClusterInfo *cluster, bool report_and_exit_on_error)
 		if (sender == 0)
 		{
 			char	port_str[6];
-			char	*send_key_error = NULL;
+			SendKeyArgs	sk_args;
 
 			snprintf(port_str, sizeof(port_str), "%d", cluster->port);
 
 			/* in child process */
 			/* XXX Find out the postmaster PID ? */
-			send_key_to_postmaster(cluster->sockdir, port_str,
-								   encryption_key, 0, &send_key_error);
-			if (send_key_error)
-				pg_fatal("%s", send_key_error);
+			sk_args.host = cluster->sockdir; /* If NULL, then libpq will use
+											  * its default. */
+			sk_args.port = port_str;
+			sk_args.encryption_key = encryption_key;
+			sk_args.pm_pid = 0;
+			sk_args.error_msg = NULL;
+			send_key_to_postmaster(&sk_args);
+			if (sk_args.error_msg)
+				pg_fatal("%s", sk_args.error_msg);
 			exit(EXIT_SUCCESS);
 		}
 		else if (sender < 0)

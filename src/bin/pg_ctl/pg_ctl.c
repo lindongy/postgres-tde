@@ -839,10 +839,7 @@ do_start(void)
 	pgpid_t		old_pid = 0;
 	pgpid_t		pm_pid;
 #ifdef USE_ENCRYPTION
-	char	*host = NULL;
-	char	*port_str = NULL;
-	unsigned char	*key_to_send;
-	char	*send_key_error = NULL;
+	SendKeyArgs	sk_args;
 #endif	/* USE_ENCRYPTION */
 
 	if (ctl_command != RESTART_COMMAND)
@@ -899,14 +896,14 @@ do_start(void)
 	}
 #endif	/* USE_ENCRYPTION */
 
-	pm_pid = start_postmaster();
+	sk_args.pm_pid = pm_pid = start_postmaster();
 
 #ifdef USE_ENCRYPTION
 	if (encryption_key_command)
 	{
 		char	*keycmd_conf_file;
 
-		key_to_send = encryption_key;
+		sk_args.encryption_key = encryption_key;
 
 		/* Is the key command also configured in postgresql.conf ? */
 		keycmd_conf_file = get_config_variable("encryption_key_command",
@@ -923,7 +920,7 @@ do_start(void)
 		 * than to let postmaster wait until MAX_WAIT_FOR_KEY_SECS has elapsed
 		 * and then fail.
 		 */
-		key_to_send = NULL;
+		sk_args.encryption_key = NULL;
 	}
 
 	/*
@@ -932,14 +929,14 @@ do_start(void)
 	 * using a command that it might find in postgresql.conf, so we shouldn't
 	 * send it again.
 	 */
-	get_postmaster_address(&host, &port_str);
-	if (!send_key_to_postmaster(host, port_str, key_to_send, pm_pid,
-			&send_key_error))
+	get_postmaster_address(&sk_args.host, &sk_args.port);
+	sk_args.error_msg = NULL;
+	if (!send_key_to_postmaster(&sk_args))
 	{
 		write_stderr(_("%s: could not send encryption key to postmaster\n"),
 					 progname);
-		if (send_key_error)
-			write_stderr("%s\n", send_key_error);
+		if (sk_args.error_msg)
+			write_stderr("%s\n", sk_args.error_msg);
 		exit(1);
 	}
 #endif	/* USE_ENCRYPTION */

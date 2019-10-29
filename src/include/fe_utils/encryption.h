@@ -18,6 +18,25 @@ extern void write_kdf_file(char *dir);
 extern void read_kdf_file(char *dir);
 extern void derive_key_from_password(unsigned char *encryption_key,
 									 const char *password, int len);
-extern bool send_key_to_postmaster(const char *host, const char *port,
-								   const unsigned char *encryption_Key,
-								   long pm_pid, char **error_msg);
+
+/*
+ * Arguments for send_key_to_postmaster().
+ *
+ * If host or port are NULL, we expect libpq to use its defaults.
+ *
+ * If encryption_key is NULL, send an "empty message". This tells postmaster
+ * that the client (typically pg_ctl) has no key, so postmaster should stop
+ * waiting for it and try to get the key elsewhere.
+ *
+ * If error occurs, the appropriate message is stored in error_msg.
+ */
+typedef struct SendKeyArgs
+{
+	char	*host;
+	char	*port;
+	const unsigned char *encryption_key;
+	long pm_pid;
+	char *error_msg;
+} SendKeyArgs;
+
+extern bool send_key_to_postmaster(SendKeyArgs *args);
