@@ -189,12 +189,10 @@ extern PGDLLIMPORT int wal_level;
  * individual bits on a page, it's still consistent no matter what combination
  * of the bits make it to disk, but the checksum wouldn't match.
  *
- * Regardless checksums, if encryption is enabled, hint bit change followed by
- * a torn page write can result in such a situation that decryption produces
- * page whose contents (following the hint bit) is garbage. This is because
- * the block cipher we use propagates changes in the lower addresses of plain
- * data to higher addresses of the cipher data. We need full-page image also
- * to recover from this state.
+ * Regardless checksums, if encryption is enabled, hint bit change is always
+ * WAL-logged because this is the simplest way to enforce LSN update. The
+ * point is that LSN is used as encryption IV and we must not use the same IV
+ * for different data.
  *
  * Also WAL-log the hint bits if forced by wal_log_hints=on.
  */
