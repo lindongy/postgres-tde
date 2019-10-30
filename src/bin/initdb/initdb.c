@@ -1410,7 +1410,7 @@ bootstrap_template1(void)
 	char	  **bki_lines;
 	char		headerline[MAXPGPATH];
 	char		buf[64];
-	static char *encr_opt_str = NULL;
+	char *encr_opt_str = NULL;
 
 	printf(_("running bootstrap script ... "));
 	fflush(stdout);
