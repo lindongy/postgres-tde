@@ -269,6 +269,19 @@ main(int argc, char **argv)
 	if (ControlFile_target.data_cipher > PG_CIPHER_NONE)
 #ifdef USE_ENCRYPTION
 	{
+		/*
+		 * Try to retrieve the command from environment variable. We do this
+		 * primarily to make automated tests work for encrypted cluster w/o
+		 * changing the scripts. XXX Not sure the variable should be
+		 * documented. If we do, then pg_ctl should probably accept it too.
+		 */
+		if (encryption_key_command == NULL)
+		{
+			encryption_key_command = getenv("PGENCRKEYCMD");
+			if (encryption_key_command && strlen(encryption_key_command) == 0)
+				encryption_key_command = NULL;
+		}
+
 		if (encryption_key_command == NULL)
 		{
 			pg_log_error("-K option must be passed for encrypted cluster");
