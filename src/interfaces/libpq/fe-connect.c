@@ -831,18 +831,18 @@ PQconnectStart(const char *conninfo)
  * Bring a connection created earlier by PQconnectStart / PQconnectStartParams
  * into CONNECTION_MADE state with SSL handshake complete.
  *
- * Returns true on success, false on failure.
+ * Returns 1 on success, 0 on failure.
  */
-bool
+int
 PQconnectSSLHandshake(PGconn *conn)
 {
 	if (!connectDBComplete(conn, true))
-		return false;
+		return 0;
 
 	if (conn->status != CONNECTION_MADE || !conn->ssl_in_use)
-		return false;
+		return 0;
 
-	return true;
+	return 1;
 }
 
 /*
@@ -852,8 +852,10 @@ PQconnectSSLHandshake(PGconn *conn)
  * we might want to rename the function (PQsendEncryptionKey) and let it
  * construct the packet. However that would introduce dependency on the
  * encryption specific code.
+ *
+ * Returns true on success, false on failure.
  */
-bool
+int
 PQpacketSend(PGconn *conn, char *data, size_t len)
 {
 	if (pqPacketSend(conn, 0, data, len) != STATUS_OK)
@@ -862,10 +864,10 @@ PQpacketSend(PGconn *conn, char *data, size_t len)
 
 		appendPQExpBuffer(&conn->errorMessage, "%s\n",
 						  SOCK_STRERROR(SOCK_ERRNO, sebuf, sizeof(sebuf)));
-		return false;
+		return 0;
 	}
 
-	return true;
+	return 1;
 }
 
 /*
