@@ -806,7 +806,7 @@ logical_read_xlog_page(XLogReaderState *state, XLogRecPtr targetPagePtr, int req
 		count = flushptr - targetPagePtr;	/* part of the page available */
 
 	/* now actually read the data, we know it's there */
-	XLogRead(cur_page, targetPagePtr, XLOG_BLCKSZ, false);
+	XLogRead(cur_page, targetPagePtr, XLOG_BLCKSZ, data_encrypted);
 
 	return count;
 }
