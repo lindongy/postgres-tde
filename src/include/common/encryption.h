@@ -18,6 +18,33 @@
 #define ENCRYPTION_KDF_NITER		1048576
 #define	ENCRYPTION_KDF_SALT_LEN		sizeof(uint64)
 
+/*
+ * Cipher used to encrypt data. This value is stored in the control file.
+ *
+ * Due to very specific requirements, the ciphers are not likely to change,
+ * but we should be somewhat flexible.
+ *
+ * XXX If we have more than one cipher someday, have pg_controldata report the
+ * cipher kind (in textual form) instead of merely saying "on".
+ */
+typedef enum CipherKind
+{
+	/* The cluster is not encrypted. */
+	PG_CIPHER_NONE = 0,
+
+	/*
+	 * AES (Rijndael) in CTR mode of operation. Only key length 128 bits is
+	 * supported now, so the constant name does not contain the key length.
+	 *
+	 * TODO Get rid of the CBC mode that we use for buffile.c before we use
+	 * buffile.c to encrypt any file that needs to be handled by
+	 * pg_upgrade. (As long as no file encrypted by buffile.c needs
+	 * pg_upgrade, the control file does not have to be aware of the CBC
+	 * mode.)
+	 */
+	PG_CIPHER_AES_CTR_128
+}			CipherKind;
+
 /* Executable to retrieve the encryption key. */
 extern char *encryption_key_command;
 
