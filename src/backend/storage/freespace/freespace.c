@@ -649,8 +649,7 @@ fsm_extend(Relation rel, BlockNumber fsm_nblocks)
 	{
 		if (data_encrypted)
 			EnforceLSNForEncryption(rel->rd_rel->relpersistence,
-									pg.data,
-									true);
+									pg.data);
 		PageSetChecksumInplace((Page) pg.data, fsm_nblocks_now);
 		smgrextend(rel->rd_smgr, FSM_FORKNUM, fsm_nblocks_now,
 				   pg.data, false);

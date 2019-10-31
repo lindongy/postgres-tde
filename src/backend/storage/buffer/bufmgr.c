@@ -2751,9 +2751,7 @@ FlushBuffer(BufferDesc *buf, SMgrRelation reln)
 		char relpersistence = buf_state & BM_PERMANENT ?
 			RELPERSISTENCE_PERMANENT : RELPERSISTENCE_UNLOGGED;
 
-		EnforceLSNForEncryption(relpersistence,
-								(char *) bufBlock,
-								false);
+		EnforceLSNForEncryption(relpersistence, (char *) bufBlock);
 	}
 
 	/*
@@ -3234,8 +3232,7 @@ FlushRelationBuffers(Relation rel)
 
 				if (data_encrypted)
 					EnforceLSNForEncryption(rel->rd_rel->relpersistence,
-											(char *) localpage,
-											false);
+											(char *) localpage);
 
 				PageSetChecksumInplace(localpage, bufHdr->tag.blockNum);
 				smgrwrite(rel->rd_smgr,

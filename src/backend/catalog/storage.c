@@ -373,7 +373,7 @@ RelationCopyStorage(SMgrRelation src, SMgrRelation dst,
 		if (data_encrypted && !do_log)
 		{
 			Assert(relpersistence != RELPERSISTENCE_PERMANENT);
-			EnforceLSNForEncryption(relpersistence, buf.data, false);
+			EnforceLSNForEncryption(relpersistence, buf.data);
 		}
 		PageSetChecksumInplace(page, blkno);
 

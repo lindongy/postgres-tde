@@ -702,8 +702,7 @@ _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 	{
 		Assert(!RelationNeedsWAL(wstate->index));
 		EnforceLSNForEncryption(wstate->index->rd_rel->relpersistence,
-								(char *) page,
-								false);
+								(char *) page);
 	}
 	PageSetChecksumInplace(page, blkno);
 

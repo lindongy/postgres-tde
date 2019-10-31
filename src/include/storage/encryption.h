@@ -53,8 +53,7 @@ extern void setup_encryption(void);
 /* Copy of the same field of ControlFileData. */
 extern char encryption_verification[];
 
-extern void EnforceLSNForEncryption(char relpersistence, char *buf_contents,
-									bool lsn_historic);
+extern void EnforceLSNForEncryption(char relpersistence, char *buf_contents);
 #endif	/* FRONTEND */
 
 #define TWEAK_SIZE 16

@@ -356,8 +356,7 @@ end_heap_rewrite(RewriteState state)
 		{
 			Assert(!RelationNeedsWAL(state->rs_new_rel));
 			EnforceLSNForEncryption(state->rs_new_rel->rd_rel->relpersistence,
-									(char *) state->rs_buffer,
-									false);
+									(char *) state->rs_buffer);
 		}
 		PageSetChecksumInplace(state->rs_buffer, state->rs_blockno);
 		smgrextend(state->rs_new_rel->rd_smgr, MAIN_FORKNUM, state->rs_blockno,
@@ -746,8 +745,7 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 			{
 				Assert(!RelationNeedsWAL(state->rs_new_rel));
 				EnforceLSNForEncryption(state->rs_new_rel->rd_rel->relpersistence,
-										(char *) page,
-										false);
+										(char *) page);
 			}
 			PageSetChecksumInplace(page, state->rs_blockno);
 			smgrextend(state->rs_new_rel->rd_smgr, MAIN_FORKNUM,

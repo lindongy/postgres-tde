@@ -660,8 +660,7 @@ vm_extend(Relation rel, BlockNumber vm_nblocks)
 	{
 		if (data_encrypted)
 			EnforceLSNForEncryption(rel->rd_rel->relpersistence,
-									pg.data,
-									true);
+									pg.data);
 		PageSetChecksumInplace((Page) pg.data, vm_nblocks_now);
 		smgrextend(rel->rd_smgr, VISIBILITYMAP_FORKNUM, vm_nblocks_now,
 				   pg.data, false);
