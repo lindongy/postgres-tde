@@ -239,9 +239,10 @@ sample_encryption(char *buf)
  * "size" must be a (non-zero) multiple of ENCRYPTION_BLOCK.
  *
  * "tweak" value must be TWEAK_SIZE bytes long. If NULL is passed, we suppose
- * that the input data start with a page LSN which we'll use as an encryption
- * tweak. In such a case we don't encrypt the initial sizeof(PageXLogRecPtr)
- * bytes so the tweak is preserved for decryption.
+ * that the input data start with PageHeaderData. In this case page LSN is not
+ * encrypted because we use it as an encryption initialization vector (IV). In
+ * such a case we don't encrypt the initial sizeof(PageXLogRecPtr) bytes so
+ * the tweak is preserved for decryption.
  *
  * All-zero blocks are not encrypted to correctly handle relation extension,
  * and also to simplify handling of holes created by seek past EOF and
@@ -259,22 +260,27 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
 	Assert(data_encrypted);
 
 	/*
-	 * Empty page is not worth encryption, and encryption of zeroes wouldn't
-	 * even be secure.
-	 */
-	if (IsAllZero(input, size))
-	{
-		memset(output, 0, size);
-		return;
-	}
-
-	/*
 	 * If caller passed no tweak, we assume this is relation page and LSN
 	 * should be used.
 	 */
 	if (tweak == NULL)
 	{
-		size_t	lsn_size = sizeof(PageXLogRecPtr);
+		size_t	lsn_size;
+
+		/*
+		 * New page should not be encrypted because it does not have LSN
+		 * (i.e. the IV) initialized. This includes all-zeroes page.
+		 */
+		if (PageIsNew(input))
+		{
+			Assert(XLogRecPtrIsInvalid(PageGetLSN(input)));
+			return;
+		}
+
+		/* We're going to encrypt the page, so the IV should be valid. */
+		Assert(!XLogRecPtrIsInvalid(PageGetLSN(input)));
+
+		lsn_size = sizeof(PageXLogRecPtr);
 
 		memset(tweak_loc, 0, TWEAK_SIZE);
 
@@ -302,6 +308,15 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
 		input += lsn_size;
 		output += lsn_size;
 		size -= lsn_size;
+	}
+	/*
+	 * Empty page is not worth encryption, and encryption of zeroes wouldn't
+	 * even be secure.
+	 */
+	else if (IsAllZero(input, size))
+	{
+		memset(output, 0, size);
+		return;
 	}
 
 	ctx = !buffile ? ctx_encrypt : ctx_encrypt_buffile;
@@ -343,15 +358,22 @@ decrypt_block(const char *input, char *output, Size size, char *tweak,
 
 	Assert(data_encrypted);
 
-	if (IsAllZero(input, size))
-	{
-		memset(output, 0, size);
-		return;
-	}
-
 	if (tweak == NULL)
 	{
-		size_t	lsn_size = sizeof(PageXLogRecPtr);
+		size_t	lsn_size;
+
+		/*
+		 * LSN is used as encryption IV, so page with invalid LSN shouldn't
+		 * have been encrypted.
+		 */
+		if (XLogRecPtrIsInvalid(PageGetLSN(input)))
+		{
+			/* This includes all-zeroes page. */
+			Assert(PageIsNew(input));
+			return;
+		}
+
+		lsn_size = sizeof(PageXLogRecPtr);
 
 		memset(tweak_loc, 0, TWEAK_SIZE);
 		memcpy(tweak_loc, input, lsn_size);
@@ -363,6 +385,11 @@ decrypt_block(const char *input, char *output, Size size, char *tweak,
 		input += lsn_size;
 		output += lsn_size;
 		size -= lsn_size;
+	}
+	else if (IsAllZero(input, size))
+	{
+		memset(output, 0, size);
+		return;
 	}
 
 	ctx = !buffile ? ctx_decrypt : ctx_decrypt_buffile;
