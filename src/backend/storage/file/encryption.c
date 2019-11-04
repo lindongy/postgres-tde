@@ -227,7 +227,7 @@ sample_encryption(char *buf)
 		tweak[i] = i;
 
 	encrypt_block("postgresqlcrypt", buf, ENCRYPTION_SAMPLE_SIZE, tweak,
-				  false);
+				  InvalidBlockNumber, false);
 }
 
 /*
@@ -244,13 +244,16 @@ sample_encryption(char *buf)
  * such a case we don't encrypt the initial sizeof(PageXLogRecPtr) bytes so
  * the tweak is preserved for decryption.
  *
+ * "block" is number of relation block to be added to the tweak if we
+ * construct it here. Ignored if valid tweak is passed.
+ *
  * All-zero blocks are not encrypted to correctly handle relation extension,
  * and also to simplify handling of holes created by seek past EOF and
  * consequent write (see buffile.c).
  */
 void
 encrypt_block(const char *input, char *output, Size size, char *tweak,
-			  bool buffile)
+			  BlockNumber block, bool buffile)
 {
 #ifdef USE_ENCRYPTION
 	EVP_CIPHER_CTX *ctx;
@@ -266,6 +269,8 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
 	if (tweak == NULL)
 	{
 		size_t	lsn_size;
+
+		Assert(block != InvalidBlockNumber);
 
 		/*
 		 * New page should not be encrypted because it does not have LSN
@@ -300,6 +305,12 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
 		 * value as long as it's unique for each encryption run.
 		 */
 		memcpy(tweak_loc, input, lsn_size);
+
+		/*
+		 * Add the block number, in case a single WAL record affects two (or
+		 * more?) pages.
+		 */
+		memcpy(tweak_loc + lsn_size, &block, sizeof(BlockNumber));
 
 		tweak = tweak_loc;
 
@@ -353,7 +364,7 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
  */
 void
 decrypt_block(const char *input, char *output, Size size, char *tweak,
-			  bool buffile)
+			  BlockNumber block, bool buffile)
 {
 #ifdef USE_ENCRYPTION
 	EVP_CIPHER_CTX *ctx;
@@ -365,6 +376,8 @@ decrypt_block(const char *input, char *output, Size size, char *tweak,
 	if (tweak == NULL)
 	{
 		size_t	lsn_size;
+
+		Assert(block != InvalidBlockNumber);
 
 		/*
 		 * LSN is used as encryption IV, so page with invalid LSN shouldn't
@@ -381,6 +394,8 @@ decrypt_block(const char *input, char *output, Size size, char *tweak,
 
 		memset(tweak_loc, 0, TWEAK_SIZE);
 		memcpy(tweak_loc, input, lsn_size);
+		memcpy(tweak_loc + lsn_size, &block, sizeof(BlockNumber));
+
 		tweak = tweak_loc;
 
 		if (input != output)

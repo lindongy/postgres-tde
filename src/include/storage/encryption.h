@@ -130,9 +130,9 @@ extern void encryption_error(bool fatal, char *message);
  * and the encryption code is less invasive.
  */
 extern void encrypt_block(const char *input, char *output, Size size,
-						  char *tweak, bool buffile);
+						  char *tweak, BlockNumber block, bool buffile);
 extern void decrypt_block(const char *input, char *output, Size size,
-						  char *tweak, bool buffile);
+						  char *tweak, BlockNumber block, bool buffile);
 
 /*
  * The following functions do not interact with OpenSSL directly so they are

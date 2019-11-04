@@ -2519,7 +2519,8 @@ XLogWrite(XLogwrtRqst WriteRqst, bool flexible)
 					else
 						nbytes = XLOG_BLCKSZ;
 
-					encrypt_block(from, to, nbytes, tweak, false);
+					encrypt_block(from, to, nbytes, tweak, InvalidBlockNumber,
+								  false);
 					nencrypted++;
 					from += XLOG_BLCKSZ;
 					to += XLOG_BLCKSZ;
@@ -3545,10 +3546,12 @@ XLogFileCopy(XLogSegNo destsegno, TimeLineID srcTLI, XLogSegNo srcsegno,
 			char		tweak[TWEAK_SIZE];
 
 			XLogEncryptionTweak(tweak, srcTLI, srcsegno, nbytes);
-			decrypt_block(buffer.data, buffer.data, nread, tweak, false);
+			decrypt_block(buffer.data, buffer.data, nread, tweak,
+						  InvalidBlockNumber, false);
 
 			XLogEncryptionTweak(tweak, ThisTimeLineID, destsegno, nbytes);
-			encrypt_block(buffer.data, buffer.data, nread, tweak, false);
+			encrypt_block(buffer.data, buffer.data, nread, tweak,
+						  InvalidBlockNumber, false);
 		}
 
 		errno = 0;
@@ -5351,7 +5354,7 @@ BootStrapXLOG(void)
 
 		XLogEncryptionTweak(tweak, ThisTimeLineID, 1, 0);
 		encrypt_block((char *) page, (char *) page, XLOG_BLCKSZ, tweak,
-					  false);
+					  InvalidBlockNumber, false);
 	}
 
 	/* Write the first page with the initial record */
@@ -11824,7 +11827,8 @@ retry:
 		char		tweak[TWEAK_SIZE];
 
 		XLogEncryptionTweak(tweak, curFileTLI, readSegNo, readOff);
-		decrypt_block(readBuf, readBuf, XLOG_BLCKSZ, tweak, false);
+		decrypt_block(readBuf, readBuf, XLOG_BLCKSZ, tweak,
+					  InvalidBlockNumber, false);
 	}
 
 	*readTLI = curFileTLI;

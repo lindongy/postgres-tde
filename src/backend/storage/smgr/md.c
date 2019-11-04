@@ -1275,13 +1275,13 @@ _mdnblocks(SMgrRelation reln, ForkNumber forknum, MdfdVec *seg)
 static void
 mdencrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer)
 {
-	encrypt_block(buffer, encrypt_buf.data, BLCKSZ, NULL, false);
+	encrypt_block(buffer, encrypt_buf.data, BLCKSZ, NULL, blocknum, false);
 }
 
 static void
 mddecrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *dest)
 {
-	decrypt_block(encrypt_buf.data, dest, BLCKSZ, NULL, false);
+	decrypt_block(encrypt_buf.data, dest, BLCKSZ, NULL, blocknum, false);
 }
 
 /*

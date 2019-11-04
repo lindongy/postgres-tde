@@ -661,6 +661,7 @@ BufFileLoadBuffer(BufFile *file)
 					  file->common.buffer.data,
 					  BLCKSZ,
 					  tweak,
+					  InvalidBlockNumber,
 					  true);
 
 #ifdef	USE_ASSERT_CHECKING
@@ -830,6 +831,7 @@ BufFileDumpBufferEncrypted(BufFile *file)
 				  encrypt_buf.data,
 				  BLCKSZ,
 				  tweak,
+				  InvalidBlockNumber,
 				  true);
 
 	thisfile = file->files[file->common.curFile];
@@ -1663,6 +1665,7 @@ retry:
 					  file->common.buffer.data,
 					  BLCKSZ,
 					  tweak,
+					  InvalidBlockNumber,
 					  true);
 
 #ifdef	USE_ASSERT_CHECKING
@@ -1716,6 +1719,7 @@ BufFileDumpBufferTransient(TransientBufFile *file)
 					  encrypt_buf.data,
 					  BLCKSZ,
 					  tweak,
+					  InvalidBlockNumber,
 					  true);
 		write_ptr = encrypt_buf.data;
 		bytestowrite = BLCKSZ;

@@ -218,7 +218,8 @@ scan_file(const char *fn, BlockNumber segmentno)
 			continue;
 
 		if (data_encrypted)
-			decrypt_block(buf.data, buf.data, BLCKSZ, NULL, false);
+			decrypt_block(buf.data, buf.data, BLCKSZ, NULL,
+						  blockno + segmentno * RELSEG_SIZE, false);
 
 		csum = pg_checksum_page(buf.data, blockno + segmentno * RELSEG_SIZE);
 		current_size += r;
@@ -247,7 +248,8 @@ scan_file(const char *fn, BlockNumber segmentno)
 			}
 
 			if (data_encrypted)
-				encrypt_block(buf.data, buf.data, BLCKSZ, NULL, false);
+				encrypt_block(buf.data, buf.data, BLCKSZ, NULL,
+							  blockno + segmentno * RELSEG_SIZE, false);
 
 			/* Write block with checksum */
 			w = write(f, buf.data, BLCKSZ);

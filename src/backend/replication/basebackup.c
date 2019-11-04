@@ -612,7 +612,8 @@ perform_base_backup(basebackup_options *opt)
 						char	*data = buf + seg_offset;
 
 						XLogEncryptionTweak(tweak, tli, segno, seg_offset);
-						decrypt_block(data, data, XLOG_BLCKSZ, tweak, false);
+						decrypt_block(data, data, XLOG_BLCKSZ, tweak,
+									  InvalidBlockNumber, false);
 
 						seg_offset += XLOG_BLCKSZ;
 					}
@@ -1596,7 +1597,8 @@ sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf
 			for (i = 0; i < cnt / BLCKSZ; i++)
 			{
 				page = buf + BLCKSZ * i;
-				decrypt_block(page, page, BLCKSZ, NULL, false);
+				decrypt_block(page, page, BLCKSZ, NULL,
+							  blkno + segmentno * RELSEG_SIZE + i, false);
 			}
 		}
 
@@ -1623,7 +1625,9 @@ sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf
 				page = buf + BLCKSZ * i;
 
 				if (decrypt_temp)
-					decrypt_block(page, page, BLCKSZ, NULL, false);
+					decrypt_block(page, page, BLCKSZ, NULL,
+								  blkno + segmentno * RELSEG_SIZE + i,
+								  false);
 
 				/*
 				 * Only check pages which have not been modified since the
