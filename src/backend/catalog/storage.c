@@ -333,8 +333,6 @@ RelationCopyStorage(SMgrRelation src, SMgrRelation dst,
 
 	for (blkno = 0; blkno < nblocks; blkno++)
 	{
-		bool	do_log = false;
-
 		/* If we got a cancel signal during the copy of the data, quit */
 		CHECK_FOR_INTERRUPTS();
 
@@ -349,32 +347,16 @@ RelationCopyStorage(SMgrRelation src, SMgrRelation dst,
 										   src->smgr_rnode.backend,
 										   forkNum))));
 
-		if (use_wal)
-			do_log = true;
-		else if (data_encrypted)
-		{
-			/*
-			 * LSN is needed as the encryption IV, so log the page even if
-			 * WAL_LEVEL_MINIMAL (i.e. !XLogIsNeeded()).
-			 */
-			if ((relpersistence == RELPERSISTENCE_PERMANENT ||
-				 copying_initfork))
-				do_log = true;
-		}
-
 		/*
 		 * WAL-log the copied page. Unfortunately we don't know what kind of a
 		 * page this is, so we have to log the full page including any unused
 		 * space.
 		 */
-		if (do_log)
+		if (use_wal)
 			log_newpage(&dst->smgr_rnode.node, forkNum, blkno, page, false);
+		else if (data_encrypted)
+			EnforceLSNForEncryption(relpersistence, page);
 
-		if (data_encrypted && !do_log)
-		{
-			Assert(relpersistence != RELPERSISTENCE_PERMANENT);
-			EnforceLSNForEncryption(relpersistence, buf.data);
-		}
 		PageSetChecksumInplace(page, blkno);
 
 		/*

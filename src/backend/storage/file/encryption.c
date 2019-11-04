@@ -572,6 +572,7 @@ EnforceLSNForEncryption(char relpersistence, char *buf_contents)
 		if (XLogRecPtrIsInvalid(PageGetLSN(buf_contents)))
 		{
 			XLogRecPtr	lsn;
+			char	xlr_data = '\0';
 
 			/*
 			 * If wal_level > WAL_LEVEL_MINIMAL, pages containing user data
@@ -593,7 +594,8 @@ EnforceLSNForEncryption(char relpersistence, char *buf_contents)
 			 * terrible.
 			 */
 			XLogBeginInsert();
-			XLogRegisterData(NULL, 0);
+			/* At least 1 byte is required. */
+			XLogRegisterData(&xlr_data, 1);
 			lsn = XLogInsert(RM_XLOG_ID, XLOG_NOOP);
 
 			PageSetLSN(buf_contents, lsn);

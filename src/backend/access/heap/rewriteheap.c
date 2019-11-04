@@ -330,34 +330,18 @@ end_heap_rewrite(RewriteState state)
 	/* Write the last page, if any */
 	if (state->rs_buffer_valid)
 	{
-		bool	do_log = false;
-
 		if (state->rs_use_wal)
-			do_log = true;
-		else if (data_encrypted)
-		{
-			/*
-			 * LSN is needed as the encryption IV, so log the page even if
-			 * WAL_LEVEL_MINIMAL (i.e. !XLogIsNeeded()).
-			 */
-			if (RelationNeedsWAL(state->rs_new_rel))
-				do_log = true;
-		}
-
-		if (do_log)
 			log_newpage(&state->rs_new_rel->rd_node,
 						MAIN_FORKNUM,
 						state->rs_blockno,
 						state->rs_buffer,
 						true);
-		RelationOpenSmgr(state->rs_new_rel);
-
-		if (data_encrypted && !do_log)
-		{
-			Assert(!RelationNeedsWAL(state->rs_new_rel));
+		else if (data_encrypted)
 			EnforceLSNForEncryption(state->rs_new_rel->rd_rel->relpersistence,
 									(char *) state->rs_buffer);
-		}
+
+		RelationOpenSmgr(state->rs_new_rel);
+
 		PageSetChecksumInplace(state->rs_buffer, state->rs_blockno);
 		smgrextend(state->rs_new_rel->rd_smgr, MAIN_FORKNUM, state->rs_blockno,
 				   (char *) state->rs_buffer, true);
@@ -712,26 +696,17 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 		if (len + saveFreeSpace > pageFreeSpace)
 		{
 			/* Doesn't fit, so write out the existing page */
-			bool	do_log = false;
 
+			/* XLOG stuff */
 			if (state->rs_use_wal)
-				do_log = true;
-			else if (data_encrypted)
-			{
-				/*
-				 * LSN is needed as the encryption IV, so log the page even if
-				 * WAL_LEVEL_MINIMAL (i.e. !XLogIsNeeded()).
-				 */
-				if (RelationNeedsWAL(state->rs_new_rel))
-					do_log = true;
-			}
-
-			if (do_log)
 				log_newpage(&state->rs_new_rel->rd_node,
 							MAIN_FORKNUM,
 							state->rs_blockno,
 							page,
 							true);
+			else if (data_encrypted)
+				EnforceLSNForEncryption(state->rs_new_rel->rd_rel->relpersistence,
+										(char *) page);
 
 			/*
 			 * Now write the page. We say isTemp = true even if it's not a
@@ -741,12 +716,6 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 			 */
 			RelationOpenSmgr(state->rs_new_rel);
 
-			if (data_encrypted && !do_log)
-			{
-				Assert(!RelationNeedsWAL(state->rs_new_rel));
-				EnforceLSNForEncryption(state->rs_new_rel->rd_rel->relpersistence,
-										(char *) page);
-			}
 			PageSetChecksumInplace(page, state->rs_blockno);
 			smgrextend(state->rs_new_rel->rd_smgr, MAIN_FORKNUM,
 					   state->rs_blockno, (char *) page, true);

@@ -651,29 +651,18 @@ _bt_blnewpage(uint32 level)
 static void
 _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 {
-	bool	do_log = false;
-
 	/* Ensure rd_smgr is open (could have been closed by relcache flush!) */
 	RelationOpenSmgr(wstate->index);
 
-	if (wstate->btws_use_wal)
-		do_log = true;
-	else if (data_encrypted)
-	{
-		/*
-		 * LSN is needed as the encryption IV, so log the page even if
-		 * WAL_LEVEL_MINIMAL (i.e. !XLogIsNeeded()).
-		 */
-		if (RelationNeedsWAL(wstate->index))
-			do_log = true;
-	}
-
 	/* XLOG stuff */
-	if (do_log)
+	if (wstate->btws_use_wal)
 	{
 		/* We use the heap NEWPAGE record type for this */
 		log_newpage(&wstate->index->rd_node, MAIN_FORKNUM, blkno, page, true);
 	}
+	else if (data_encrypted)
+		EnforceLSNForEncryption(wstate->index->rd_rel->relpersistence,
+								(char *) page);
 
 	/*
 	 * If we have to write pages nonsequentially, fill in the space with
@@ -698,12 +687,6 @@ _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 				   true);
 	}
 
-	if (data_encrypted && !do_log)
-	{
-		Assert(!RelationNeedsWAL(wstate->index));
-		EnforceLSNForEncryption(wstate->index->rd_rel->relpersistence,
-								(char *) page);
-	}
 	PageSetChecksumInplace(page, blkno);
 
 	/*
