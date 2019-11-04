@@ -647,10 +647,14 @@ fsm_extend(Relation rel, BlockNumber fsm_nblocks)
 
 	while (fsm_nblocks_now < fsm_nblocks)
 	{
-		if (data_encrypted)
-			EnforceLSNForEncryption(rel->rd_rel->relpersistence,
-									pg.data);
 		PageSetChecksumInplace((Page) pg.data, fsm_nblocks_now);
+		/*
+		 * Encryption: invalid LSN means that the page won't be
+		 * encrypted. This is o.k. as the page is still empty. It'd be hard to
+		 * set a "fake LSN" because the relation can receive a regular one
+		 * later if it's RELPERSISTENCE_PERMANENT.
+		 */
+		Assert(XLogRecPtrIsInvalid(PageGetLSN(pg.data)));
 		smgrextend(rel->rd_smgr, FSM_FORKNUM, fsm_nblocks_now,
 				   pg.data, false);
 		fsm_nblocks_now++;

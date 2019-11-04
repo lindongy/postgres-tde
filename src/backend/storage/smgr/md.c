@@ -403,7 +403,11 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 
 	Assert(seekpos < (off_t) BLCKSZ * RELSEG_SIZE);
 
-	if (data_encrypted)
+	/*
+	 * Only encrypt the page if it has valid LSN (IV). Otherwise it should be
+	 * a new page.
+	 */
+	if (data_encrypted && !XLogRecPtrIsInvalid(PageGetLSN(buffer)))
 	{
 		mdencrypt(reln, forknum, blocknum, buffer);
 		buffer = encrypt_buf.data;
