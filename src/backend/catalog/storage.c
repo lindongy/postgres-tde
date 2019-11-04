@@ -355,7 +355,7 @@ RelationCopyStorage(SMgrRelation src, SMgrRelation dst,
 		if (use_wal)
 			log_newpage(&dst->smgr_rnode.node, forkNum, blkno, page, false);
 		else if (data_encrypted)
-			EnforceLSNForEncryption(relpersistence, page);
+			enforce_lsn_for_encryption(relpersistence, page);
 
 		PageSetChecksumInplace(page, blkno);
 

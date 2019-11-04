@@ -661,8 +661,8 @@ _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 		log_newpage(&wstate->index->rd_node, MAIN_FORKNUM, blkno, page, true);
 	}
 	else if (data_encrypted)
-		EnforceLSNForEncryption(wstate->index->rd_rel->relpersistence,
-								(char *) page);
+		enforce_lsn_for_encryption(wstate->index->rd_rel->relpersistence,
+								   (char *) page);
 
 	/*
 	 * If we have to write pages nonsequentially, fill in the space with

@@ -337,8 +337,8 @@ end_heap_rewrite(RewriteState state)
 						state->rs_buffer,
 						true);
 		else if (data_encrypted)
-			EnforceLSNForEncryption(state->rs_new_rel->rd_rel->relpersistence,
-									(char *) state->rs_buffer);
+			enforce_lsn_for_encryption(state->rs_new_rel->rd_rel->relpersistence,
+									   (char *) state->rs_buffer);
 
 		RelationOpenSmgr(state->rs_new_rel);
 
@@ -705,8 +705,8 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 							page,
 							true);
 			else if (data_encrypted)
-				EnforceLSNForEncryption(state->rs_new_rel->rd_rel->relpersistence,
-										(char *) page);
+				enforce_lsn_for_encryption(state->rs_new_rel->rd_rel->relpersistence,
+										   (char *) page);
 
 			/*
 			 * Now write the page. We say isTemp = true even if it's not a

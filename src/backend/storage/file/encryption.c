@@ -561,7 +561,7 @@ mdtweak(char *tweak, RelFileNode *relnode, ForkNumber forknum, BlockNumber block
  * user to drop the existing unlogged relations.)
  */
 void
-EnforceLSNForEncryption(char relpersistence, char *buf_contents)
+enforce_lsn_for_encryption(char relpersistence, char *buf_contents)
 {
 	/* Failure indicates incorrect use of the function. */
 	Assert(data_encrypted);
