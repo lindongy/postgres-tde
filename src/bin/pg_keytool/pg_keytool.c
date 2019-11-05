@@ -25,10 +25,15 @@
 #include "libpq-int.h"
 #include "libpq/pqcomm.h"
 #include "port/pg_crc32c.h"
-#include "storage/encryption.h"
 #include "getopt_long.h"
 
 #ifdef USE_ENCRYPTION
+/*
+ * TODO Tune these values.
+ */
+#define ENCRYPTION_PWD_MIN_LENGTH	8
+#define ENCRYPTION_PWD_MAX_LENGTH	16
+
 static const char *progname;
 
 unsigned char encryption_key[ENCRYPTION_KEY_LENGTH];

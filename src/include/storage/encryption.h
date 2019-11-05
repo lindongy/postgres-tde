@@ -115,12 +115,6 @@ extern void EncryptionShmemInit(void);
 
 #ifdef USE_ENCRYPTION
 
-/*
- * TODO Tune these values.
- */
-#define ENCRYPTION_PWD_MIN_LENGTH	8
-#define ENCRYPTION_PWD_MAX_LENGTH	16
-
 extern void encryption_error(bool fatal, char *message);
 #endif	/* USE_ENCRYPTION */
 
