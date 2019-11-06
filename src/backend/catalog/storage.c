@@ -333,12 +333,26 @@ RelationCopyStorage(SMgrRelation src, SMgrRelation dst,
 
 	for (blkno = 0; blkno < nblocks; blkno++)
 	{
+		char	*buf_read, *buf_dst;
+		Page	page_encr = NULL;
+
 		/* If we got a cancel signal during the copy of the data, quit */
 		CHECK_FOR_INTERRUPTS();
 
-		smgrread(src, forkNum, blkno, buf.data);
+		if (!data_encrypted)
+			buf_read = buf.data;
+		else
+			buf_read = encrypt_buf.data;
 
-		if (!PageIsVerified(page, blkno))
+		smgrread(src, forkNum, blkno, buf_read);
+
+		if (data_encrypted)
+		{
+			decrypt_block(buf_read, buf.data, BLCKSZ, NULL, blkno, false);
+			page_encr = buf_read;
+		}
+
+		if (!PageIsVerified(page, blkno, page_encr))
 			ereport(ERROR,
 					(errcode(ERRCODE_DATA_CORRUPTED),
 					 errmsg("invalid page in block %u of relation %s",
@@ -357,14 +371,22 @@ RelationCopyStorage(SMgrRelation src, SMgrRelation dst,
 		else if (data_encrypted)
 			enforce_lsn_for_encryption(relpersistence, page);
 
-		PageSetChecksumInplace(page, blkno);
+		buf_dst = (char *) page;
+		if (data_encrypted)
+		{
+			encrypt_block(buf_dst, encrypt_buf.data, BLCKSZ, NULL, blkno,
+						  false);
+			buf_dst = encrypt_buf.data;
+		}
+
+		PageSetChecksumInplace(buf_dst, blkno);
 
 		/*
 		 * Now write the page.  We say isTemp = true even if it's not a temp
 		 * rel, because there's no need for smgr to schedule an fsync for this
 		 * write; we'll do it ourselves below.
 		 */
-		smgrextend(dst, forkNum, blkno, buf.data, true);
+		smgrextend(dst, forkNum, blkno, buf_dst, true);
 	}
 
 	/*

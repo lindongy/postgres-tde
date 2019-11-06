@@ -651,6 +651,8 @@ _bt_blnewpage(uint32 level)
 static void
 _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 {
+	char	*buf;
+
 	/* Ensure rd_smgr is open (could have been closed by relcache flush!) */
 	RelationOpenSmgr(wstate->index);
 
@@ -687,7 +689,14 @@ _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 				   true);
 	}
 
-	PageSetChecksumInplace(page, blkno);
+	buf = (char *) page;
+	if (data_encrypted)
+	{
+		encrypt_block(buf, encrypt_buf.data, BLCKSZ, NULL, blkno, false);
+		buf = encrypt_buf.data;
+	}
+
+	PageSetChecksumInplace(buf, blkno);
 
 	/*
 	 * Now write the page.  There's no need for smgr to schedule an fsync for
@@ -696,15 +705,13 @@ _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 	if (blkno == wstate->btws_pages_written)
 	{
 		/* extending the file... */
-		smgrextend(wstate->index->rd_smgr, MAIN_FORKNUM, blkno,
-				   (char *) page, true);
+		smgrextend(wstate->index->rd_smgr, MAIN_FORKNUM, blkno, buf, true);
 		wstate->btws_pages_written++;
 	}
 	else
 	{
 		/* overwriting a block we zero-filled before */
-		smgrwrite(wstate->index->rd_smgr, MAIN_FORKNUM, blkno,
-				  (char *) page, true);
+		smgrwrite(wstate->index->rd_smgr, MAIN_FORKNUM, blkno, buf, true);
 	}
 
 	pfree(page);

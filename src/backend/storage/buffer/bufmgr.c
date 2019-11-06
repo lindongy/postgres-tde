@@ -894,11 +894,25 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 		{
 			instr_time	io_start,
 						io_time;
+			Page	bufBlockEncr = NULL;
+			Page	bufRead;
+
+			if (!data_encrypted)
+				bufRead = bufBlock;
+			else
+				bufRead = (Page) encrypt_buf.data;
 
 			if (track_io_timing)
 				INSTR_TIME_SET_CURRENT(io_start);
 
-			smgrread(smgr, forkNum, blockNum, (char *) bufBlock);
+			smgrread(smgr, forkNum, blockNum, bufRead);
+
+			if (data_encrypted)
+			{
+				decrypt_block(bufRead, bufBlock, BLCKSZ, NULL, blockNum,
+							  false);
+				bufBlockEncr = bufRead;
+			}
 
 			if (track_io_timing)
 			{
@@ -909,7 +923,7 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 			}
 
 			/* check for garbage data */
-			if (!PageIsVerified((Page) bufBlock, blockNum))
+			if (!PageIsVerified((Page) bufBlock, blockNum, bufBlockEncr))
 			{
 				if (mode == RBM_ZERO_ON_ERROR || zero_damaged_pages)
 				{
@@ -2752,6 +2766,10 @@ FlushBuffer(BufferDesc *buf, SMgrRelation reln)
 			RELPERSISTENCE_PERMANENT : RELPERSISTENCE_UNLOGGED;
 
 		enforce_lsn_for_encryption(relpersistence, (char *) bufBlock);
+
+		encrypt_block(bufBlock, encrypt_buf.data, BLCKSZ, NULL,
+					  buf->tag.blockNum, false);
+		bufBlock = encrypt_buf.data;
 	}
 
 	/*
@@ -3231,8 +3249,14 @@ FlushRelationBuffers(Relation rel)
 				error_context_stack = &errcallback;
 
 				if (data_encrypted)
+				{
 					enforce_lsn_for_encryption(rel->rd_rel->relpersistence,
 											   (char *) localpage);
+
+					encrypt_block((char *) localpage, encrypt_buf.data, BLCKSZ, NULL,
+								  bufHdr->tag.blockNum, false);
+					localpage = encrypt_buf.data;
+				}
 
 				PageSetChecksumInplace(localpage, bufHdr->tag.blockNum);
 				smgrwrite(rel->rd_smgr,

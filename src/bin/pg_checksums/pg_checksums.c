@@ -81,10 +81,6 @@ usage(void)
 	printf(_("  -d, --disable            disable data checksums\n"));
 	printf(_("  -e, --enable             enable data checksums\n"));
 	printf(_("  -f, --filenode=FILENODE  check only relation with specified filenode\n"));
-#ifdef	USE_ENCRYPTION
-	printf(_("  -K, --encryption-key-command\n"
-			 "                           command that returns encryption key\n"));
-#endif							/* USE_ENCRYPTION */
 	printf(_("  -N, --no-sync            do not wait for changes to be written safely to disk\n"));
 	printf(_("  -P, --progress           show progress information\n"));
 	printf(_("  -v, --verbose            output verbose messages\n"));
@@ -105,10 +101,12 @@ static const char *const skip[] = {
 	"pg_filenode.map",
 	"pg_internal.init",
 	"PG_VERSION",
-	"kdf_params",
 #ifdef EXEC_BACKEND
 	"config_exec_params",
 	"config_exec_params.new",
+#endif
+#ifdef USE_ENCRYPTION
+	"kdf_params",
 #endif
 	NULL,
 };
@@ -217,10 +215,6 @@ scan_file(const char *fn, BlockNumber segmentno)
 		if (PageIsNew(header))
 			continue;
 
-		if (data_encrypted)
-			decrypt_block(buf.data, buf.data, BLCKSZ, NULL,
-						  blockno + segmentno * RELSEG_SIZE, false);
-
 		csum = pg_checksum_page(buf.data, blockno + segmentno * RELSEG_SIZE);
 		current_size += r;
 		if (mode == PG_MODE_CHECK)
@@ -246,10 +240,6 @@ scan_file(const char *fn, BlockNumber segmentno)
 				pg_log_error("seek failed for block %u in file \"%s\": %m", blockno, fn);
 				exit(1);
 			}
-
-			if (data_encrypted)
-				encrypt_block(buf.data, buf.data, BLCKSZ, NULL,
-							  blockno + segmentno * RELSEG_SIZE, false);
 
 			/* Write block with checksum */
 			w = write(f, buf.data, BLCKSZ);
@@ -425,7 +415,7 @@ main(int argc, char *argv[])
 		}
 	}
 
-	while ((c = getopt_long(argc, argv, "cD:deK:NPf:v", long_options, &option_index)) != -1)
+	while ((c = getopt_long(argc, argv, "cD:deNPf:v", long_options, &option_index)) != -1)
 	{
 		switch (c)
 		{
@@ -446,11 +436,6 @@ main(int argc, char *argv[])
 				}
 				only_filenode = pstrdup(optarg);
 				break;
-#ifdef	USE_ENCRYPTION
-			case 'K':
-				encryption_key_command = pg_strdup(optarg);
-				break;
-#endif							/* USE_ENCRYPTION */
 			case 'N':
 				do_sync = false;
 				break;
@@ -558,35 +543,6 @@ main(int argc, char *argv[])
 		pg_log_error("data checksums are already enabled in cluster");
 		exit(1);
 	}
-
-	/*
-	 * Try to retrieve the command from environment variable. We do this
-	 * primarily to make automated tests work for encrypted cluster w/o
-	 * changing the scripts. XXX Not sure the variable should be
-	 * documented. If we do, then pg_ctl should probably accept it too.
-	 */
-	if (encryption_key_command == NULL)
-	{
-		encryption_key_command = getenv("PGENCRKEYCMD");
-		if (encryption_key_command && strlen(encryption_key_command) == 0)
-			encryption_key_command = NULL;
-	}
-
-	if (encryption_key_command)
-	{
-		run_encryption_key_command(DataDir);
-		setup_encryption();
-		data_encrypted = true;
-	}
-
-	if (ControlFile->data_cipher > PG_CIPHER_NONE && !data_encrypted)
-	{
-		pg_log_error("data is encrypted, please pass the encryption key command");
-		exit(1);
-	}
-
-	if (ControlFile->data_cipher == PG_CIPHER_NONE && data_encrypted)
-		pg_log_warning("data is not encrypted, ignoring the encryption key command");
 
 	/* Operate on all files if checking or enabling checksums */
 	if (mode == PG_MODE_CHECK || mode == PG_MODE_ENABLE)

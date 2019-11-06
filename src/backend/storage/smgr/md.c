@@ -32,7 +32,6 @@
 #include "postmaster/bgwriter.h"
 #include "storage/fd.h"
 #include "storage/bufmgr.h"
-#include "storage/encryption.h"
 #include "storage/md.h"
 #include "storage/relfilenode.h"
 #include "storage/smgr.h"
@@ -139,8 +138,6 @@ static MdfdVec *_mdfd_getseg(SMgrRelation reln, ForkNumber forkno,
 static BlockNumber _mdnblocks(SMgrRelation reln, ForkNumber forknum,
 							  MdfdVec *seg);
 
-static void mdencrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer);
-static void mddecrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer);
 
 /*
  *	mdinit() -- Initialize private state for magnetic disk storage manager.
@@ -403,16 +400,6 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 
 	Assert(seekpos < (off_t) BLCKSZ * RELSEG_SIZE);
 
-	/*
-	 * Only encrypt the page if it has valid LSN (IV). Otherwise it should be
-	 * a new page.
-	 */
-	if (data_encrypted && !XLogRecPtrIsInvalid(PageGetLSN(buffer)))
-	{
-		mdencrypt(reln, forknum, blocknum, buffer);
-		buffer = encrypt_buf.data;
-	}
-
 	if ((nbytes = FileWrite(v->mdfd_vfd, buffer, BLCKSZ, seekpos, WAIT_EVENT_DATA_FILE_EXTEND)) != BLCKSZ)
 	{
 		if (nbytes < 0)
@@ -599,7 +586,6 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 	off_t		seekpos;
 	int			nbytes;
 	MdfdVec    *v;
-	char	   *buffer_read = buffer;
 
 	TRACE_POSTGRESQL_SMGR_MD_READ_START(forknum, blocknum,
 										reln->smgr_rnode.node.spcNode,
@@ -614,10 +600,7 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 
 	Assert(seekpos < (off_t) BLCKSZ * RELSEG_SIZE);
 
-	if (data_encrypted)
-		buffer_read = encrypt_buf.data;
-
-	nbytes = FileRead(v->mdfd_vfd, buffer_read, BLCKSZ, seekpos, WAIT_EVENT_DATA_FILE_READ);
+	nbytes = FileRead(v->mdfd_vfd, buffer, BLCKSZ, seekpos, WAIT_EVENT_DATA_FILE_READ);
 
 	TRACE_POSTGRESQL_SMGR_MD_READ_DONE(forknum, blocknum,
 									   reln->smgr_rnode.node.spcNode,
@@ -652,8 +635,6 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 							blocknum, FilePathName(v->mdfd_vfd),
 							nbytes, BLCKSZ)));
 	}
-	else if (data_encrypted)
-		mddecrypt(reln, forknum, blocknum, buffer);
 }
 
 /*
@@ -689,11 +670,6 @@ mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 
 	Assert(seekpos < (off_t) BLCKSZ * RELSEG_SIZE);
 
-	if (data_encrypted)
-	{
-		mdencrypt(reln, forknum, blocknum, buffer);
-		buffer = encrypt_buf.data;
-	}
 	nbytes = FileWrite(v->mdfd_vfd, buffer, BLCKSZ, seekpos, WAIT_EVENT_DATA_FILE_WRITE);
 
 	TRACE_POSTGRESQL_SMGR_MD_WRITE_DONE(forknum, blocknum,
@@ -1269,19 +1245,6 @@ _mdnblocks(SMgrRelation reln, ForkNumber forknum, MdfdVec *seg)
 						FilePathName(seg->mdfd_vfd))));
 	/* note that this calculation will ignore any partial block at EOF */
 	return (BlockNumber) (len / BLCKSZ);
-}
-
-
-static void
-mdencrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer)
-{
-	encrypt_block(buffer, encrypt_buf.data, BLCKSZ, NULL, blocknum, false);
-}
-
-static void
-mddecrypt(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *dest)
-{
-	decrypt_block(encrypt_buf.data, dest, BLCKSZ, NULL, blocknum, false);
 }
 
 /*

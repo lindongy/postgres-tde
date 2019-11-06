@@ -240,16 +240,18 @@ sample_encryption(char *buf)
  *
  * "tweak" value must be TWEAK_SIZE bytes long. If NULL is passed, we suppose
  * that the input data start with PageHeaderData. In this case page LSN is not
- * encrypted because we use it as an encryption initialization vector (IV). In
- * such a case we don't encrypt the initial sizeof(PageXLogRecPtr) bytes so
- * the tweak is preserved for decryption.
+ * encrypted because we use it as an encryption initialization vector (IV),
+ * and will need that for decryption. Page checksum stays unencrypted too
+ * because it should be computed out of the encrypted data (the encrypted data
+ * is what we actually store to disk).
  *
  * "block" is number of relation block to be added to the tweak if we
  * construct it here. Ignored if valid tweak is passed.
  *
  * All-zero blocks are not encrypted to correctly handle relation extension,
  * and also to simplify handling of holes created by seek past EOF and
- * consequent write (see buffile.c).
+ * consequent write (see buffile.c). And specifically for relation pages, the
+ * problem is that empty page does not have valid LSN.
  */
 void
 encrypt_block(const char *input, char *output, Size size, char *tweak,
@@ -268,7 +270,7 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
 	 */
 	if (tweak == NULL)
 	{
-		size_t	lsn_size;
+		size_t	lsn_size, unencr_size;
 
 		Assert(block != InvalidBlockNumber);
 
@@ -318,10 +320,11 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
 		if (input != output)
 			memcpy(output, input, lsn_size);
 
-		/* Do not encrypt the LSN. */
-		input += lsn_size;
-		output += lsn_size;
-		size -= lsn_size;
+		/* Do not encrypt the LSN and checksum. */
+		unencr_size = offsetof(PageHeaderData, pd_flags);
+		input += unencr_size;
+		output += unencr_size;
+		size -= unencr_size;
 	}
 	/*
 	 * Empty page is not worth encryption, and encryption of zeroes wouldn't
@@ -375,7 +378,7 @@ decrypt_block(const char *input, char *output, Size size, char *tweak,
 
 	if (tweak == NULL)
 	{
-		size_t	lsn_size;
+		size_t	lsn_size, unencr_size;
 
 		Assert(block != InvalidBlockNumber);
 
@@ -401,9 +404,11 @@ decrypt_block(const char *input, char *output, Size size, char *tweak,
 		if (input != output)
 			memcpy(output, input, lsn_size);
 
-		input += lsn_size;
-		output += lsn_size;
-		size -= lsn_size;
+		/* Do not encrypt the LSN and checksum. */
+		unencr_size = offsetof(PageHeaderData, pd_flags);
+		input += unencr_size;
+		output += unencr_size;
+		size -= unencr_size;
 	}
 	else if (IsAllZero(input, size))
 	{

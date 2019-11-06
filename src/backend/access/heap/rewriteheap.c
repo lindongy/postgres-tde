@@ -330,21 +330,29 @@ end_heap_rewrite(RewriteState state)
 	/* Write the last page, if any */
 	if (state->rs_buffer_valid)
 	{
+		char	*buf = (char *) state->rs_buffer;
+
 		if (state->rs_use_wal)
 			log_newpage(&state->rs_new_rel->rd_node,
 						MAIN_FORKNUM,
 						state->rs_blockno,
-						state->rs_buffer,
+						buf,
 						true);
 		else if (data_encrypted)
 			enforce_lsn_for_encryption(state->rs_new_rel->rd_rel->relpersistence,
-									   (char *) state->rs_buffer);
+									   buf);
+		if (data_encrypted)
+		{
+			encrypt_block(buf, encrypt_buf.data, BLCKSZ, NULL,
+						  state->rs_blockno, false);
+			buf = encrypt_buf.data;
+		}
 
 		RelationOpenSmgr(state->rs_new_rel);
 
-		PageSetChecksumInplace(state->rs_buffer, state->rs_blockno);
+		PageSetChecksumInplace(buf, state->rs_blockno);
 		smgrextend(state->rs_new_rel->rd_smgr, MAIN_FORKNUM, state->rs_blockno,
-				   (char *) state->rs_buffer, true);
+				   buf, true);
 	}
 
 	/*
@@ -695,6 +703,8 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 
 		if (len + saveFreeSpace > pageFreeSpace)
 		{
+			char	*buf = (char *) page;
+
 			/* Doesn't fit, so write out the existing page */
 
 			/* XLOG stuff */
@@ -702,11 +712,11 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 				log_newpage(&state->rs_new_rel->rd_node,
 							MAIN_FORKNUM,
 							state->rs_blockno,
-							page,
+							buf,
 							true);
 			else if (data_encrypted)
 				enforce_lsn_for_encryption(state->rs_new_rel->rd_rel->relpersistence,
-										   (char *) page);
+										   buf);
 
 			/*
 			 * Now write the page. We say isTemp = true even if it's not a
@@ -716,9 +726,16 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 			 */
 			RelationOpenSmgr(state->rs_new_rel);
 
-			PageSetChecksumInplace(page, state->rs_blockno);
+			if (data_encrypted)
+			{
+				encrypt_block(buf, encrypt_buf.data, BLCKSZ, NULL,
+							  state->rs_blockno, false);
+				buf = encrypt_buf.data;
+			}
+
+			PageSetChecksumInplace(buf, state->rs_blockno);
 			smgrextend(state->rs_new_rel->rd_smgr, MAIN_FORKNUM,
-					   state->rs_blockno, (char *) page, true);
+					   state->rs_blockno, buf, true);
 
 			state->rs_blockno++;
 			state->rs_buffer_valid = false;

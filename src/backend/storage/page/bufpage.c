@@ -78,9 +78,13 @@ PageInit(Page page, Size pageSize, Size specialSize)
  * allow zeroed pages here, and are careful that the page access macros
  * treat such a page as empty and without free space.  Eventually, VACUUM
  * will clean up such a page and make it usable.
+ *
+ * If "page_encr" is passed, it points to encrypted page and "page" is its
+ * plain form. The point is that checksum needs to be verified before
+ * decryption, but other fields must be checked after that.
  */
 bool
-PageIsVerified(Page page, BlockNumber blkno)
+PageIsVerified(Page page, BlockNumber blkno, Page page_encr)
 {
 	PageHeader	p = (PageHeader) page;
 	bool		checksum_failure = false;
@@ -94,10 +98,25 @@ PageIsVerified(Page page, BlockNumber blkno)
 	{
 		if (DataChecksumsEnabled())
 		{
+			Page page_save = NULL;
+
+			if (page_encr)
+			{
+				page_save = page;
+				page = page_encr;
+				p = (PageHeader) page;
+			}
+
 			checksum = pg_checksum_page((char *) page, blkno);
 
 			if (checksum != p->pd_checksum)
 				checksum_failure = true;
+
+			if (page_save)
+			{
+				page = page_save;
+				p = (PageHeader) page;
+			}
 		}
 
 		/*

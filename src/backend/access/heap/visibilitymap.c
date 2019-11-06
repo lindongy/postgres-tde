@@ -658,14 +658,13 @@ vm_extend(Relation rel, BlockNumber vm_nblocks)
 	/* Now extend the file */
 	while (vm_nblocks_now < vm_nblocks)
 	{
-		PageSetChecksumInplace((Page) pg.data, vm_nblocks_now);
 		/*
-		 * Encryption: invalid LSN means that the page won't be
-		 * encrypted. This is o.k. as the page is still empty. It'd be hard to
-		 * set a "fake LSN" because the relation can receive a regular one
-		 * later if it's RELPERSISTENCE_PERMANENT.
+		 * Encryption: invalid LSN means that the page should not be
+		 * encrypted. This is o.k. as the page is still empty.
 		 */
 		Assert(XLogRecPtrIsInvalid(PageGetLSN(pg.data)));
+
+		PageSetChecksumInplace((Page) pg.data, vm_nblocks_now);
 		smgrextend(rel->rd_smgr, VISIBILITYMAP_FORKNUM, vm_nblocks_now,
 				   pg.data, false);
 		vm_nblocks_now++;

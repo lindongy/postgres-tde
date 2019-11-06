@@ -1584,50 +1584,13 @@ sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf
 			verify_checksum = false;
 		}
 
-		/*
-		 * Decrypt the file if needed.
-		 *
-		 * Unlike the checksum verification (see below), we don't need to care
-		 * about LSN. As long as we use AES cipher in CTR mode, torn page
-		 * write should not affect the successfully written part of the page,
-		 * and crash recovery on cluster startup will fix the rest.
-		 */
-		if (decrypt_file)
-		{
-			for (i = 0; i < cnt / BLCKSZ; i++)
-			{
-				page = buf + BLCKSZ * i;
-				decrypt_block(page, page, BLCKSZ, NULL,
-							  blkno + segmentno * RELSEG_SIZE + i, false);
-			}
-		}
-
 		if (verify_checksum)
 		{
-			static char	*buf_encrypted = NULL;
-			bool	decrypt_temp = false;
-
-			/*
-			 * If decryption is needed only due to checksum verification, put
-			 * the encrypted data aside.
-			 */
-			if (data_encrypted && !decrypt_file)
-			{
-				if (buf_encrypted == NULL)
-					buf_encrypted = (char *) palloc(TAR_SEND_SIZE);
-				memcpy(buf_encrypted, buf, cnt);
-
-				decrypt_temp = true;
-			}
-
 			for (i = 0; i < cnt / BLCKSZ; i++)
 			{
-				page = buf + BLCKSZ * i;
+				BlockNumber	blkno_global = blkno + segmentno * RELSEG_SIZE;
 
-				if (decrypt_temp)
-					decrypt_block(page, page, BLCKSZ, NULL,
-								  blkno + segmentno * RELSEG_SIZE + i,
-								  false);
+				page = buf + BLCKSZ * i;
 
 				/*
 				 * Only check pages which have not been modified since the
@@ -1639,7 +1602,7 @@ sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf
 				 */
 				if (!PageIsNew(page) && PageGetLSN(page) < startptr)
 				{
-					checksum = pg_checksum_page((char *) page, blkno + segmentno * RELSEG_SIZE);
+					checksum = pg_checksum_page((char *) page, blkno_global);
 					phdr = (PageHeader) page;
 					if (phdr->pd_checksum != checksum)
 					{
@@ -1694,15 +1657,6 @@ sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf
 												readfilename)));
 							}
 
-							/*
-							 * If only checksum verification requires
-							 * decryption, backup the encrypted data. (The
-							 * actual decryption will take place in the next
-							 * loop.)
-							 */
-							if (decrypt_temp)
-								memcpy(buf_encrypted + BLCKSZ * i, page, BLCKSZ);
-
 							/* Set flag so we know a retry was attempted */
 							block_retry = true;
 
@@ -1727,13 +1681,25 @@ sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf
 											"be reported", readfilename)));
 					}
 				}
+
+				/*
+				 * Decrypt the page if needed.
+				 */
+				if (decrypt_file)
+				{
+					decrypt_block(page, page, BLCKSZ, NULL, blkno_global,
+								  false);
+
+					/*
+					 * Compute new checksum for the decrypted page.
+					 */
+					if (DataChecksumsEnabled())
+						PageSetChecksumInplace(page, blkno_global);
+				}
+
 				block_retry = false;
 				blkno++;
 			}
-
-			/* Make sure we send the encrypted data. */
-			if (decrypt_temp)
-				memcpy(buf, buf_encrypted, cnt);
 		}
 
 		/* Send the chunk as a CopyData message */
