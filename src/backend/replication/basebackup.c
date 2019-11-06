@@ -17,6 +17,7 @@
 #include <time.h>
 
 #include "access/xlog_internal.h"	/* for pg_start/stop_backup */
+#include "catalog/pg_class.h"
 #include "catalog/pg_control.h"
 #include "catalog/pg_type.h"
 #include "common/controldata_utils.h"
@@ -612,8 +613,12 @@ perform_base_backup(basebackup_options *opt)
 						char	*data = buf + seg_offset;
 
 						XLogEncryptionTweak(tweak, tli, segno, seg_offset);
-						decrypt_block(data, data, XLOG_BLCKSZ, tweak,
-									  InvalidBlockNumber, false);
+						decrypt_block(data,
+									  data,
+									  XLOG_BLCKSZ,
+									  tweak,
+									  InvalidBlockNumber,
+									  EDK_PERMANENT);
 
 						seg_offset += XLOG_BLCKSZ;
 					}
@@ -1687,8 +1692,11 @@ sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf
 				 */
 				if (decrypt_file)
 				{
-					decrypt_block(page, page, BLCKSZ, NULL, blkno_global,
-								  false);
+					/*
+					 * The function should not be called on other than
+					 * permanent relations.
+					 */
+					decrypt_page(page, page, BLCKSZ, RELPERSISTENCE_PERMANENT);
 
 					/*
 					 * Compute new checksum for the decrypted page.

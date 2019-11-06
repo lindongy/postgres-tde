@@ -348,7 +348,7 @@ RelationCopyStorage(SMgrRelation src, SMgrRelation dst,
 
 		if (data_encrypted)
 		{
-			decrypt_block(buf_read, buf.data, BLCKSZ, NULL, blkno, false);
+			decrypt_page(buf_read, buf.data, blkno, relpersistence);
 			page_encr = buf_read;
 		}
 
@@ -374,8 +374,10 @@ RelationCopyStorage(SMgrRelation src, SMgrRelation dst,
 		buf_dst = (char *) page;
 		if (data_encrypted)
 		{
-			encrypt_block(buf_dst, encrypt_buf.data, BLCKSZ, NULL, blkno,
-						  false);
+			encrypt_page(buf_dst,
+						 encrypt_buf.data,
+						 blkno,
+						 relpersistence);
 			buf_dst = encrypt_buf.data;
 		}
 

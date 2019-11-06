@@ -11,6 +11,8 @@
 #include <openssl/evp.h>
 
 unsigned char encryption_key[ENCRYPTION_KEY_LENGTH];
+
+unsigned char encryption_key_temp[ENCRYPTION_KEY_LENGTH];
 #endif	/* USE_ENCRYPTION */
 
 char	   *encryption_key_command = NULL;

@@ -1221,8 +1221,12 @@ WriteEmptyXLOG(void)
 		char		tweak[TWEAK_SIZE];
 
 		XLogEncryptionTweak(tweak, page->xlp_tli, newXlogSegNo, 0);
-		encrypt_block(buffer.data, buffer.data, XLOG_BLCKSZ, tweak,
-					  InvalidBlockNumber, false);
+		encrypt_block(buffer.data,
+					  buffer.data,
+					  XLOG_BLCKSZ,
+					  tweak,
+					  InvalidBlockNumber,
+					  EDK_PERMANENT);;
 	}
 
 	/* Write the first page */

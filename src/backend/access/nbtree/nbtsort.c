@@ -692,7 +692,10 @@ _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 	buf = (char *) page;
 	if (data_encrypted)
 	{
-		encrypt_block(buf, encrypt_buf.data, BLCKSZ, NULL, blkno, false);
+		encrypt_page(buf,
+					 encrypt_buf.data,
+					 blkno,
+					 wstate->index->rd_rel->relpersistence);
 		buf = encrypt_buf.data;
 	}
 

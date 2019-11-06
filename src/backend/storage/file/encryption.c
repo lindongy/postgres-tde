@@ -162,6 +162,8 @@ void
 setup_encryption(void)
 {
 #ifdef USE_ENCRYPTION
+	int	rc;
+
 	/*
 	 * Setup OpenSSL.
 	 *
@@ -193,6 +195,38 @@ setup_encryption(void)
 #else
 	encrypt_buf_xlog = (char *) palloc(ENCRYPT_BUF_XLOG_SIZE);
 #endif
+
+	/*
+	 * Derive encryption_key_temp (the key for unlogged / temporary tables)
+	 * from encryption_key.
+	 *
+	 * TODO Check if there's better way to do this.
+	 */
+	rc = PKCS5_PBKDF2_HMAC((char *) encryption_key,
+						   ENCRYPTION_KEY_LENGTH,
+						   /*
+							* No salt is needed as long as we consider
+							* encryption_key existing key to be strong.
+							*/
+						   NULL, 0,
+						   /*
+							* Not many iterations needed, for the same
+							* reason.
+							*/
+						   1000,
+						   EVP_sha1(),
+						   ENCRYPTION_KEY_LENGTH,
+						   encryption_key_temp);
+
+	if (rc != 1)
+	{
+#ifndef FRONTEND
+		ereport(FATAL, (errmsg("failed to derive key from password")));
+#else
+		fprintf(stderr, "failed to derive key from password");
+		exit(EXIT_FAILURE);
+#endif	/* FRONTEND */
+	}
 
 	encryption_setup_done = true;
 #else  /* !USE_ENCRYPTION */
@@ -227,7 +261,7 @@ sample_encryption(char *buf)
 		tweak[i] = i;
 
 	encrypt_block("postgresqlcrypt", buf, ENCRYPTION_SAMPLE_SIZE, tweak,
-				  InvalidBlockNumber, false);
+				  InvalidBlockNumber, EDK_PERMANENT);
 }
 
 /*
@@ -255,12 +289,13 @@ sample_encryption(char *buf)
  */
 void
 encrypt_block(const char *input, char *output, Size size, char *tweak,
-			  BlockNumber block, bool buffile)
+			  BlockNumber block, EncryptedDataKind data_kind)
 {
 #ifdef USE_ENCRYPTION
 	EVP_CIPHER_CTX *ctx;
 	int			out_size;
 	char	tweak_loc[TWEAK_SIZE];
+	unsigned char	*key;
 
 	Assert(data_encrypted);
 
@@ -337,10 +372,11 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
 		return;
 	}
 
-	ctx = !buffile ? ctx_encrypt : ctx_encrypt_buffile;
+	ctx = data_kind != EDK_BUFFILE ? ctx_encrypt : ctx_encrypt_buffile;
+	key = data_kind != EDK_TEMP ? encryption_key : encryption_key_temp;
 
 	/* The remaining initialization. */
-	if (EVP_EncryptInit_ex(ctx, NULL, NULL, encryption_key,
+	if (EVP_EncryptInit_ex(ctx, NULL, NULL, key,
 						   (unsigned char *) tweak) != 1)
 		evp_error();
 
@@ -367,12 +403,13 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
  */
 void
 decrypt_block(const char *input, char *output, Size size, char *tweak,
-			  BlockNumber block, bool buffile)
+			  BlockNumber block, EncryptedDataKind data_kind)
 {
 #ifdef USE_ENCRYPTION
 	EVP_CIPHER_CTX *ctx;
 	int			out_size;
 	char	tweak_loc[TWEAK_SIZE];
+	unsigned char	*key;
 
 	Assert(data_encrypted);
 
@@ -417,10 +454,11 @@ decrypt_block(const char *input, char *output, Size size, char *tweak,
 		return;
 	}
 
-	ctx = !buffile ? ctx_decrypt : ctx_decrypt_buffile;
+	ctx = data_kind != EDK_BUFFILE ? ctx_encrypt : ctx_encrypt_buffile;
+	key = data_kind != EDK_TEMP ? encryption_key : encryption_key_temp;
 
 	/* The remaining initialization. */
-	if (EVP_DecryptInit_ex(ctx, NULL, NULL, encryption_key,
+	if (EVP_DecryptInit_ex(ctx, NULL, NULL, key,
 						   (unsigned char *) tweak) != 1)
 		evp_error();
 
@@ -572,13 +610,6 @@ mdtweak(char *tweak, RelFileNode *relnode, ForkNumber forknum, BlockNumber block
  * the "fake LSN" if such an empty page belongs to unlogged / temporary table,
  * but it'd be harder for permanent ones. Let's reject all cases to be
  * consistent.
- *
- * TODO Introduce a separate key for temporary / unlogged relations to make
- * sure that key+IV is not reused if the "fake LSN" is equal to a regular
- * LSN. However make sure (in mdencrypt() / mddecrypt() mdextend() ?) that
- * INIT_FORKNUM fork is encrypted using the regular key because it uses the
- * regular LSN. (Warn users that the beta release implementing this requires
- * user to drop the existing unlogged relations.)
  */
 void
 enforce_lsn_for_encryption(char relpersistence, char *buf_contents)

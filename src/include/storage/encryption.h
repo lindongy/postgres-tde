@@ -119,14 +119,37 @@ extern void encryption_error(bool fatal, char *message);
 #endif	/* USE_ENCRYPTION */
 
 /*
+ * Different kinds of data require different ciphers and keys.
+ */
+typedef enum EncryptedDataKind
+{
+	EDK_PERMANENT,				/* Permanent relations and WAL. */
+	EDK_BUFFILE,				/* Temporary and transient files
+								 * (buffile.c) */
+	EDK_TEMP					/* Unlogged and temporary relations. */
+} EncryptedDataKind;
+
+/*
  * These functions do interact with OpenSSL, but we only enclose the relevant
  * parts in "#ifdef USE_ENCRYPTION". Thus caller does not have to use #ifdef
  * and the encryption code is less invasive.
  */
 extern void encrypt_block(const char *input, char *output, Size size,
-						  char *tweak, BlockNumber block, bool buffile);
+						  char *tweak, BlockNumber block,
+						  EncryptedDataKind data_kind);
 extern void decrypt_block(const char *input, char *output, Size size,
-						  char *tweak, BlockNumber block, bool buffile);
+						  char *tweak, BlockNumber block,
+						  EncryptedDataKind data_kind);
+
+/*
+ * Convenience macros to encrypt / decrypt relation page.
+ */
+#define encrypt_page(input, output, block, relpersistence)	\
+	encrypt_block((input), (output), BLCKSZ, NULL, (block), \
+				  ((relpersistence) == RELPERSISTENCE_PERMANENT) ? EDK_PERMANENT : EDK_TEMP)
+#define decrypt_page(input, output, block, relpersistence)	\
+	decrypt_block((input), (output), BLCKSZ, NULL, (block), \
+				  ((relpersistence) == RELPERSISTENCE_PERMANENT) ? EDK_PERMANENT : EDK_TEMP)
 
 /*
  * The following functions do not interact with OpenSSL directly so they are

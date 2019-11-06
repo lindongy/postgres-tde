@@ -1031,8 +1031,10 @@ _hash_alloc_buckets(Relation rel, BlockNumber firstblock, uint32 nblocks)
 
 	if (data_encrypted)
 	{
-		encrypt_block(zerobuf.data, encrypt_buf.data, BLCKSZ, NULL, lastblock,
-					  false);
+		encrypt_page(zerobuf.data,
+					 encrypt_buf.data,
+					 lastblock,
+					 rel->rd_rel->relpersistence);
 		page = encrypt_buf.data;
 	}
 

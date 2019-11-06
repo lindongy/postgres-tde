@@ -2567,7 +2567,7 @@ retry:
 							  nencrypt,
 							  tweak,
 							  InvalidBlockNumber,
-							  false);
+							  EDK_PERMANENT);
 			}
 
 			/*

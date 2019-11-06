@@ -799,8 +799,12 @@ XLogRead(char *buf, int segsize, TimeLineID tli, XLogRecPtr startptr,
 				char		tweak[TWEAK_SIZE];
 
 				XLogEncryptionTweak(tweak, tli, sendSegNo, decryptOff);
-				decrypt_block(decrypt_p, decrypt_p, XLOG_BLCKSZ, tweak,
-							  InvalidBlockNumber, false);
+				decrypt_block(decrypt_p,
+							  decrypt_p,
+							  XLOG_BLCKSZ,
+							  tweak,
+							  InvalidBlockNumber,
+							  EDK_PERMANENT);
 
 				decrypt_p += XLOG_BLCKSZ;
 				decryptOff += XLOG_BLCKSZ;

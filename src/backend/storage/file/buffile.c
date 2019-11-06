@@ -662,7 +662,7 @@ BufFileLoadBuffer(BufFile *file)
 					  BLCKSZ,
 					  tweak,
 					  InvalidBlockNumber,
-					  true);
+					  EDK_BUFFILE);
 
 #ifdef	USE_ASSERT_CHECKING
 
@@ -832,7 +832,7 @@ BufFileDumpBufferEncrypted(BufFile *file)
 				  BLCKSZ,
 				  tweak,
 				  InvalidBlockNumber,
-				  true);
+				  EDK_BUFFILE);
 
 	thisfile = file->files[file->common.curFile];
 	bytestowrite = FileWrite(thisfile,
@@ -1666,7 +1666,7 @@ retry:
 					  BLCKSZ,
 					  tweak,
 					  InvalidBlockNumber,
-					  true);
+					  EDK_BUFFILE);
 
 #ifdef	USE_ASSERT_CHECKING
 
@@ -1720,7 +1720,7 @@ BufFileDumpBufferTransient(TransientBufFile *file)
 					  BLCKSZ,
 					  tweak,
 					  InvalidBlockNumber,
-					  true);
+					  EDK_BUFFILE);
 		write_ptr = encrypt_buf.data;
 		bytestowrite = BLCKSZ;
 	}

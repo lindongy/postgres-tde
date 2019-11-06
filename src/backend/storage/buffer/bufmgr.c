@@ -909,8 +909,10 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 
 			if (data_encrypted)
 			{
-				decrypt_block(bufRead, bufBlock, BLCKSZ, NULL, blockNum,
-							  false);
+				decrypt_page(bufRead,
+							 bufBlock,
+							 blockNum,
+							 relpersistence);
 				bufBlockEncr = bufRead;
 			}
 
@@ -2767,8 +2769,8 @@ FlushBuffer(BufferDesc *buf, SMgrRelation reln)
 
 		enforce_lsn_for_encryption(relpersistence, (char *) bufBlock);
 
-		encrypt_block(bufBlock, encrypt_buf.data, BLCKSZ, NULL,
-					  buf->tag.blockNum, false);
+		encrypt_page(bufBlock, encrypt_buf.data, buf->tag.blockNum,
+					 relpersistence);
 		bufBlock = encrypt_buf.data;
 	}
 
@@ -3253,8 +3255,10 @@ FlushRelationBuffers(Relation rel)
 					enforce_lsn_for_encryption(rel->rd_rel->relpersistence,
 											   (char *) localpage);
 
-					encrypt_block((char *) localpage, encrypt_buf.data, BLCKSZ, NULL,
-								  bufHdr->tag.blockNum, false);
+					encrypt_page((char *) localpage,
+								 encrypt_buf.data,
+								 bufHdr->tag.blockNum,
+								 rel->rd_rel->relpersistence);
 					localpage = encrypt_buf.data;
 				}
 

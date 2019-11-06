@@ -343,8 +343,10 @@ end_heap_rewrite(RewriteState state)
 									   buf);
 		if (data_encrypted)
 		{
-			encrypt_block(buf, encrypt_buf.data, BLCKSZ, NULL,
-						  state->rs_blockno, false);
+			encrypt_page(buf,
+						 encrypt_buf.data,
+						 state->rs_blockno,
+						 state->rs_new_rel->rd_rel->relpersistence);
 			buf = encrypt_buf.data;
 		}
 
@@ -728,8 +730,10 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 
 			if (data_encrypted)
 			{
-				encrypt_block(buf, encrypt_buf.data, BLCKSZ, NULL,
-							  state->rs_blockno, false);
+				encrypt_page(buf,
+							 encrypt_buf.data,
+							 state->rs_blockno,
+							 state->rs_new_rel->rd_rel->relpersistence);
 				buf = encrypt_buf.data;
 			}
 

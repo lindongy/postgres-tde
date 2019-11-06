@@ -218,8 +218,10 @@ LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber blockNum,
 			enforce_lsn_for_encryption(RELPERSISTENCE_TEMP,
 									   (char *) localpage);
 
-			encrypt_block((char *) localpage, encrypt_buf.data, BLCKSZ, NULL,
-						  bufHdr->tag.blockNum, false);
+			encrypt_page((char *) localpage,
+						 encrypt_buf.data,
+						 bufHdr->tag.blockNum,
+						 RELPERSISTENCE_TEMP);
 			localpage = encrypt_buf.data;
 		}
 		PageSetChecksumInplace(localpage, bufHdr->tag.blockNum);
