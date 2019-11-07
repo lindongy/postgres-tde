@@ -98,15 +98,6 @@ echo &lt;your key&gt;
  </para>
 
  <para>
-  If encryption is enabled, <xref linkend="guc-full-page-writes"/> must be
-  turned on, otherwise the server refuses to start. This is because the
-  encryption introduces dependencies between data within a page, and thus
-  server crash during disk write can result in more serious damage of the page
-  than it would do without encryption. The whole page needs to be retrieved
-  from WAL in such a case to ensure reliable recovery.
- </para>
-
- <para>
   Once the <productname>PostgreSQL</productname> server is running, client
   applications should recognize no difference from an unencrypted cluster,
   except that <xref linkend="guc-data-encryption"/> variable is set.

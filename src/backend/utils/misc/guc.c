@@ -174,7 +174,6 @@ static void assign_session_replication_role(int newval, void *extra);
 static bool check_temp_buffers(int *newval, void **extra, GucSource source);
 static bool check_bonjour(bool *newval, void **extra, GucSource source);
 static bool check_ssl(bool *newval, void **extra, GucSource source);
-static bool check_full_page_writes(bool *newval, void **extra, GucSource source);
 static bool check_stage_log_stats(bool *newval, void **extra, GucSource source);
 static bool check_log_stats(bool *newval, void **extra, GucSource source);
 static bool check_canonical_path(char **newval, void **extra, GucSource source);
@@ -1180,7 +1179,7 @@ static struct config_bool ConfigureNamesBool[] =
 		},
 		&fullPageWrites,
 		true,
-		check_full_page_writes, NULL, NULL
+		NULL, NULL, NULL
 	},
 
 	{
@@ -11118,19 +11117,6 @@ check_ssl(bool *newval, void **extra, GucSource source)
 		return false;
 	}
 #endif
-	return true;
-}
-
-static bool
-check_full_page_writes(bool *newval, void **extra, GucSource source)
-{
-	if (!(*newval) && data_encrypted)
-	{
-		GUC_check_errdetail("Cannot disable parameter when the cluster is encrypted.");
-
-		return false;
-	}
-
 	return true;
 }
 

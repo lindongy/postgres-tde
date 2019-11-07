@@ -4898,32 +4898,6 @@ ReadControlFile(void)
 		memcpy(encryption_verification,
 			   ControlFile->encryption_verification,
 			   ENCRYPTION_SAMPLE_SIZE);
-
-		/*
-		 * full_page_writes must be set because torn page write of an
-		 * encrypted page implies that decryption of the page will produce
-		 * garbage. This damage can affect even those parts of the page that
-		 * haven't been modified by any access method. And since no access
-		 * method modified those parts, there might be no XLOG records to
-		 * repair them during crash recovery. So full page image is the only
-		 * way to fix such a page.
-		 *
-		 * Do not enforce this setting in binary upgrade mode, since
-		 * pg_upgrade sets it to off for performance reasons. (If the upgrade
-		 * crashes, the new cluster must be created from scratch anyway.)
-		 *
-		 * XXX It would be nice to have guc.c check so that we don't have to
-		 * copy and paste the error message. However it's unclear how to
-		 * ensure that either ERROR is raised or nothing happens at all. It
-		 * seems that set_config_option() can change
-		 * config_generic.reset_source if the check succeeded, but that's too
-		 * invasive.
-		 */
-		if (!fullPageWrites && !IsBinaryUpgrade)
-			ereport(FATAL,
-					(errmsg("invalid value for parameter \"full_page_writes\": %d",
-							fullPageWrites),
-					 errdetail("Cannot disable parameter when the cluster is encrypted.")));
 	}
 
 	/*
