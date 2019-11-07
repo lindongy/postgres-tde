@@ -54,14 +54,6 @@ extern char *encryption_key_command;
  */
 extern unsigned char encryption_key[];
 
-/*
- * Key to encrypt unlogged / temporary tables using AES-CTR cipher. It's
- * needed because LSN is used as the encryption IV and because we assign "fake
- * LSN" to pages of unlogged / temporary relations. It'd be hard to guarantee
- * that those fake LSNs do not collide with regular ones.
- */
-extern unsigned char encryption_key_temp[];
-
 extern void run_encryption_key_command(char *data_dir);
 extern void read_encryption_key_f(FILE *f, char *command);
 #endif /* COMMON_ENCRYPTION_H */

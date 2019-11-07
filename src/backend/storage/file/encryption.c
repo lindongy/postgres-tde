@@ -162,8 +162,6 @@ void
 setup_encryption(void)
 {
 #ifdef USE_ENCRYPTION
-	int	rc;
-
 	/*
 	 * Setup OpenSSL.
 	 *
@@ -195,38 +193,6 @@ setup_encryption(void)
 #else
 	encrypt_buf_xlog = (char *) palloc(ENCRYPT_BUF_XLOG_SIZE);
 #endif
-
-	/*
-	 * Derive encryption_key_temp (the key for unlogged / temporary tables)
-	 * from encryption_key.
-	 *
-	 * TODO Check if there's better way to do this.
-	 */
-	rc = PKCS5_PBKDF2_HMAC((char *) encryption_key,
-						   ENCRYPTION_KEY_LENGTH,
-						   /*
-							* No salt is needed as long as we consider
-							* encryption_key existing key to be strong.
-							*/
-						   NULL, 0,
-						   /*
-							* Not many iterations needed, for the same
-							* reason.
-							*/
-						   1000,
-						   EVP_sha1(),
-						   ENCRYPTION_KEY_LENGTH,
-						   encryption_key_temp);
-
-	if (rc != 1)
-	{
-#ifndef FRONTEND
-		ereport(FATAL, (errmsg("failed to derive key from password")));
-#else
-		fprintf(stderr, "failed to derive key from password");
-		exit(EXIT_FAILURE);
-#endif	/* FRONTEND */
-	}
 
 	encryption_setup_done = true;
 #else  /* !USE_ENCRYPTION */
@@ -295,7 +261,6 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
 	EVP_CIPHER_CTX *ctx;
 	int			out_size;
 	char	tweak_loc[TWEAK_SIZE];
-	unsigned char	*key;
 
 	Assert(data_encrypted);
 
@@ -306,6 +271,7 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
 	if (tweak == NULL)
 	{
 		size_t	lsn_size, unencr_size;
+		char	*c = tweak_loc;
 
 		Assert(block != InvalidBlockNumber);
 
@@ -325,9 +291,7 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
 		/* We're going to encrypt the page, so the IV should be valid. */
 		Assert(!XLogRecPtrIsInvalid(PageGetLSN(input)));
 
-		lsn_size = sizeof(PageXLogRecPtr);
-
-		memset(tweak_loc, 0, TWEAK_SIZE);
+		memset(c, 0, TWEAK_SIZE);
 
 		/*
 		 * The CTR mode counter is big endian (see crypto/modes/ctr128.c in
@@ -341,13 +305,31 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
 		 * Endian of the LSN does not matter: no one cares about the actual
 		 * value as long as it's unique for each encryption run.
 		 */
-		memcpy(tweak_loc, input, lsn_size);
+		lsn_size = sizeof(PageXLogRecPtr);
+		memcpy(c, input, lsn_size);
+		c += lsn_size;
 
 		/*
 		 * Add the block number, in case a single WAL record affects two (or
-		 * more?) pages.
+		 * more?) pages. Likewise, different endian-ness of the block number
+		 * does not affect its uniqueness.
 		 */
-		memcpy(tweak_loc + lsn_size, &block, sizeof(BlockNumber));
+		memcpy(c, &block, sizeof(BlockNumber));
+
+		/*
+		 * In case the "fake LSN" assigned to page of temporary / unlogged
+		 * relation is equal to an existing regular LSN of any permanent
+		 * relation, we need to ensure that the IV is still different. Do so
+		 * by setting one bit of the next available byte of the IV. There
+		 * should still be enough space for the internal counter of the crypto
+		 * library, even if page size is 32 kB - in that case we need 11 bits
+		 * (2^15 / 2^4 = 2^11), but 7 bytes are still left.
+		 */
+		if (data_kind == EDK_TEMP)
+		{
+			c += sizeof(BlockNumber);
+			*c |= 0x1 << 7;
+		}
 
 		tweak = tweak_loc;
 
@@ -373,10 +355,9 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
 	}
 
 	ctx = data_kind != EDK_BUFFILE ? ctx_encrypt : ctx_encrypt_buffile;
-	key = data_kind != EDK_TEMP ? encryption_key : encryption_key_temp;
 
 	/* The remaining initialization. */
-	if (EVP_EncryptInit_ex(ctx, NULL, NULL, key,
+	if (EVP_EncryptInit_ex(ctx, NULL, NULL, encryption_key,
 						   (unsigned char *) tweak) != 1)
 		evp_error();
 
@@ -409,13 +390,13 @@ decrypt_block(const char *input, char *output, Size size, char *tweak,
 	EVP_CIPHER_CTX *ctx;
 	int			out_size;
 	char	tweak_loc[TWEAK_SIZE];
-	unsigned char	*key;
 
 	Assert(data_encrypted);
 
 	if (tweak == NULL)
 	{
 		size_t	lsn_size, unencr_size;
+		char	*c = tweak_loc;
 
 		Assert(block != InvalidBlockNumber);
 
@@ -432,9 +413,15 @@ decrypt_block(const char *input, char *output, Size size, char *tweak,
 
 		lsn_size = sizeof(PageXLogRecPtr);
 
-		memset(tweak_loc, 0, TWEAK_SIZE);
-		memcpy(tweak_loc, input, lsn_size);
-		memcpy(tweak_loc + lsn_size, &block, sizeof(BlockNumber));
+		memset(c, 0, TWEAK_SIZE);
+		memcpy(c, input, lsn_size);
+		c += lsn_size;
+		memcpy(c, &block, sizeof(BlockNumber));
+		if (data_kind == EDK_TEMP)
+		{
+			c += sizeof(BlockNumber);
+			*c |= 0x1 << 7;
+		}
 
 		tweak = tweak_loc;
 
@@ -455,10 +442,9 @@ decrypt_block(const char *input, char *output, Size size, char *tweak,
 	}
 
 	ctx = data_kind != EDK_BUFFILE ? ctx_encrypt : ctx_encrypt_buffile;
-	key = data_kind != EDK_TEMP ? encryption_key : encryption_key_temp;
 
 	/* The remaining initialization. */
-	if (EVP_DecryptInit_ex(ctx, NULL, NULL, key,
+	if (EVP_DecryptInit_ex(ctx, NULL, NULL, encryption_key,
 						   (unsigned char *) tweak) != 1)
 		evp_error();
 
