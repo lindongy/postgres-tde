@@ -1625,7 +1625,23 @@ retry:
 
 	if (file->common.nbytes < 0)
 	{
-		/* TODO The W32 specific code, see FileWrite. */
+		/*
+		 * See comments in FileRead()
+		 */
+#ifdef WIN32
+		DWORD		error = GetLastError();
+
+		switch (error)
+		{
+			case ERROR_NO_SYSTEM_RESOURCES:
+				pg_usleep(1000L);
+				errno = EINTR;
+				break;
+			default:
+				_dosmaperr(error);
+				break;
+		}
+#endif
 
 		/* OK to retry if interrupted */
 		if (errno == EINTR)
@@ -1739,7 +1755,23 @@ retry:
 
 	if (nwritten < 0)
 	{
-		/* TODO The W32 specific code, see FileWrite. */
+		/*
+		 * See comments in FileRead()
+		 */
+#ifdef WIN32
+		DWORD		error = GetLastError();
+
+		switch (error)
+		{
+			case ERROR_NO_SYSTEM_RESOURCES:
+				pg_usleep(1000L);
+				errno = EINTR;
+				break;
+			default:
+				_dosmaperr(error);
+				break;
+		}
+#endif
 
 		/* OK to retry if interrupted */
 		if (errno == EINTR)
