@@ -78,8 +78,6 @@ get_bin_version(ClusterInfo *cluster)
  * of the command.
  *
  * The code requires it be called first from the primary thread on Windows.
- *
- * TODO Consolidate the use of popen() with Windows. Or use only popen()?
  */
 bool
 exec_prog(const char *log_file, const char *opt_log_file,

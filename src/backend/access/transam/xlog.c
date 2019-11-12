@@ -4900,10 +4900,6 @@ ReadControlFile(void)
 			   ENCRYPTION_SAMPLE_SIZE);
 	}
 
-	/*
-	 * This calculation relies on data_encryption (in particular the header
-	 * sizes do), so we could not do it earlier.
-	 */
 	UsableBytesInSegment =
 		(wal_segment_size / XLOG_BLCKSZ * UsableBytesInPage) -
 		(SizeOfXLogLongPHD - SizeOfXLogShortPHD);
