@@ -15,6 +15,7 @@
 
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/time.h>
 #include <sys/wait.h>
 
 #include "postgres_fe.h"
@@ -24,10 +25,10 @@
 #include "common/logging.h"
 #include "fe_utils/encryption.h"
 #include "libpq-fe.h"
-#include "libpq-int.h"
 #include "libpq/pqcomm.h"
 
 #ifdef USE_ENCRYPTION
+#include <openssl/evp.h>
 
 /*
  * Key derivation function.
@@ -310,8 +311,8 @@ send_key_to_postmaster(SendKeyArgs *args)
 				(pid_t) args->pm_pid)
 				return false;
 #else
-			if (WaitForSingleObject(args->postmasterProcess, 0) == WAIT_OBJECT_0)
-				return POSTMASTER_FAILED;
+			if (WaitForSingleObject(args->pmProcess, 0) == WAIT_OBJECT_0)
+				return false;
 #endif
 		}
 
@@ -329,8 +330,8 @@ send_key_to_postmaster(SendKeyArgs *args)
 		if (conn == NULL)
 			continue;
 
-		if (conn->status != CONNECTION_STARTED &&
-			conn->status != CONNECTION_MADE)
+		if (PQstatus(conn) != CONNECTION_STARTED &&
+			PQstatus(conn) != CONNECTION_MADE)
 		{
 			char	*msg = PQerrorMessage(conn);
 
@@ -347,9 +348,9 @@ send_key_to_postmaster(SendKeyArgs *args)
 		 * especially "allow" would be much trickier for
 		 * PQconnectSSLHandshake() to handle.
 		 */
-		sslmode = conn->sslmode[0];
+		sslmode = PQconnectionSSLMode(conn);
 		if (sslmode != 'd' && sslmode != 'a' && sslmode != 'p' &&
-			conn->connhost[0].type != CHT_UNIX_SOCKET)
+			!PQconnectedToSocket(conn))
 		{
 			if (!PQconnectSSLHandshake(conn))
 			{

@@ -178,3 +178,5 @@ PQgssEncInUse             175
 PQgetgssctx               176
 PQconnectSSLHandshake     177
 PQpacketSend              178
+PQconnectionSSLMode       179
+PQconnectedToSocket       180

@@ -22,7 +22,6 @@
 #include "common/logging.h"
 #include "fe_utils/encryption.h"
 #include "libpq-fe.h"
-#include "libpq-int.h"
 #include "libpq/pqcomm.h"
 #include "port/pg_crc32c.h"
 #include "getopt_long.h"
@@ -217,6 +216,8 @@ main(int argc, char **argv)
 	/* If password was received, turn it into encryption key. */
 	if (!expect_password)
 	{
+		int	encr_key_int[ENCRYPTION_KEY_LENGTH];
+
 		if (n < ENCRYPTION_KEY_CHARS)
 		{
 			pg_log_error("The key is too short");
@@ -225,13 +226,28 @@ main(int argc, char **argv)
 
 		for (i = 0; i < ENCRYPTION_KEY_LENGTH; i++)
 		{
-			if (sscanf(key_chars + 2 * i, "%2hhx", encryption_key + i) == 0)
+			/*
+			 * TODO Figure out how to use the the %2hhx formatting string on
+			 * windows, and remove the encr_key_init variable.
+			 */
+			/*
+			 * if (sscanf(key_chars + 2 * i, "%2hhx", encryption_key + i) == 0)
+			 * {
+			 * 	pg_log_error("Invalid character in encryption key at position %d",
+			 * 				 2 * i);
+			 * 	exit(EXIT_FAILURE);
+			 * }
+			 */
+
+			if (sscanf(key_chars + 2 * i, "%2x", encr_key_int + i) == 0)
 			{
 				pg_log_error("Invalid character in encryption key at position %d",
 							 2 * i);
 				exit(EXIT_FAILURE);
 			}
 		}
+		for (i = 0; i < ENCRYPTION_KEY_LENGTH; i++)
+			encryption_key[i] = (char) encr_key_int[i];
 	}
 	else
 	{

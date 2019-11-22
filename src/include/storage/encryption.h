@@ -29,7 +29,7 @@
 	"compile postgres with --with-openssl to use encryption."
 
 /* Is the cluster encrypted? */
-extern PGDLLIMPORT bool data_encrypted;
+extern bool data_encrypted;
 
 /*
  * Number of bytes reserved to store encryption sample in ControlFileData.

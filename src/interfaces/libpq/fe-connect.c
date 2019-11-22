@@ -846,6 +846,24 @@ PQconnectSSLHandshake(PGconn *conn)
 }
 
 /*
+ * Return the first letter of conn->sslmode.
+ */
+char
+PQconnectionSSLMode(PGconn *conn)
+{
+	return conn->sslmode[0];
+}
+
+/*
+ * Return 1 if connected to unix domain socket, 0 otherwise.
+ */
+int
+PQconnectedToSocket(PGconn *conn)
+{
+	return (conn->connhost[0].type == CHT_UNIX_SOCKET) ? 1 : 0;
+}
+
+/*
  * This function only exposes pqPacketSend() to libpq users.
  *
  * XXX Currently it's only used to send the encryption key to postmaster, so

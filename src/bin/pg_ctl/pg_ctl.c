@@ -143,9 +143,7 @@ static void adjust_data_dir(void);
 static char *get_config_variable(const char *var_name, size_t res_size);
 #ifdef USE_ENCRYPTION
 static char *get_first_csv_item(char *csv_list);
-#ifdef HAVE_UNIX_SOCKETS
 static void get_postmaster_address(char **host_p, char **port_str_p);
-#endif	/* HAVE_UNIX_SOCKETS */
 #endif	/* USE_ENCRYPTION */
 
 #ifdef WIN32
@@ -915,7 +913,7 @@ do_start(void)
 
 	sk_args.pm_pid = pm_pid = start_postmaster();
 #ifdef WIN32
-	sk_args.postmasterProcess = postmasterProcess;
+	sk_args.pmProcess = postmasterProcess;
 #endif
 
 #ifdef USE_ENCRYPTION
@@ -2387,7 +2385,6 @@ get_first_csv_item(char *csv_list)
 	return result;
 }
 
-#ifdef HAVE_UNIX_SOCKETS
 /*
  * Retrieve host name and port to which the encryption key should be sent.
  */
@@ -2416,7 +2413,6 @@ get_postmaster_address(char **host_p, char **port_str_p)
 	 */
 	*port_str_p = get_config_variable("port", 7);
 }
-#endif	/* HAVE_UNIX_SOCKETS */
 #endif	/* USE_ENCRYPTION */
 
 static DBState

@@ -263,6 +263,8 @@ start_postmaster(ClusterInfo *cluster, bool report_and_exit_on_error)
 	if (encryption_setup_done && !cluster->has_encr_key_cmd)
 #ifdef USE_ENCRYPTION
 	{
+		SendKeyArgs	sk_args;
+
 #ifndef WIN32
 		pid_t sender;
 
@@ -271,7 +273,6 @@ start_postmaster(ClusterInfo *cluster, bool report_and_exit_on_error)
 		if (sender == 0)
 		{
 			char	port_str[6];
-			SendKeyArgs	sk_args;
 
 			snprintf(port_str, sizeof(port_str), "%d", cluster->port);
 
@@ -291,6 +292,8 @@ start_postmaster(ClusterInfo *cluster, bool report_and_exit_on_error)
 		else if (sender < 0)
 			pg_fatal("could not create key sender process");
 #else	/* WIN32 */
+		HANDLE sender;
+
 		pg_log(PG_VERBOSE, "sending encryption key to postmaster\n");
 		sender = _beginthreadex(NULL, 0, (void *) send_key_to_postmaster, &sk_args, 0, NULL);
 		if (sender == 0)

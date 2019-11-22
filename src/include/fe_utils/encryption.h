@@ -42,7 +42,7 @@ typedef struct SendKeyArgs
 	 * Set this *in addition to* pm_pid, otherwise it's hard to tell whether
 	 * the handle is valid.
 	 */
-	HANDLE	postmasterProcess;
+	HANDLE	pmProcess;
 #endif
 
 	char *error_msg;
