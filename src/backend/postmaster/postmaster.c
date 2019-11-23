@@ -514,6 +514,10 @@ typedef struct
 	bool		IsBinaryUpgrade;
 	int			max_safe_fds;
 	int			MaxBackends;
+#ifdef USE_ENCRYPTION
+	bool		data_encrypted;
+	unsigned char encryption_key[ENCRYPTION_KEY_LENGTH];
+#endif
 #ifdef WIN32
 	HANDLE		PostmasterHandle;
 	HANDLE		initial_signal_pipe;
@@ -5103,6 +5107,11 @@ SubPostmasterMain(int argc, char *argv[])
 				 errmsg("out of memory")));
 #endif
 
+#ifdef USE_ENCRYPTION
+	if (data_encrypted)
+		setup_encryption();
+#endif
+
 	/*
 	 * If appropriate, physically re-attach to shared memory segment. We want
 	 * to do this before going any further to ensure that we can attach at the
@@ -6367,6 +6376,10 @@ save_backend_variables(BackendParameters *param, Port *port,
 	param->max_safe_fds = max_safe_fds;
 
 	param->MaxBackends = MaxBackends;
+#ifdef USE_ENCRYPTION
+	param->data_encrypted = data_encrypted;
+	memcpy(param->encryption_key, encryption_key, ENCRYPTION_KEY_LENGTH);
+#endif
 
 #ifdef WIN32
 	param->PostmasterHandle = PostmasterHandle;
@@ -6602,6 +6615,11 @@ restore_backend_variables(BackendParameters *param, Port *port)
 	max_safe_fds = param->max_safe_fds;
 
 	MaxBackends = param->MaxBackends;
+
+#ifdef USE_ENCRYPTION
+	data_encrypted = param->data_encrypted;
+	memcpy(encryption_key, param->encryption_key, ENCRYPTION_KEY_LENGTH);
+#endif
 
 #ifdef WIN32
 	PostmasterHandle = param->PostmasterHandle;
