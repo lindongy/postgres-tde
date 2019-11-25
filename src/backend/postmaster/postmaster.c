@@ -1391,7 +1391,6 @@ PostmasterMain(int argc, char *argv[])
 			run_encryption_key_command(DataDir);
 		else
 		{
-#ifdef HAVE_UNIX_SOCKETS
 			status = ServerLoop(true);
 
 			/* No other return code should be seen here. */
@@ -1406,10 +1405,6 @@ PostmasterMain(int argc, char *argv[])
 			 * it again if restarting after a crash.
 			 */
 			memcpy(encryption_key, encryption_key_shmem, ENCRYPTION_KEY_LENGTH);
-#else
-			ereport(FATAL,
-					(errmsg("encryption_key_command is not set")));
-#endif	/* HAVE_UNIX_SOCKETS */
 		}
 
 		/* Finalize the setup. */
