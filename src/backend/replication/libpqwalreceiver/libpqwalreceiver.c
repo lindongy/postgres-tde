@@ -429,8 +429,7 @@ libpqrcv_startstreaming(WalReceiverConn *conn,
 						 options->proto.physical.startpointTLI);
 
 	/* Request decryption of the stream if appropriate. */
-	if (!options->logical && options->proto.physical.decrypt &&
-		!data_encrypted)
+	if (!options->logical && options->proto.physical.decrypt)
 		appendStringInfo(&cmd, " DECRYPT");
 
 	/* Start streaming. */
