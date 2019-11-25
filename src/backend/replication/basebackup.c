@@ -1589,7 +1589,7 @@ sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf
 			verify_checksum = false;
 		}
 
-		if (verify_checksum)
+		if (verify_checksum || decrypt_file)
 		{
 			for (i = 0; i < cnt / BLCKSZ; i++)
 			{
@@ -1605,7 +1605,8 @@ sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf
 				 * this case. We also skip completely new pages, since they
 				 * don't have a checksum yet.
 				 */
-				if (!PageIsNew(page) && PageGetLSN(page) < startptr)
+				if (verify_checksum && !PageIsNew(page) &&
+					PageGetLSN(page) < startptr)
 				{
 					checksum = pg_checksum_page((char *) page, blkno_global);
 					phdr = (PageHeader) page;
@@ -1696,7 +1697,8 @@ sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf
 					 * The function should not be called on other than
 					 * permanent relations.
 					 */
-					decrypt_page(page, page, BLCKSZ, RELPERSISTENCE_PERMANENT);
+					decrypt_page(page, page, blkno_global,
+								 RELPERSISTENCE_PERMANENT);
 
 					/*
 					 * Compute new checksum for the decrypted page.
