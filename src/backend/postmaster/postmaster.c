@@ -377,6 +377,14 @@ static bool LoadedSSL = false;
 static DNSServiceRef bonjour_sdref = NULL;
 #endif
 
+#ifdef USE_ENCRYPTION
+/* Is the only purpose of this backend to receive encryption key? */
+static bool key_only_backend = false;
+
+/* Has the "key only backend" received an empty key message? */
+static bool got_empty_key_msg = false;
+#endif	/* USE_ENCRYPTION */
+
 /*
  * postmaster.c - function prototypes
  */
@@ -409,7 +417,10 @@ static int	BackendStartup(Port *port);
 static int	ProcessStartupPacket(Port *port, bool secure_done);
 static void SendNegotiateProtocolVersion(List *unrecognized_protocol_options);
 static void processCancelRequest(Port *port, void *pkt);
-static void processEncryptionKey(void *pkt);
+#ifdef USE_ENCRYPTION
+static bool processEncryptionKeyMessage(void *pkt);
+static void shareEncryptionKey(void);
+#endif	/* USE_ENCRYPTION */
 static int	initMasks(fd_set *rmask);
 static void report_fork_failure_to_client(Port *port, int errnum);
 static CAC_state canAcceptConnections(void);
@@ -2123,13 +2134,14 @@ ProcessStartupPacket(Port *port, bool secure_done)
 		return STATUS_ERROR;
 	}
 
+#ifdef USE_ENCRYPTION
 	/*
 	 * Catch the encryption key message even if the cluster is not encrypted:
 	 * pg_ctl can send an empty message if was passed no key, just to let
 	 * postmaster know that it shouldn't wait for the key message (pg_ctl does
-	 * not know whether the cluster is encrypted). This empty message would
-	 * make the first started backend of the cluster complain about
-	 * "unsupported frontend protocol".
+	 * not know whether the cluster is encrypted). If we didn't catch it here,
+	 * this empty message would make the first started backend of the cluster
+	 * complain about "unsupported frontend protocol".
 	 */
 	if (proto == ENCRYPTION_KEY_MSG_CODE)
 	{
@@ -2138,12 +2150,27 @@ ProcessStartupPacket(Port *port, bool secure_done)
 			if (secure_done)
 				ereport(DEBUG1,
 						(errmsg_internal("receiving encryption key via SSL")));
-			processEncryptionKey(buf);
+
+			if (processEncryptionKeyMessage(buf))
+			{
+				/* Information to be displayed by init_ps_display(). */
+				port->user_name = pstrdup("<no user>");
+				port->database_name = pstrdup("<no database>");
+
+				/* This backend needs to be run specially. */
+				key_only_backend = true;
+
+				/*
+				 * processEncryptionKey() will finalize the key delivery as
+				 * soon as shared memory can be accessed.
+				 */
+				return STATUS_OK;
+			}
 		}
 
-		/* Not really an error, but we don't want to proceed further */
 		return STATUS_ERROR;
 	}
+#endif	/* USE_ENCRYPTION */
 
 	if (proto == NEGOTIATE_SSL_CODE && !secure_done)
 	{
@@ -2548,8 +2575,68 @@ processCancelRequest(Port *port, void *pkt)
 					backendPID)));
 }
 
+#ifdef USE_ENCRYPTION
 /*
  * Process a message from backend that contains the encryption key.
+ *
+ * If valid key message was received, either initialize the encryption_key
+ * variable or set got_empty_key_msg, and return true. In such a case,
+ * shareEncryptionKey() will put the encryption key into shared memory as soon
+ * as it's available or just set a shared memory flag saying that the message
+ * was empty. Return false if the message is invalid or if the current backend
+ * should not receive it.
+ */
+bool
+processEncryptionKeyMessage(void *pkt)
+{
+	EncryptionKeyMsg	*msg = (EncryptionKeyMsg *) pkt;
+
+	/* Backend to receive the key should not be launched otherwise. */
+	Assert(data_encrypted);
+
+	/*
+	 * The checks in shareEncryptionKey() would fire in this case too, but the
+	 * error message is clearer if this case is handled explicitly.
+	 */
+	if (pmState != PM_INIT)
+	{
+		ereport(COMMERROR,
+				(errmsg("encryption key can only be setup during startup"),
+				 errhint("Check if the cluster is encrypted.")));
+		return false;
+	}
+
+	if (msg->version != 1)
+	{
+		ereport(COMMERROR,
+				(errmsg("unexpected version of encryption key message %d",
+					msg->version)));
+		return false;
+	}
+
+	/*
+	 * If pg_ctl sent an empty message, the encryption key command should have
+	 * already been read from postgresql.conf and processed.
+	 */
+	if (msg->empty)
+	{
+		got_empty_key_msg = true;
+		return true;
+	}
+
+	memcpy(encryption_key, msg->data, ENCRYPTION_KEY_LENGTH);
+
+	return true;
+}
+
+/*
+ * Put the contents of encryption_key into shared memory so that postmaster
+ * and its child processes can use it. Caller is responsible for
+ * encryption_key to have been initialized.
+ *
+ * processEncryptionKeyMessage() cannot access shared memory if EXEC_BACKEND
+ * mechanism is used so we split the key transfer into two phases. This is the
+ * second one.
  *
  * Currently there's no guarantee that only a single backend tries to deliver
  * the key, but it's not worth trying to synchronize the access. If multiple
@@ -2569,58 +2656,36 @@ processCancelRequest(Port *port, void *pkt)
  * DBA.
  */
 void
-processEncryptionKey(void *pkt)
+shareEncryptionKey(void)
 {
-	EncryptionKeyMsg	*msg = (EncryptionKeyMsg *) pkt;
+	Assert(key_only_backend);
 
-	/* Backend to receive the key should not be launched otherwise. */
-	Assert(data_encrypted);
-
-	if (msg->version != 1)
+	if (got_empty_key_msg)
 	{
-		ereport(COMMERROR,
-				(errmsg("unexpected version of encryption key message %d",
-					msg->version)));
-		return;
+		encryption_key_shmem->empty = true;
+		ereport(LOG,
+				(errmsg_internal("empty encryption key message received")));
 	}
-
-	/*
-	 * The checks below would fire in this case too, but the error message is
-	 * clearer if this case is handled explicitly.
-	 */
-	if (pmState != PM_INIT)
+	else
 	{
 		/*
-		 * If pg_ctl sent an empty message, the encryption key command should
-		 * have already been read from postgresql.conf and processed.
+		 * Check if someone else already initialized the key. This is not
+		 * fatal but seems to indicate misconfiguration which DBA should be
+		 * aware of. Check also encryption_setup_done because shared memory
+		 * could have been reset. As postmaster has a local copy of the key,
+		 * the new key should not be used, but it'd be inconsistent if we
+		 * didn't complain in this special case.
 		 */
-		if (msg->empty)
+		if (encryption_key_shmem->received || encryption_setup_done)
+		{
+			ereport(COMMERROR,
+					(errmsg("received encryption key more than once")));
 			return;
+		}
 
-		ereport(COMMERROR,
-				(errmsg("encryption key can only be setup during startup"),
-				 errhint("Check if the cluster is encrypted.")));
-		return;
+		ereport(LOG, (errmsg_internal("encryption key received")));
+		memcpy(encryption_key_shmem->data, encryption_key, ENCRYPTION_KEY_LENGTH);
 	}
-
-	/*
-	 * Someone else already initialized the key. This is not fatal but seems
-	 * to indicate misconfiguration which DBA should be aware of. Check also
-	 * encryption_setup_done because shared memory could have been reset. As
-	 * postmaster has a local copy of the key, the new key should not be used,
-	 * but it'd be inconsistent if we didn't complain in this special case.
-	 */
-	if (encryption_key_shmem->received || encryption_setup_done)
-	{
-		ereport(COMMERROR,
-				(errmsg("received encryption key more than once")));
-		return;
-	}
-
-	encryption_key_shmem->empty = msg->empty;
-
-	if (!encryption_key_shmem->empty)
-		memcpy(encryption_key_shmem->data, msg->data, ENCRYPTION_KEY_LENGTH);
 
 	/*
 	 * received==true should be a guarantee that the key is in the shared
@@ -2628,9 +2693,8 @@ processEncryptionKey(void *pkt)
 	 */
 	pg_write_barrier();
 	encryption_key_shmem->received = true;
-
-	ereport(LOG, (errmsg_internal("encryption key received")));
 }
+#endif	/* USE_ENCRYPTION */
 
 /*
  * canAcceptConnections --- check to see if database state allows connections.
@@ -2657,6 +2721,11 @@ canAcceptConnections(void)
 		else if (Shutdown > NoShutdown)
 			return CAC_SHUTDOWN;	/* shutdown is pending */
 		else if (!FatalError &&
+				 /*
+				  * If the cluster is encrypted, PM_INIT should allow for
+				  * launching a special backend that merely receives the
+				  * encryption key.
+				  */
 				 ((data_encrypted && pmState == PM_INIT) ||
 				  pmState == PM_STARTUP ||
 				  pmState == PM_RECOVERY))
@@ -4325,6 +4394,7 @@ BackendStartup(Port *port)
 {
 	Backend    *bn;				/* for backend cleanup */
 	pid_t		pid;
+	CAC_state	cac;
 
 	/*
 	 * Create backend data structure.  Better before the fork() so we can
@@ -4355,10 +4425,15 @@ BackendStartup(Port *port)
 
 	bn->cancel_key = MyCancelKey;
 
-	/* Pass down canAcceptConnections state */
-	port->canAcceptConnections = canAcceptConnections();
-	bn->dead_end = (port->canAcceptConnections != CAC_OK &&
-					port->canAcceptConnections != CAC_WAITBACKUP);
+	/*
+	 * Pass down canAcceptConnections state.
+	 *
+	 * The special case of data_encrypted means that we might need special
+	 * backend to receive encryption key.
+	 */
+	cac = port->canAcceptConnections = canAcceptConnections();
+	bn->dead_end = (cac != CAC_OK && cac != CAC_WAITBACKUP &&
+					!(data_encrypted && cac == CAC_STARTUP));
 
 	/*
 	 * Unless it's a dead_end child, assign it a child slot number
@@ -4387,6 +4462,16 @@ BackendStartup(Port *port)
 
 		/* Perform additional initialization and collect startup packet */
 		BackendInitialize(port);
+
+		if (key_only_backend)
+		{
+			/*
+			 * Putting the encryption key into shared memory is the only thing
+			 * we're expected to do.
+			 */
+			shareEncryptionKey();
+			proc_exit(0);
+		}
 
 		/* And run the backend */
 		BackendRun(port);
@@ -5102,11 +5187,6 @@ SubPostmasterMain(int argc, char *argv[])
 				 errmsg("out of memory")));
 #endif
 
-#ifdef USE_ENCRYPTION
-	if (data_encrypted)
-		setup_encryption();
-#endif
-
 	/*
 	 * If appropriate, physically re-attach to shared memory segment. We want
 	 * to do this before going any further to ensure that we can attach at the
@@ -5224,6 +5304,23 @@ SubPostmasterMain(int argc, char *argv[])
 		/* Attach process to shared data structures */
 		CreateSharedMemoryAndSemaphores(0);
 
+#ifdef USE_ENCRYPTION
+		if (key_only_backend)
+		{
+			Assert(data_encrypted);
+
+			/*
+			 * Putting the encryption key into shared memory is the only thing
+			 * we're expected to do.
+			 */
+			shareEncryptionKey();
+			proc_exit(0);
+		}
+
+		if (data_encrypted)
+			setup_encryption();
+#endif	/* USE_ENCRYPTION */
+
 		/* And run the backend */
 		BackendRun(&port);		/* does not return */
 	}
@@ -5238,6 +5335,11 @@ SubPostmasterMain(int argc, char *argv[])
 		/* Attach process to shared data structures */
 		CreateSharedMemoryAndSemaphores(0);
 
+#ifdef USE_ENCRYPTION
+		if (data_encrypted)
+			setup_encryption();
+#endif	/* USE_ENCRYPTION */
+
 		AuxiliaryProcessMain(argc - 2, argv + 2);	/* does not return */
 	}
 	if (strcmp(argv[1], "--forkavlauncher") == 0)
@@ -5251,6 +5353,12 @@ SubPostmasterMain(int argc, char *argv[])
 		/* Attach process to shared data structures */
 		CreateSharedMemoryAndSemaphores(0);
 
+		/* XXX Do we need encryption here? */
+#ifdef USE_ENCRYPTION
+		if (data_encrypted)
+			setup_encryption();
+#endif	/* USE_ENCRYPTION */
+
 		AutoVacLauncherMain(argc - 2, argv + 2);	/* does not return */
 	}
 	if (strcmp(argv[1], "--forkavworker") == 0)
@@ -5263,6 +5371,11 @@ SubPostmasterMain(int argc, char *argv[])
 
 		/* Attach process to shared data structures */
 		CreateSharedMemoryAndSemaphores(0);
+
+#ifdef USE_ENCRYPTION
+		if (data_encrypted)
+			setup_encryption();
+#endif	/* USE_ENCRYPTION */
 
 		AutoVacWorkerMain(argc - 2, argv + 2);	/* does not return */
 	}
@@ -5285,6 +5398,11 @@ SubPostmasterMain(int argc, char *argv[])
 		/* Fetch MyBgworkerEntry from shared memory */
 		shmem_slot = atoi(argv[1] + 15);
 		MyBgworkerEntry = BackgroundWorkerEntry(shmem_slot);
+
+#ifdef USE_ENCRYPTION
+		if (data_encrypted)
+			setup_encryption();
+#endif	/* USE_ENCRYPTION */
 
 		StartBackgroundWorker();
 	}
