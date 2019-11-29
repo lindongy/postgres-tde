@@ -153,13 +153,24 @@ struct BufFile
  * several ways: 1) it's not split into segments, 2) there's no need of seek,
  * 3) there's no need to combine read and write access.
  */
+
+/*
+ * Only this part of the hash fits into encryption tweak, see
+ * BufFileOpenTransient().
+ */
+#define BUF_FILE_PATH_HASH_LEN	8
+
 struct TransientBufFile
 {
-	BufFileCommon common;		/* Common fields, see above. */
+	/* Common fields, see above. */
+	BufFileCommon common;
 
 	/* The underlying file. */
-	char	   *path;
 	int			fd;
+	char		*path;
+
+	/* Path-dependent part of the encryption tweak. */
+	char	tweakBase[BUF_FILE_PATH_HASH_LEN];
 };
 
 static BufFile *makeBufFileCommon(int nfiles);
@@ -1125,7 +1136,7 @@ BufFileSeekBlock(BufFile *file, long blknum)
 static void
 BufFileTweak(char *tweak, BufFileCommon *file, bool is_transient)
 {
-	off_t		block;
+	uint64		block;
 
 	/*
 	 * The unused bytes should always be defined.
@@ -1185,33 +1196,17 @@ BufFileTweak(char *tweak, BufFileCommon *file, bool is_transient)
 	else
 	{
 		TransientBufFile *transfile = (TransientBufFile *) file;
-		pg_sha256_ctx sha_ctx;
-		unsigned char sha[PG_SHA256_DIGEST_LENGTH];
-#define BUF_FILE_PATH_HASH_LEN	8
-
-		/*
-		 * For transient file we can't use any field of TransientBufFile
-		 * because this info gets lost if the file is closed and reopened.
-		 * Hash of the file path string is an easy way to get "persistent"
-		 * tweak value, however usual hashes do not fit into TWEAK_SIZE. The
-		 * hash portion that we can store is actually even smaller because
-		 * block number needs to be stored too. Even though we only use part
-		 * of the hash, the tweak we finally use for data encryption /
-		 * decryption should not be predictable because the tweak we compute
-		 * here is further processed, see cbc_essi_preprocess_tweak().
-		 */
-		pg_sha256_init(&sha_ctx);
-		pg_sha256_update(&sha_ctx,
-						 (uint8 *) transfile->path,
-						 strlen(transfile->path));
-		pg_sha256_final(&sha_ctx, sha);
 
 		StaticAssertStmt(BUF_FILE_PATH_HASH_LEN + sizeof(block) <= TWEAK_SIZE,
 						 "tweak components do not fit into TWEAK_SIZE");
-		memcpy(tweak, sha, BUF_FILE_PATH_HASH_LEN);
+
+		/* The path-dependent part. */
+		memcpy(tweak, transfile->tweakBase, BUF_FILE_PATH_HASH_LEN);
 		tweak += BUF_FILE_PATH_HASH_LEN;
+
+		/* The block-dependent part. */
 		block = file->curOffset / BLCKSZ;
-		*((off_t *) tweak) = block;
+		*((uint64 *) tweak) = block;
 	}
 }
 
@@ -1415,9 +1410,13 @@ BufFileAppendMetadata(BufFile *target, BufFile *source)
  * Open TransientBufFile at given path or create one if it does not
  * exist. User will be allowed either to write to the file or to read from it,
  * according to fileFlags, but not both.
+ *
+ * If the file should be renamed before decryption, pass the new name as
+ * decrypt_path.
  */
 TransientBufFile *
-BufFileOpenTransient(const char *path, int fileFlags)
+BufFileOpenTransient(const char *path, int fileFlags,
+					 const char *decrypt_path)
 {
 	bool		readOnly;
 	bool		append = false;
@@ -1465,12 +1464,10 @@ BufFileOpenTransient(const char *path, int fileFlags)
 	if (fd < 0)
 	{
 		/*
-		 * If caller wants to read from file and the file is not there, he
-		 * should be able to handle the condition on his own.
-		 *
-		 * XXX Shouldn't we always let caller evaluate errno?
+		 * If the file is not there, caller should be able to handle the
+		 * condition on his own.
 		 */
-		if (errno == ENOENT && (fileFlags & O_RDONLY))
+		if (errno == ENOENT)
 			return NULL;
 
 		ereport(ERROR,
@@ -1478,7 +1475,7 @@ BufFileOpenTransient(const char *path, int fileFlags)
 				 errmsg("could not open file \"%s\": %m", path)));
 	}
 
-	file = (TransientBufFile *) palloc(sizeof(TransientBufFile));
+	file = (TransientBufFile *) palloc0(sizeof(TransientBufFile));
 	fcommon = &file->common;
 	fcommon->dirty = false;
 	fcommon->pos = 0;
@@ -1488,9 +1485,32 @@ BufFileOpenTransient(const char *path, int fileFlags)
 	fcommon->curFile = 0;
 	fcommon->useful = (off_t *) palloc0(sizeof(off_t));
 	fcommon->nuseful = 1;
-
-	file->path = pstrdup(path);
 	file->fd = fd;
+	file->path = pstrdup(path);
+
+	/* Compute path-dependent part of encryption tweak. */
+	if (data_encrypted)
+	{
+		pg_sha256_ctx sha_ctx;
+		unsigned char sha[PG_SHA256_DIGEST_LENGTH];
+		const char	*tweak_path;
+
+		/* Use the path that will be valid at decryption time. */
+		tweak_path = decrypt_path ? decrypt_path : path;
+
+		/*
+		 * For transient file we can't use any field of TransientBufFile
+		 * because this info gets lost if the file is closed and reopened.
+		 * Hash of the file path string is an easy way to get "persistent"
+		 * tweak value, however usual hashes do not fit into TWEAK_SIZE. The
+		 * hash portion that we can store is actually even smaller because
+		 * block number needs to be stored too.
+		 */
+		pg_sha256_init(&sha_ctx);
+		pg_sha256_update(&sha_ctx, (uint8 *) tweak_path, strlen(tweak_path));
+		pg_sha256_final(&sha_ctx, sha);
+		memcpy(file->tweakBase, sha, BUF_FILE_PATH_HASH_LEN);
+	}
 
 	errno = 0;
 	size = lseek(file->fd, 0, SEEK_END);
@@ -1563,9 +1583,12 @@ BufFileOpenTransient(const char *path, int fileFlags)
 
 /*
  * Close a TransientBufFile.
+ *
+ * Return true if succeeded, false if failed. If noerr is false, ERROR is
+ * raised on failure instead of returning.
  */
-void
-BufFileCloseTransient(TransientBufFile *file)
+bool
+BufFileCloseTransient(TransientBufFile *file, bool noerr)
 {
 	/* Flush any unwritten data. */
 	if (!file->common.readOnly &&
@@ -1579,20 +1602,32 @@ BufFileCloseTransient(TransientBufFile *file)
 		 * code.
 		 */
 		if (file->common.dirty)
+		{
+			if (noerr)
+				return false;
+
 			ereport(ERROR,
 					(errcode_for_file_access(),
 					 errmsg("could not flush file \"%s\": %m", file->path)));
+		}
 	}
 
 	if (CloseTransientFile(file->fd))
+	{
+		if (noerr)
+			return false;
+
 		ereport(ERROR,
 				(errcode_for_file_access(),
 				 errmsg("could not close file \"%s\": %m", file->path)));
+	}
 
 	if (data_encrypted)
 		pfree(file->common.useful);
 	pfree(file->path);
 	pfree(file);
+
+	return true;
 }
 
 /*

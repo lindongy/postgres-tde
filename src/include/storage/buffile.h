@@ -74,8 +74,9 @@ extern void BufFileExportShared(BufFile *file);
 extern BufFile *BufFileOpenShared(SharedFileSet *fileset, const char *name);
 extern void BufFileDeleteShared(SharedFileSet *fileset, const char *name);
 
-extern TransientBufFile *BufFileOpenTransient(const char *path, int fileFlags);
-extern void BufFileCloseTransient(TransientBufFile *file);
+extern TransientBufFile *BufFileOpenTransient(const char *path, int fileFlags,
+											  const char *decrypt_path);
+extern bool BufFileCloseTransient(TransientBufFile *file, bool noerr);
 extern size_t BufFileReadTransient(TransientBufFile *file, void *ptr,
 					 size_t size);
 extern size_t BufFileWriteTransient(TransientBufFile *file, void *ptr,

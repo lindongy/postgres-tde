@@ -1168,7 +1168,7 @@ ReorderBufferIterTXNFinish(ReorderBuffer *rb,
 	for (off = 0; off < state->nr_txns; off++)
 	{
 		if (state->entries[off].file)
-			BufFileCloseTransient(state->entries[off].file);
+			BufFileCloseTransient(state->entries[off].file, true);
 	}
 
 	/* free memory we might have "leaked" in the last *Next call */
@@ -2273,7 +2273,7 @@ ReorderBufferSerializeTXN(ReorderBuffer *rb, ReorderBufferTXN *txn)
 			char		path[MAXPGPATH];
 
 			if (file)
-				BufFileCloseTransient(file);
+				BufFileCloseTransient(file, true);
 
 			XLByteToSeg(change->lsn, curOpenSegNo, wal_segment_size);
 
@@ -2286,7 +2286,8 @@ ReorderBufferSerializeTXN(ReorderBuffer *rb, ReorderBufferTXN *txn)
 
 			/* open segment, create it if necessary */
 			file = BufFileOpenTransient(path,
-										O_CREAT | O_WRONLY | O_APPEND | PG_BINARY);
+										O_CREAT | O_WRONLY | O_APPEND | PG_BINARY,
+										NULL);
 		}
 
 		ReorderBufferSerializeChange(rb, txn, file, change);
@@ -2302,7 +2303,7 @@ ReorderBufferSerializeTXN(ReorderBuffer *rb, ReorderBufferTXN *txn)
 	txn->serialized = true;
 
 	if (file)
-		BufFileCloseTransient(file);
+		BufFileCloseTransient(file, true);
 }
 
 /*
@@ -2508,7 +2509,7 @@ ReorderBufferRestoreChanges(ReorderBuffer *rb, ReorderBufferTXN *txn,
 			ReorderBufferSerializedPath(path, MyReplicationSlot, txn->xid,
 										*segno);
 
-			*file = BufFileOpenTransient(path, O_RDONLY | PG_BINARY);
+			*file = BufFileOpenTransient(path, O_RDONLY | PG_BINARY, NULL);
 			if (*file == NULL)
 			{
 				Assert(errno == ENOENT);
@@ -2556,7 +2557,7 @@ ReorderBufferRestoreChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 	/* eof */
 	if (no_data)
 	{
-		BufFileCloseTransient(*file);
+		BufFileCloseTransient(*file, true);
 		*file = NULL;
 		return;
 	}

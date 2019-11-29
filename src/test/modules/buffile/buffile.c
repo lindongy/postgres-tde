@@ -389,7 +389,7 @@ buffile_open_transient(PG_FUNCTION_ARGS)
 	/*
 	 * Make sure the file is not deleted across function calls.
 	 */
-	bft = BufFileOpenTransient(path, flags);
+	bft = BufFileOpenTransient(path, flags, NULL);
 
 	MemoryContextSwitchTo(old_cxt);
 
@@ -405,7 +405,7 @@ buffile_close_transient(PG_FUNCTION_ARGS)
 	if (bft == NULL)
 		elog(ERROR, "there's no file to close");
 
-	BufFileCloseTransient(bft);
+	BufFileCloseTransient(bft, true);
 	bft = NULL;
 
 	PG_RETURN_VOID();

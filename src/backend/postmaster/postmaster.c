@@ -5416,6 +5416,11 @@ SubPostmasterMain(int argc, char *argv[])
 	{
 		/* Do not want to attach to shared memory */
 
+#ifdef USE_ENCRYPTION
+		if (data_encrypted)
+			setup_encryption();
+#endif	/* USE_ENCRYPTION */
+
 		PgstatCollectorMain(argc, argv);	/* does not return */
 	}
 	if (strcmp(argv[1], "--forklog") == 0)
