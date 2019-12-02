@@ -375,6 +375,7 @@ buffile_open_transient(PG_FUNCTION_ARGS)
 	bool		write_only = PG_GETARG_BOOL(1);
 	bool		append = PG_GETARG_BOOL(2);
 	int			flags = O_CREAT | PG_BINARY;
+	char		tweak_base[TWEAK_BASE_SIZE];
 
 	if (bft != NULL)
 		elog(ERROR, "file already exists");
@@ -384,13 +385,16 @@ buffile_open_transient(PG_FUNCTION_ARGS)
 	if (append)
 		flags |= O_APPEND;
 
-	old_cxt = MemoryContextSwitchTo(TopMemoryContext);
-
 	/*
 	 * Make sure the file is not deleted across function calls.
 	 */
-	bft = BufFileOpenTransient(path, flags, NULL);
-
+	old_cxt = MemoryContextSwitchTo(TopMemoryContext);
+	/*
+	 * The tweak value does not matter for testing, but it'd better be defined
+	 * (e.g. for troubleshooting purposes).
+	 */
+	memset(tweak_base, 0, TWEAK_BASE_SIZE);
+	bft = BufFileOpenTransient(path, flags, tweak_base);
 	MemoryContextSwitchTo(old_cxt);
 
 	PG_RETURN_VOID();

@@ -190,6 +190,8 @@ static void ReorderBufferExecuteInvalidations(ReorderBuffer *rb, ReorderBufferTX
  * Disk serialization support functions
  * ---------------------------------------
  */
+static void ReorderBufferTweakBase(ReorderBufferTXN *txn,
+								   char tweak_base[TWEAK_BASE_SIZE]);
 static void ReorderBufferCheckSerializeTXN(ReorderBuffer *rb, ReorderBufferTXN *txn);
 static void ReorderBufferSerializeTXN(ReorderBuffer *rb, ReorderBufferTXN *txn);
 static void ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
@@ -2216,6 +2218,42 @@ ReorderBufferXidHasBaseSnapshot(ReorderBuffer *rb, TransactionId xid)
  */
 
 /*
+ * Initialize the common part of the encryption tweak.
+ */
+static void
+ReorderBufferTweakBase(ReorderBufferTXN *txn,
+					   char tweak_base[TWEAK_BASE_SIZE])
+{
+	char	*c = tweak_base;
+	pid_t	pid = MyProcPid;
+
+	StaticAssertStmt(1 + sizeof(TransactionId) + 3
+					 <= TWEAK_BASE_SIZE,
+					 "tweak components do not fit into TWEAK_BASE_SIZE");
+
+	memset(tweak_base, 0, TWEAK_BASE_SIZE);
+	*c = TRANS_BUF_FILE_REORDERBUFFER;
+	c++;
+	memcpy(c, &txn->xid, sizeof(TransactionId));
+	c += sizeof(TransactionId);
+
+	/*
+	 * There's only room for 3 bytes of the PID. Use the less significant part
+	 * so that PID change is more likely to cause tweak change.
+	 */
+	/*
+	 * If PID happens to be shorter, we need to adjust the code so that no
+	 * byte of tweak_base is left undefined.
+	 */
+	StaticAssertStmt(sizeof(pid) == 4, "sizeof(pid) != 4");
+#ifdef WORDS_BIGENDIAN
+	memcpy(c, ((char *) &pid) + 1, 3);
+#else
+	memcpy(c, &pid, 3);
+#endif
+}
+
+/*
  * Check whether the transaction tx should spill its data to disk.
  */
 static void
@@ -2271,6 +2309,7 @@ ReorderBufferSerializeTXN(ReorderBuffer *rb, ReorderBufferTXN *txn)
 			!XLByteInSeg(change->lsn, curOpenSegNo, wal_segment_size))
 		{
 			char		path[MAXPGPATH];
+			char		tweak_base[TWEAK_BASE_SIZE];
 
 			if (file)
 				BufFileCloseTransient(file, true);
@@ -2284,10 +2323,12 @@ ReorderBufferSerializeTXN(ReorderBuffer *rb, ReorderBufferTXN *txn)
 			ReorderBufferSerializedPath(path, MyReplicationSlot, txn->xid,
 										curOpenSegNo);
 
+			if (data_encrypted)
+				ReorderBufferTweakBase(txn, tweak_base);
 			/* open segment, create it if necessary */
 			file = BufFileOpenTransient(path,
 										O_CREAT | O_WRONLY | O_APPEND | PG_BINARY,
-										NULL);
+										tweak_base);
 		}
 
 		ReorderBufferSerializeChange(rb, txn, file, change);
@@ -2495,6 +2536,7 @@ ReorderBufferRestoreChanges(ReorderBuffer *rb, ReorderBufferTXN *txn,
 		if (*file == NULL)
 		{
 			char		path[MAXPGPATH];
+			char		tweak_base[TWEAK_BASE_SIZE];
 
 			/* first time in */
 			if (*segno == 0)
@@ -2509,7 +2551,10 @@ ReorderBufferRestoreChanges(ReorderBuffer *rb, ReorderBufferTXN *txn,
 			ReorderBufferSerializedPath(path, MyReplicationSlot, txn->xid,
 										*segno);
 
-			*file = BufFileOpenTransient(path, O_RDONLY | PG_BINARY, NULL);
+			if (data_encrypted)
+				ReorderBufferTweakBase(txn, tweak_base);
+			*file = BufFileOpenTransient(path, O_RDONLY | PG_BINARY,
+										 tweak_base);
 			if (*file == NULL)
 			{
 				Assert(errno == ENOENT);

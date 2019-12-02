@@ -44,7 +44,6 @@
 #include <unistd.h>
 
 #include "commands/tablespace.h"
-#include "common/sha2.h"
 #include "executor/instrument.h"
 #include "miscadmin.h"
 #include "pgstat.h"
@@ -153,13 +152,6 @@ struct BufFile
  * several ways: 1) it's not split into segments, 2) there's no need of seek,
  * 3) there's no need to combine read and write access.
  */
-
-/*
- * Only this part of the hash fits into encryption tweak, see
- * BufFileOpenTransient().
- */
-#define BUF_FILE_PATH_HASH_LEN	8
-
 struct TransientBufFile
 {
 	/* Common fields, see above. */
@@ -170,7 +162,7 @@ struct TransientBufFile
 	char		*path;
 
 	/* Path-dependent part of the encryption tweak. */
-	char	tweakBase[BUF_FILE_PATH_HASH_LEN];
+	char	tweakBase[TWEAK_BASE_SIZE];
 };
 
 static BufFile *makeBufFileCommon(int nfiles);
@@ -1197,12 +1189,12 @@ BufFileTweak(char *tweak, BufFileCommon *file, bool is_transient)
 	{
 		TransientBufFile *transfile = (TransientBufFile *) file;
 
-		StaticAssertStmt(BUF_FILE_PATH_HASH_LEN + sizeof(block) <= TWEAK_SIZE,
+		StaticAssertStmt(TWEAK_BASE_SIZE + sizeof(block) <= TWEAK_SIZE,
 						 "tweak components do not fit into TWEAK_SIZE");
 
 		/* The path-dependent part. */
-		memcpy(tweak, transfile->tweakBase, BUF_FILE_PATH_HASH_LEN);
-		tweak += BUF_FILE_PATH_HASH_LEN;
+		memcpy(tweak, transfile->tweakBase, TWEAK_BASE_SIZE);
+		tweak += TWEAK_BASE_SIZE;
 
 		/* The block-dependent part. */
 		block = file->curOffset / BLCKSZ;
@@ -1411,12 +1403,12 @@ BufFileAppendMetadata(BufFile *target, BufFile *source)
  * exist. User will be allowed either to write to the file or to read from it,
  * according to fileFlags, but not both.
  *
- * If the file should be renamed before decryption, pass the new name as
- * decrypt_path.
+ * tweak_base should contain the first eight bytes of the encryption tweak
+ * that is common to all buffers of the file.
  */
 TransientBufFile *
 BufFileOpenTransient(const char *path, int fileFlags,
-					 const char *decrypt_path)
+					 char tweak_base[TWEAK_BASE_SIZE])
 {
 	bool		readOnly;
 	bool		append = false;
@@ -1488,29 +1480,8 @@ BufFileOpenTransient(const char *path, int fileFlags,
 	file->fd = fd;
 	file->path = pstrdup(path);
 
-	/* Compute path-dependent part of encryption tweak. */
 	if (data_encrypted)
-	{
-		pg_sha256_ctx sha_ctx;
-		unsigned char sha[PG_SHA256_DIGEST_LENGTH];
-		const char	*tweak_path;
-
-		/* Use the path that will be valid at decryption time. */
-		tweak_path = decrypt_path ? decrypt_path : path;
-
-		/*
-		 * For transient file we can't use any field of TransientBufFile
-		 * because this info gets lost if the file is closed and reopened.
-		 * Hash of the file path string is an easy way to get "persistent"
-		 * tweak value, however usual hashes do not fit into TWEAK_SIZE. The
-		 * hash portion that we can store is actually even smaller because
-		 * block number needs to be stored too.
-		 */
-		pg_sha256_init(&sha_ctx);
-		pg_sha256_update(&sha_ctx, (uint8 *) tweak_path, strlen(tweak_path));
-		pg_sha256_final(&sha_ctx, sha);
-		memcpy(file->tweakBase, sha, BUF_FILE_PATH_HASH_LEN);
-	}
+		memcpy(file->tweakBase, tweak_base, TWEAK_BASE_SIZE);
 
 	errno = 0;
 	size = lseek(file->fd, 0, SEEK_END);
