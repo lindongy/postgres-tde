@@ -113,11 +113,8 @@ run_encryption_key_command(char *data_dir)
 void
 read_encryption_key_f(FILE *f, char *command)
 {
-	char	   *buf;
-	int		read_len, i, c;
-	int	encr_key_int[ENCRYPTION_KEY_LENGTH];
-
-	buf = (char *) palloc(ENCRYPTION_KEY_CHARS);
+	char	   buf[ENCRYPTION_KEY_CHARS];
+	int		read_len, c;
 
 	read_len = 0;
 	while ((c = fgetc(f)) != EOF && c != '\n')
@@ -167,14 +164,26 @@ read_encryption_key_f(FILE *f, char *command)
 	}
 
 	/* Turn the hexadecimal representation into an array of bytes. */
+	encryption_key_from_string(buf);
+}
+
+/*
+ * Use the input hexadecimal string to initialize the encryption_key variable.
+ */
+void
+encryption_key_from_string(char key_str[ENCRYPTION_KEY_CHARS])
+{
+	int	encr_key_int[ENCRYPTION_KEY_LENGTH];
+	int	i;
+
 	for (i = 0; i < ENCRYPTION_KEY_LENGTH; i++)
 	{
 		/*
-		 * TODO Figure out how to use the the %2hhx formatting string on
-		 * windows, and remove the encr_key_init variable.
+		 * The code would be simpler with %2hhx conversion, but it does not
+		 * seem to be well portable. At least mingw build on Windows
+		 * complains about it.
 		 */
-		//if (sscanf(buf + 2 * i, "%2hhx", encryption_key + i) == 0)
-		if (sscanf(buf + 2 * i, "%2x", encr_key_int + i) == 0)
+		if (sscanf(key_str + 2 * i, "%2x", encr_key_int + i) == 0)
 		{
 #ifdef FRONTEND
 			pg_log_fatal("invalid character in encryption key at position %d",
@@ -189,6 +198,4 @@ read_encryption_key_f(FILE *f, char *command)
 	}
 	for (i = 0; i < ENCRYPTION_KEY_LENGTH; i++)
 		encryption_key[i] = (char) encr_key_int[i];
-
-	pfree(buf);
 }

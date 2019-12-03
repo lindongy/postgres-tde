@@ -56,4 +56,5 @@ extern unsigned char encryption_key[];
 
 extern void run_encryption_key_command(char *data_dir);
 extern void read_encryption_key_f(FILE *f, char *command);
+extern void encryption_key_from_string(char key_str[ENCRYPTION_KEY_CHARS]);
 #endif /* COMMON_ENCRYPTION_H */

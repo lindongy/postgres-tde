@@ -490,6 +490,7 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 		else if ((p = strstr(bufin, "encryption fingerprint")) != NULL)
 		{
 			int			i;
+			int	sample_int[ENCRYPTION_SAMPLE_SIZE];
 
 			p = strchr(p, ':');
 
@@ -510,9 +511,15 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 			if (strspn(p, "0123456789ABCDEF") != 32)
 				pg_fatal("%d: controldata retrieval problem\n", __LINE__);
 
+			/*
+			 * See encryption_key_from_string() for explanation why %2hhx
+			 * conversion cannot be used here.
+			 */
 			for (i = 0; i < ENCRYPTION_SAMPLE_SIZE; i++)
-				sscanf(p + 2 * i, "%2hhx",
-					   cluster->controldata.encryption_verification + i);
+				sscanf(p + 2 * i, "%2x", sample_int + i);
+			for (i = 0; i < ENCRYPTION_SAMPLE_SIZE; i++)
+				cluster->controldata.encryption_verification[i] =
+					(char) sample_int[i];
 		}
 	}
 

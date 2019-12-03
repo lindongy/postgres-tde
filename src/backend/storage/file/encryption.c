@@ -112,11 +112,8 @@ void
 read_encryption_key(read_encryption_key_cb read_char)
 {
 #ifdef USE_ENCRYPTION
-	char	*buf;
-	int		read_len, i, c;
-	int	encr_key_int[ENCRYPTION_KEY_LENGTH];
-
-	buf = (char *) palloc(ENCRYPTION_KEY_CHARS);
+	char	buf[ENCRYPTION_KEY_CHARS];
+	int		read_len, c;
 
 	read_len = 0;
 	while ((c = (*read_char)()) != EOF && c != '\n')
@@ -131,30 +128,8 @@ read_encryption_key(read_encryption_key_cb read_char)
 		ereport(FATAL, (errmsg("Encryption key is too short")));
 
 	/* Turn the hexadecimal representation into an array of bytes. */
-	for (i = 0; i < ENCRYPTION_KEY_LENGTH; i++)
-	{
-		/*
-		 * TODO Figure out how to use the the %2hhx formatting string on
-		 * windows, and remove the encr_key_init variable.
-		 */
-		/*
-		 * if (sscanf(buf + 2 * i, "%2hhx", encryption_key + i) == 0)
-		 * {
-		 * 	ereport(FATAL,
-		 * 			(errmsg("Invalid character in encryption key at position %d",
-		 * 					2 * i)));
-		 * }
-		 */
-		if (sscanf(buf + 2 * i, "%2x", encr_key_int + i) == 0)
-		{
-			ereport(FATAL, (errmsg("Invalid character in encryption key at position %d",
-								   2 * i)));
-		}
-	}
-	for (i = 0; i < ENCRYPTION_KEY_LENGTH; i++)
-		encryption_key[i] = (char) encr_key_int[i];
+	encryption_key_from_string(buf);
 
-	pfree(buf);
 #else  /* !USE_ENCRYPTION */
 	/*
 	 * If no encryption implementation is linked and caller requests
