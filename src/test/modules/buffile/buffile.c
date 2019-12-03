@@ -409,7 +409,7 @@ buffile_close_transient(PG_FUNCTION_ARGS)
 	if (bft == NULL)
 		elog(ERROR, "there's no file to close");
 
-	BufFileCloseTransient(bft, true);
+	BufFileCloseTransient(bft);
 	bft = NULL;
 
 	PG_RETURN_VOID();

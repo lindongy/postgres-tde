@@ -95,7 +95,7 @@ extern void BufFileDeleteShared(SharedFileSet *fileset, const char *name);
 
 extern TransientBufFile *BufFileOpenTransient(const char *path, int fileFlags,
 											  char tweak_base[TWEAK_BASE_SIZE]);
-extern bool BufFileCloseTransient(TransientBufFile *file, bool noerr);
+extern int BufFileCloseTransient(TransientBufFile *file);
 extern size_t BufFileReadTransient(TransientBufFile *file, void *ptr,
 					 size_t size);
 extern size_t BufFileWriteTransient(TransientBufFile *file, void *ptr,

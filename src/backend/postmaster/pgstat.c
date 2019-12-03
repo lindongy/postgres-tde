@@ -4965,10 +4965,10 @@ pgstat_write_statsfiles(bool permanent, bool allDbs)
 				(errcode_for_file_access(),
 				 errmsg("could not write temporary statistics file \"%s\": %m",
 						tmpfile)));
-		BufFileCloseTransient(fpout, true);
+		BufFileCloseTransient(fpout);
 		unlink(tmpfile);
 	}
-	else if (!BufFileCloseTransient(fpout, true))
+	else if (!BufFileCloseTransient(fpout))
 	{
 		ereport(LOG,
 				(errcode_for_file_access(),
@@ -5115,10 +5115,10 @@ pgstat_write_db_statsfile(PgStat_StatDBEntry *dbentry, bool permanent)
 				(errcode_for_file_access(),
 				 errmsg("could not write temporary statistics file \"%s\": %m",
 						tmpfile)));
-		BufFileCloseTransient(fpout, true);
+		BufFileCloseTransient(fpout);
 		unlink(tmpfile);
 	}
-	else if (!BufFileCloseTransient(fpout, true))
+	else if (!BufFileCloseTransient(fpout))
 	{
 		ereport(LOG,
 				(errcode_for_file_access(),
@@ -5403,7 +5403,7 @@ pgstat_read_statsfiles(Oid onlydb, bool permanent, bool deep)
 	}
 
 done:
-	BufFileCloseTransient(fpin, true);
+	BufFileCloseTransient(fpin);
 
 	/* If requested to read the permanent file, also get rid of it. */
 	if (permanent)
@@ -5580,7 +5580,7 @@ pgstat_read_db_statsfile(Oid databaseid, HTAB *tabhash, HTAB *funchash,
 	}
 
 done:
-	BufFileCloseTransient(fpin, true);
+	BufFileCloseTransient(fpin);
 
 	if (permanent)
 	{
@@ -5645,7 +5645,7 @@ pgstat_read_db_statsfile_timestamp(Oid databaseid, bool permanent,
 	{
 		ereport(pgStatRunningInCollector ? LOG : WARNING,
 				(errmsg("corrupted statistics file \"%s\"", statfile)));
-		BufFileCloseTransient(fpin, true);
+		BufFileCloseTransient(fpin);
 		return false;
 	}
 
@@ -5657,7 +5657,7 @@ pgstat_read_db_statsfile_timestamp(Oid databaseid, bool permanent,
 	{
 		ereport(pgStatRunningInCollector ? LOG : WARNING,
 				(errmsg("corrupted statistics file \"%s\"", statfile)));
-		BufFileCloseTransient(fpin, true);
+		BufFileCloseTransient(fpin);
 		return false;
 	}
 
@@ -5670,7 +5670,7 @@ pgstat_read_db_statsfile_timestamp(Oid databaseid, bool permanent,
 	{
 		ereport(pgStatRunningInCollector ? LOG : WARNING,
 				(errmsg("corrupted statistics file \"%s\"", statfile)));
-		BufFileCloseTransient(fpin, true);
+		BufFileCloseTransient(fpin);
 		return false;
 	}
 
@@ -5730,7 +5730,7 @@ pgstat_read_db_statsfile_timestamp(Oid databaseid, bool permanent,
 	}
 
 done:
-	BufFileCloseTransient(fpin, true);
+	BufFileCloseTransient(fpin);
 	return true;
 }
 

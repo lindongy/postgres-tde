@@ -1170,7 +1170,7 @@ ReorderBufferIterTXNFinish(ReorderBuffer *rb,
 	for (off = 0; off < state->nr_txns; off++)
 	{
 		if (state->entries[off].file)
-			BufFileCloseTransient(state->entries[off].file, true);
+			BufFileCloseTransient(state->entries[off].file);
 	}
 
 	/* free memory we might have "leaked" in the last *Next call */
@@ -2312,7 +2312,7 @@ ReorderBufferSerializeTXN(ReorderBuffer *rb, ReorderBufferTXN *txn)
 			char		tweak_base[TWEAK_BASE_SIZE];
 
 			if (file)
-				BufFileCloseTransient(file, true);
+				BufFileCloseTransient(file);
 
 			XLByteToSeg(change->lsn, curOpenSegNo, wal_segment_size);
 
@@ -2344,7 +2344,7 @@ ReorderBufferSerializeTXN(ReorderBuffer *rb, ReorderBufferTXN *txn)
 	txn->serialized = true;
 
 	if (file)
-		BufFileCloseTransient(file, true);
+		BufFileCloseTransient(file);
 }
 
 /*
@@ -2602,7 +2602,7 @@ ReorderBufferRestoreChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 	/* eof */
 	if (no_data)
 	{
-		BufFileCloseTransient(*file, true);
+		BufFileCloseTransient(*file);
 		*file = NULL;
 		return;
 	}

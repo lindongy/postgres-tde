@@ -1555,40 +1555,30 @@ BufFileOpenTransient(const char *path, int fileFlags,
 /*
  * Close a TransientBufFile.
  *
- * Return true if succeeded, false if failed. If noerr is false, ERROR is
- * raised on failure instead of returning.
+ * Return the return value of the underlying call of CloseTransientFile().
  */
-bool
-BufFileCloseTransient(TransientBufFile *file, bool noerr)
+int
+BufFileCloseTransient(TransientBufFile *file)
 {
+	int	result = 0;
+
 	/* Flush any unwritten data. */
 	if (!file->common.readOnly &&
 		file->common.dirty && file->common.nbytes > 0)
 	{
 		BufFileDumpBufferTransient(file);
 
-		/*
-		 * Caller of BufFileWriteTransient() recognizes the failure to flush
-		 * buffer by the returned value, however this function has no return
-		 * code.
-		 */
 		if (file->common.dirty)
 		{
-			if (noerr)
-				return false;
-
-			ereport(ERROR,
+			ereport(WARNING,
 					(errcode_for_file_access(),
 					 errmsg("could not flush file \"%s\": %m", file->path)));
 		}
 	}
 
-	if (CloseTransientFile(file->fd))
+	if ((result = CloseTransientFile(file->fd)))
 	{
-		if (noerr)
-			return false;
-
-		ereport(ERROR,
+		ereport(WARNING,
 				(errcode_for_file_access(),
 				 errmsg("could not close file \"%s\": %m", file->path)));
 	}
@@ -1598,7 +1588,7 @@ BufFileCloseTransient(TransientBufFile *file, bool noerr)
 	pfree(file->path);
 	pfree(file);
 
-	return true;
+	return result;
 }
 
 /*
