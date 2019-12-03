@@ -1,7 +1,7 @@
 <!-- doc/src/sgml/encryption.sgml -->
 
 <chapter id="encryption">
- <title>Transparent Cluster Encryption</title>
+ <title>Transparent Data Encryption</title>
 
  <para>
   Cluster encryption can be used if <acronym>DBA</acronym> cannot or does not

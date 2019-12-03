@@ -5,92 +5,66 @@ Transparent Cluster Encryption
 
 When creating a new cluster (instance), user can choose to have his data
 encrypted on disk. If this feature is active, data is encrypted before it's
-written to disk and decrypted after it has been read, however the data is
-unencrypted in memory (data-at-rest encryption). The following characteristics
-should be considered by anyone who is interested in the feature:
+written to disk and decrypted after it has been read. The data is always
+unencrypted in memory. The following characteristics should be considered by
+anyone who is interested in the feature:
 
 	1. The encryption is transparent from application's point of view.
 
 	2. A single key is used to encrypt the whole cluster.
 
 The full instance encryption feature helps to ensure data confidentiality,
-especially when user cannot rely on confidentiality on filesystem level. On
+especially when user cannot rely on confidentiality at filesystem level. On
 the other hand, it does not ensure data integrity, i.e. it does not help to
-detect whether an adversary wrote his cipher data to the disk. The block
-cipher methods generally do not protect data integrity, and it'd probably be
-hard anyway because we encrypt postgres data pages (typically of size 8 kB)
-separate from each other. If the attacker only changes part of the page, this
-can be detected if data checksums feature is enabled. And specifically for
-XLOG, each XLOG record has its own checksum.
-
-Since the data is stored on a disk, we naturally base our approach on "Disk
-encryption theory" [1]. For each kind of file we use the AES cipher in the
-appropriate mode of operation. The AES cipher itself encrypts / decrypts
-individual blocks ("encryption blocks") of 16 bytes (128 bits), while the mode
-of operation defines the rules how to apply the cipher to data which spans
-multiple encryption blocks.
+detect whether an adversary wrote his cipher data to the disk. The ciphers
+used here do not protect data integrity: we encrypt one pages (typically of
+size 8 kB) at a time, so the attacker can replace the whole page. However if
+the attacker only changes part of the page, this can be detected if data
+checksums feature is enabled. And specifically for WAL, each WAL record has
+its own checksum.
 
 Relations
 ---------
 
-AES cipher in CBC mode [2] is used to encrypt relation files, one relation
-block (page) at a time. The important characteristic of this mode is that, if
-a single encryption block changes, the next run of the encryption produces an
-encrypted page where not only that block is different, but also all the
-following blocks. Furthermore, as the postgres page starts with LSN, even if
-only the last encryption block of the page changes, the whole cipher text of
-the page will be different after the next encryption.
+AES cipher in CTR mode [2] is used to encrypt relation files, one relation
+block (page) at a time. Since CTR is effectively a stream cipher, we can
+consider each page to be a separate stream.
 
-This propagation of changes across encryption blocks makes it harder for
-adversary to deduce what happens in the database. Without the propagation he
-might be able to see data changes with higher granularity. For example, if
-only the beginning of index page changes, it gives some information on the
-keys inserted.
+One particular advantage of the CTR mode is that initialization vector (IV) of
+given encryption blocks can be determined independently from other blocks, so
+both encryption and decryption of a single page can be performed by multiple
+CPUs in parallel.
 
-On the other hand, the same change propagation can cause problems if only a
-part of a new version of encrypted page is written to disk (torn page
-write). If such a page is decrypted during crash recovery, part of the plain
-text can become garbage. This can affect even those parts of the page that
-haven't been modified recently, and therefore XLOG records to fix those parts
-are not available. Therefore, if the cluster encryption is enabled,
-full_page_writes configuration variable must be set too, otherwise the server
-refuses to start. With this setting, the damage described here can be fixed by
-retrieving the full-page-image (FPI) from XLOG and applying it.
+Page LSN is stored unencrypted, see the section on initialization vector
+(tweak) below.
 
-However, even if full_page_writes is set, postgres can still avoid writing FPI
-XLOG record if only hint bit(s) changed on a page and if wal_log_hints
-configuration variable is off. The problem with encryption is that even a
-single bit change is propagated to all the following encryption blocks during
-the next encryption of the page. Again, if only part of the new cipher text is
-written, the remaining portion of the page becomes garbage after decryption,
-and we might not be able to fix it during recovery unless we have the FPI in
-the XLOG. So if encryption is enabled, postgres behaves as if wal_log_hints
-was always set.
+Page checksum is also unencrypted so that it can be computed after encryption,
+right before the page is written to disk.
 
-XLOG
-----
+WAL
+---
 
-The specific problem of XLOG is that record must not be changed once it has
-been flushed to disk. However if we used a block cipher, and if a new XLOG
+The specific problem of WAL is that record must not be changed once it has
+been flushed to disk. However if we used a block cipher, and if a new WAL
 record started in the same encryption block in which the previous record ends,
 that encryption block would become completely different after the next run of
-encryption of the containing page. Torn write of such a block (e.g. if memory
-page boundary crosses the encryption block) is likely to make decryption
-produce garbage, which will also appear in the already-flushed record.
+encryption of the containing page. Torn write of such a block (e.g. if page
+boundary crosses the encryption block) is likely to make decryption produce
+garbage, which will also appear in the already-flushed record.
 
-Therefore we encrypt XLOG using a stream cipher, or rather block cipher in
+Therefore we encrypt WAL using a stream cipher, or rather block cipher in
 stream mode of operation. Stream cipher uses XOR operation to combine a "key
 stream" with the input stream, and it does not matter if the length of the
-input stream is aligned to any value. In particular, the CTR mode [3] was
-chosen because it allows for both read and write operations to be
-parallelized.
+input stream is aligned to any value. In particular, the CTR mode [2] was
+chosen because it allows for both read and write operations to be performed by
+multiple CPUs.
 
-The XLOG is encrypted / decrypted one XLOG page (typically 8 kB) at a time, so
-rather than a single stream, the encrypted XLOG is actually a sequence of
+The WAL is encrypted / decrypted one WAL page (typically 8 kB) at a time, so
+rather than a single stream, the encrypted WAL is actually a sequence of
 per-page streams.
 
 Since stream ciphers are susceptible to "reused key attack" [4], we must
-ensure that the unused part of the last XLOG page (filled with zeroes) is
+ensure that the unused part of the last WAL page (filled with zeroes) is
 never encrypted.
 
 Temporary files
@@ -106,20 +80,25 @@ account:
 1. The file buffer cannot be positioned at arbitrary offset of the file. If
 the encryption routine starts at some position of the file, decryption must
 not start elsewhere because there's no way to determine which initialization
-vector was used internally for the corresponding encryption blocks (of 16
-bytes) during encryption. It makes sense to position the buffer at file offset
-that is whole multiple of buffer size.
+vector was used internally for the corresponding encryption blocks during
+encryption. It makes sense to position the buffer at file offset, that is
+whole multiple of buffer size.
 
-2. In general, the useful (written) data does not fill whole multiple of
+2. Since temporary file or its part can be rewritten, we either need to derive
+a new IV for each write or to avoid using stream cipher (see [4]). The earlier
+is difficult because both temporary files and "auxiliary files" are
+implemented in the same module buffile.c (in order to eliminate code
+duplication) and because it's hard to generate an unique IV for each write
+into auxiliary file, see explanation below. Therefore we use the AES-CBC
+cipher [3] for temporary files.
+
+3. In general, the useful (written) data does not fill whole multiple of
 encryption blocks, but we must write the whole blocks for decryption to
-succeed. This implies that we need to fill the unused part of the last block
-with zeroes and also remember the amount of useful bytes in the segment file.
-(In fact we align the segment file size to file buffers instead of encryption
-blocks, which probably makes the implementation a bit simpler.)
-
-Stream cipher might seem like a solution of the padding problem, but we cannot
-use it here because parts of the temporary file can be rewritten. That would
-expose the temporary file to "reused key attack" [4].
+succeed (this is because we use block cipher, as explained above). That
+implies that we need to fill the unused part of the last block with zeroes and
+also remember the amount of useful bytes in the segment file.  (In fact we
+align the segment file size to file buffers instead of encryption blocks,
+which makes the implementation simpler.)
 
 Auxiliary files
 ---------------
@@ -128,17 +107,19 @@ To store other kinds of data encrypted than the ones above, developers are
 advised to use BufFileWriteTransient() and BufFileReadTransient() functions
 (also located in buffile.c). These are especially useful if some data
 structure should be written to an encrypted file and user does not want to
-care whether the next write position is at encryption block boundary.
+care about encryption specific details.
 
-Wherever the write starts, BufFileWriteTransient() first reads the whole
-encryption block that contains the start positions, then decrypts it, adds the
-new data to it, encrypts the whole block and writes it back to the
-file. Likewise, BufFileReadTransient() ensures that only the whole encryption
-blocks are read from disk and decrypted, whether the next read position is at
-block boundary or not.
+Since these files can be closed and reopened again, we need to derive the
+tweak w/o using any in-memory metadata - such metadata is essentially lost
+when the file is closed. If we stored any kind of metadata into the file, it'd
+make the implementation rather tricky. Howver w/o storing the metadata, we
+cannot easily derive a new tweak if some block gets rewritten. Therefore we
+use the AES-CBC cipher for auxiliary files: unlike stream cipher, this cipher
+is not vulnerable to "reused key attack" [4].
 
 Serialization of data changes during logical decoding (reorderbuffer.c) is the
-typical use case for this API.
+typical use case for this API. Another use case is encryption of statistics
+(pgstat.c).
 
 Initialization vector (IV), encryption tweak
 --------------------------------------------
@@ -150,19 +131,11 @@ data should be encrypted differently if located elsewhere on the disk. Term
 "encryption tweak" is more common in the context of disk encryption.
 
 When encrypting relations, each encryption unit (i.e. page) has an unique
-tweak, which consists of RelFileNode structure, buffer number and fork
-number. As a consequence, we need to decrypt page using the existing tweak and
-encrypt it with a new tweak if copying it from one relation to
-another. Typically this happens when a new database is being created from
-template database.
+tweak, which consists of page LSN and block number. Since the tweak is needed
+for decryption, we leave the LSN unencrypted.
 
-To avoid "reencryption" during pg_upgrade, all the OIDs contained in the
-RelFileNode structure (tablespace OID, database OID and relation file OID)
-must be preserved. If pg_upgrade had to reencrypt files, it could not be used
-with the --link option.
-
-XLOG encryption tweak consists of timeline, segment number and offset at which
-the XLOG page starts in the segment. The "reencryption" takes place when XLOG
+WAL encryption tweak consists of timeline, segment number and offset at which
+the WAL page starts in the segment. The "reencryption" takes place when WAL
 page is copied from one timeline to another, typicially at the end of
 recovery.
 
@@ -170,22 +143,19 @@ As for temporary files, PID of the owning backend, file / fileset number and
 block number (where block is of the same size as a relation page) within the
 file provide sufficient uniqueness, so we use these to generate the tweak.
 
-Auxiliary files can be closed and reopened by another backend, so there's no
-PID strictly associated with them. Therefore we generate the tweak by hashing
-the file path, and appending block number to the hash.
+Auxiliary files can be used for different purposes, so each caller is
+responsible for the tweak initialization. See the source code for details.
 
 Replication
 -----------
 
-During streaming replication, the walsender process sends the XLOG encrypted
+During streaming replication, the walsender process sends the WAL encrypted
 and walreceiver just writes it. Decryption is performed before the slave
 cluster tries to apply the changes. That implies that the same encryption key
-must be used both master and slave. If it should be possible someday to stream
-the XLOG unencrypted. One implication is that pg_basebackup should then also
-receive the relation data unencrypted.
+must be used both master and slave.
 
 As for logical replication, the only change introduced by this feature is that
-the XLOG has to be decrypted before the contained data changes can be
+the WAL has to be decrypted before the contained data changes can be
 decoded. The data changes are transferred to the subscribing database /
 cluster unencrypted, so both master and slave can use different encryption
 keys.
@@ -195,8 +165,8 @@ References
 
 [1] https://en.wikipedia.org/wiki/Disk_encryption_theory
 
-[2] https://en.wikipedia.org/wiki/Disk_encryption_theory#Cipher-block_chaining_(CBC)
+[2] https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Counter_(CTR)
 
-[3] https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Counter_(CTR)
+[3] https://en.wikipedia.org/wiki/Disk_encryption_theory#Cipher-block_chaining_(CBC)
 
 [4] https://en.wikipedia.org/wiki/Stream_cipher_attacks#Reused_key_attack
