@@ -4968,7 +4968,7 @@ pgstat_write_statsfiles(bool permanent, bool allDbs)
 		BufFileCloseTransient(fpout);
 		unlink(tmpfile);
 	}
-	else if (!BufFileCloseTransient(fpout))
+	else if (BufFileCloseTransient(fpout) != 0)
 	{
 		ereport(LOG,
 				(errcode_for_file_access(),
@@ -5118,7 +5118,7 @@ pgstat_write_db_statsfile(PgStat_StatDBEntry *dbentry, bool permanent)
 		BufFileCloseTransient(fpout);
 		unlink(tmpfile);
 	}
-	else if (!BufFileCloseTransient(fpout))
+	else if (BufFileCloseTransient(fpout) != 0)
 	{
 		ereport(LOG,
 				(errcode_for_file_access(),

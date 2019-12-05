@@ -1576,7 +1576,7 @@ BufFileCloseTransient(TransientBufFile *file)
 		}
 	}
 
-	if ((result = CloseTransientFile(file->fd)))
+	if ((result = CloseTransientFile(file->fd)) != 0)
 	{
 		ereport(WARNING,
 				(errcode_for_file_access(),
