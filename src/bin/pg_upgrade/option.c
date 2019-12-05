@@ -223,7 +223,7 @@ parseCommandLine(int argc, char *argv[])
 				 */
 				snprintf(encryption_key_command_opt,
 						 strlen(encryption_key_command) + 7,
-						 " -K '%s'", encryption_key_command);
+						 " -K \"%s\"", encryption_key_command);
 				break;
 #endif	/* USE_ENCRYPTION */
 

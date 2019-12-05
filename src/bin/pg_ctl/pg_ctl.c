@@ -112,6 +112,15 @@ static volatile pgpid_t postmasterPID = -1;
  * only because of this one variable.
  */
 unsigned char encryption_key[ENCRYPTION_KEY_LENGTH];
+#ifndef HAVE_UNIX_SOCKETS
+/*
+ * Port at which postmaster listens for encryption key message.
+ *
+ * This is only useful for pg_upgrade which starts the cluster on a port
+ * different from that in configuration file.
+ */
+static char *encr_key_port = NULL;
+#endif
 
 #ifdef WIN32
 static DWORD pgctl_start_type = SERVICE_AUTO_START;
@@ -948,6 +957,14 @@ do_start(void)
 	 * send it again.
 	 */
 	get_postmaster_address(&sk_args.host, &sk_args.port);
+#ifndef HAVE_UNIX_SOCKETS
+	if (encr_key_port)
+	{
+		sk_args.port = encr_key_port;
+		/* Not sure why it this is necessary on windows. */
+		sk_args.host = pg_strdup("localhost");
+	}
+#endif
 	sk_args.error_msg = NULL;
 	if (!send_key_to_postmaster(&sk_args))
 	{
@@ -2140,10 +2157,8 @@ do_help(void)
 	printf(_("  -e SOURCE              event source for logging when running as a service\n"));
 #endif
 #ifdef	USE_ENCRYPTION
-#ifdef HAVE_UNIX_SOCKETS
 	printf(_("  -K, --encryption-key-command\n"
 			 "                         command that returns encryption key\n\n"));
-#endif	/* HAVE_UNIX_SOCKETS */
 #endif	/* USE_ENCRYPTION */
 	printf(_("  -s, --silent           only print errors, no informational messages\n"));
 	printf(_("  -t, --timeout=SECS     seconds to wait when using -w option\n"));
@@ -2447,8 +2462,9 @@ main(int argc, char **argv)
 		{"silent", no_argument, NULL, 's'},
 		{"timeout", required_argument, NULL, 't'},
 #ifdef USE_ENCRYPTION
-#ifdef HAVE_UNIX_SOCKETS
 		{"encryption-key-command", required_argument, NULL, 'K'},
+#ifndef HAVE_UNIX_SOCKETS
+		{"encryption-key-port", required_argument, NULL, 1},
 #endif	/* HAVE_UNIX_SOCKETS */
 #endif	/* USE_ENCRYPTION */
 		{"core-files", no_argument, NULL, 'c'},
@@ -2548,11 +2564,9 @@ main(int argc, char **argv)
 					event_source = pg_strdup(optarg);
 					break;
 #ifdef USE_ENCRYPTION
-#ifdef HAVE_UNIX_SOCKETS
 				case 'K':
 					encryption_key_command = pg_strdup(optarg);
 					break;
-#endif	/* HAVE_UNIX_SOCKETS */
 #endif	/* USE_ENCRYPTION */
 				case 'l':
 					log_file = pg_strdup(optarg);
@@ -2613,6 +2627,11 @@ main(int argc, char **argv)
 				case 'c':
 					allow_core_files = true;
 					break;
+#ifndef HAVE_UNIX_SOCKETS
+				case 1:
+					encr_key_port = pg_strdup(optarg);
+					break;
+#endif
 				default:
 					/* getopt_long already issued a suitable error message */
 					do_advice();

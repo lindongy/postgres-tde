@@ -200,6 +200,7 @@ start_postmaster(ClusterInfo *cluster, bool report_and_exit_on_error)
 	PGconn	   *conn;
 	bool		pg_ctl_return = false;
 	char		socket_string[MAXPGPATH + 200];
+	char		encryption_key_port_opt[64];
 
 	static bool exit_hook_registered = false;
 
@@ -241,10 +242,17 @@ start_postmaster(ClusterInfo *cluster, bool report_and_exit_on_error)
 	 * crash, the new cluster has to be recreated anyway.  fsync=off is a big
 	 * win on ext4.
 	 */
+#ifndef HAVE_UNIX_SOCKETS
+	/* Make sure pg_ctl sends the encryption key to the correct port. */
+	encryption_key_port_opt[0] = '\0';
+	sprintf(encryption_key_port_opt, " --encryption-key-port \"%d\"",
+			cluster->port);
+#endif
 	snprintf(cmd, sizeof(cmd),
-			 "\"%s/pg_ctl\"%s -w -l \"%s\" -D \"%s\" -o \"-p %d%s%s %s%s\" start",
+			 "\"%s/pg_ctl\"%s%s -w -l \"%s\" -D \"%s\" -o \"-p %d%s%s %s%s\" start",
 			 cluster->bindir,
 			 encryption_key_command_opt,
+			 encryption_key_port_opt,
 			 SERVER_LOG_FILE, cluster->pgconfig, cluster->port,
 			 (cluster->controldata.cat_ver >=
 			  BINARY_UPGRADE_SERVER_FLAG_CAT_VER) ? " -b" :
@@ -264,26 +272,29 @@ start_postmaster(ClusterInfo *cluster, bool report_and_exit_on_error)
 #ifdef USE_ENCRYPTION
 	{
 		SendKeyArgs	sk_args;
-
+		char	port_str[6];
 #ifndef WIN32
 		pid_t sender;
+#else
+		HANDLE sender;
+#endif
 
+		snprintf(port_str, sizeof(port_str), "%d", cluster->port);
+
+		/* in child process */
+		sk_args.host = cluster->sockdir; /* If NULL, then libpq will use
+										  * its default. */
+		sk_args.port = port_str;
+		sk_args.encryption_key = encryption_key;
+		/* XXX Find out the postmaster PID ? */
+		sk_args.pm_pid = 0;
+		sk_args.error_msg = NULL;
+
+#ifndef WIN32
 		pg_log(PG_VERBOSE, "sending encryption key to postmaster\n");
 		sender = fork();
 		if (sender == 0)
 		{
-			char	port_str[6];
-
-			snprintf(port_str, sizeof(port_str), "%d", cluster->port);
-
-			/* in child process */
-			sk_args.host = cluster->sockdir; /* If NULL, then libpq will use
-											  * its default. */
-			sk_args.port = port_str;
-			sk_args.encryption_key = encryption_key;
-			/* XXX Find out the postmaster PID ? */
-			sk_args.pm_pid = 0;
-			sk_args.error_msg = NULL;
 			send_key_to_postmaster(&sk_args);
 			if (sk_args.error_msg)
 				pg_fatal("%s", sk_args.error_msg);
@@ -292,8 +303,6 @@ start_postmaster(ClusterInfo *cluster, bool report_and_exit_on_error)
 		else if (sender < 0)
 			pg_fatal("could not create key sender process");
 #else	/* WIN32 */
-		HANDLE sender;
-
 		pg_log(PG_VERBOSE, "sending encryption key to postmaster\n");
 		sender = _beginthreadex(NULL, 0, (void *) send_key_to_postmaster, &sk_args, 0, NULL);
 		if (sender == 0)
