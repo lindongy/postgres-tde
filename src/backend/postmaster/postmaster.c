@@ -2600,9 +2600,9 @@ processEncryptionKeyMessage(void *pkt)
 	 */
 	if (pmState != PM_INIT)
 	{
-		ereport(COMMERROR,
-				(errmsg("encryption key can only be setup during startup"),
-				 errhint("Check if the cluster is encrypted.")));
+		ereport(DEBUG1,
+				(errmsg("postmaster received the encryption key message in state %d",
+						pmState)));
 		return false;
 	}
 
