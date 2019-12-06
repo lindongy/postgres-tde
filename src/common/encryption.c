@@ -24,17 +24,18 @@ void
 run_encryption_key_command(char *data_dir)
 {
 	FILE	   *fp;
-	char	cmd[MAXPGPATH];
-	char	*sp, *dp, *endp;
+	char	*cmd, *sp, *dp, *endp;
 
 	Assert(encryption_key_command != NULL &&
 		   strlen(encryption_key_command) > 0);
+
+	cmd = palloc(strlen(encryption_key_command) + 1);
 
 	/*
 	 * Replace %D pattern in the command with the actual data directory path.
 	 */
 	dp = cmd;
-	endp = cmd + MAXPGPATH - 1;
+	endp = cmd + strlen(encryption_key_command);
 	*endp = '\0';
 	for (sp = encryption_key_command; *sp; sp++)
 	{
@@ -105,6 +106,7 @@ run_encryption_key_command(char *data_dir)
 				(errmsg("could not close pipe to \"%s\"", cmd)));
 #endif	/* FRONTEND */
 	}
+	pfree(cmd);
 }
 
 /*
