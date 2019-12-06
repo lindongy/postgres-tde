@@ -2226,8 +2226,12 @@ ReorderBufferTweakBase(ReorderBufferTXN *txn,
 {
 	char	*c = tweak_base;
 	pid_t	pid = MyProcPid;
+	int	pid_bytes;
 
-	StaticAssertStmt(1 + sizeof(TransactionId) + 3
+/* Only this part of the PID fits into the tweak. */
+#define PID_BYTES_USABLE	3
+
+	StaticAssertStmt(1 + sizeof(TransactionId) + PID_BYTES_USABLE
 					 <= TWEAK_BASE_SIZE,
 					 "tweak components do not fit into TWEAK_BASE_SIZE");
 
@@ -2238,18 +2242,14 @@ ReorderBufferTweakBase(ReorderBufferTXN *txn,
 	c += sizeof(TransactionId);
 
 	/*
-	 * There's only room for 3 bytes of the PID. Use the less significant part
-	 * so that PID change is more likely to cause tweak change.
+	 * There's only room for PID_BYTES_USABLE bytes of the PID. Use the less
+	 * significant part so that PID increment always causes tweak change.
 	 */
-	/*
-	 * If PID happens to be shorter, we need to adjust the code so that no
-	 * byte of tweak_base is left undefined.
-	 */
-	StaticAssertStmt(sizeof(pid) == 4, "sizeof(pid) != 4");
+	pid_bytes = Min(sizeof(pid), PID_BYTES_USABLE);
 #ifdef WORDS_BIGENDIAN
-	memcpy(c, ((char *) &pid) + 1, 3);
+	memcpy(c, ((char *) &pid) + sizeof(pid) - pid_bytes, pid_bytes);
 #else
-	memcpy(c, &pid, 3);
+	memcpy(c, &pid, pid_bytes);
 #endif
 }
 

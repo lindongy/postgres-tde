@@ -1141,6 +1141,11 @@ BufFileTweak(char *tweak, BufFileCommon *file, bool is_transient)
 		pid_t		pid;
 		uint32		number;
 		int			curFile;
+		int		pid_bytes;
+		char	*c = tweak;
+
+/* Only this part of the PID fits into the tweak. */
+#define PID_BYTES_USABLE	4
 
 		if (tmpfile->fileset)
 		{
@@ -1164,8 +1169,8 @@ BufFileTweak(char *tweak, BufFileCommon *file, bool is_transient)
 
 		block = curFile * buffile_seg_blocks + file->curOffset / BLCKSZ;
 
-		StaticAssertStmt(sizeof(pid) + sizeof(number) + sizeof(block) <=
-						 TWEAK_SIZE,
+		StaticAssertStmt(PID_BYTES_USABLE + sizeof(number) + sizeof(block)
+						 <= TWEAK_SIZE,
 						 "tweak components do not fit into TWEAK_SIZE");
 
 		/*
@@ -1173,17 +1178,20 @@ BufFileTweak(char *tweak, BufFileCommon *file, bool is_transient)
 		 * in the case of parallel query processing), number within the PID
 		 * and block number.
 		 *
-		 * XXX Additional flag would be handy to distinguish local file from
-		 * shared one. Since there's no more room within TWEAK_SIZE, should we
-		 * use the highest bit in one of the existing components (preferably
-		 * other than pid so that tweaks of different processes do not become
-		 * identical)?
+		 * There's only room for PID_BYTES_USABLE bytes of the PID. Use the
+		 * less significant part so that PID increment always causes tweak
+		 * change.
 		 */
-		*((pid_t *) tweak) = pid;
-		tweak += sizeof(pid_t);
-		*((uint32 *) tweak) = number;
-		tweak += sizeof(number);
-		*((off_t *) tweak) = block;
+		pid_bytes = Min(sizeof(pid), PID_BYTES_USABLE);
+#ifdef WORDS_BIGENDIAN
+		memcpy(c, ((char *) &pid) + sizeof(pid) - pid_bytes, pid_bytes);
+#else
+		memcpy(c, &pid, pid_bytes);
+#endif
+		c += pid_bytes;
+		memcpy(c, &number, sizeof(number));
+		c += sizeof(number);
+		memcpy(c, &block, sizeof(block));
 	}
 	else
 	{
