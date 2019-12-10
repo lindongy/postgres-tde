@@ -959,11 +959,7 @@ do_start(void)
 	get_postmaster_address(&sk_args.host, &sk_args.port);
 #ifndef HAVE_UNIX_SOCKETS
 	if (encr_key_port)
-	{
 		sk_args.port = encr_key_port;
-		/* Not sure why it this is necessary on windows. */
-		sk_args.host = pg_strdup("localhost");
-	}
 #endif
 	sk_args.error_msg = NULL;
 	if (!send_key_to_postmaster(&sk_args))
