@@ -300,21 +300,23 @@ PostgreSQL documentation
       <term><option>--encryption-key-command=<replaceable class="parameter">command</replaceable></option></term>
       <listitem>
        <para>
-         If the cluster is encrypted, <application>pg_ctl</application> runs
-        this command to retrieve the encryption key, and sends the key to the
-        database server during startup - see <xref linkend="encryption"/> for
-        details.
+        If the cluster is encrypted and
+        if <literal>encryption_key_command</literal> is not present
+        in <filename>postgresql.conf</filename>, this option can be used top
+        pass the encryption key command to <application>pg_ctl</application>.
+        <application>pg_ctl</application> runs this command to retrieve the
+        encryption key and sends the key to the database server during startup
+        - see <xref linkend="encryption"/> for details.
        </para>
 
        <note>
         <para>
-         If the machine on which the database server runs does not support
-         Unix-domain sockets, consider setting <envar>PGSSLMODE</envar>
-         environment variable to <literal>require</literal> or higher before
-         you run <application>pg_ctl</application>. Otherwise the key may be
-         subject to eavesdropping. See <xref linkend="libpq-connect-sslmode"/>
-         or <xref linkend="libpq-ssl-sslmode-statements"/> for more
-         information on encrypted connections.
+         If you start your cluster other way than
+         using <application>pg_ctl</application> (for example
+         using <firstterm>systemd</firstterm> or a custom script) (and
+         if <literal>encryption_key_command</literal> is not present
+         in <filename>postgresql.conf</filename>), consider sending the key
+         using <xref linkend="app-pg-keytool"/> utility.
         </para>
        </note>
       </listitem>

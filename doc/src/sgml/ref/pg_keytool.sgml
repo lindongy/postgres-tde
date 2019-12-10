@@ -16,8 +16,8 @@ PostgreSQL documentation
 
  <refnamediv>
   <refname>pg_keytool</refname>
-  <refpurpose>produce cluster encryption key, possibly deriving it from a
-  passphrase</refpurpose>
+  <refpurpose>generate cluster encryption key and/or send it to
+    <productname>PostgreSQL</productname> server</refpurpose>
  </refnamediv>
 
  <refsynopsisdiv>
@@ -30,34 +30,40 @@ PostgreSQL documentation
  <refsect1>
   <title>Description</title>
   <para>
-   <application>pg_keytool</application> reads encryption key or password from
-   the standard input. If it received password, it runs <firstterm>key
-   derivation function</firstterm> (<acronym>KDF</acronym>) on it in order to
-   derive the key. If encryption key was read, it's used without any further
-   processing.
+   <application>pg_keytool</application> reads either encryption key or
+   password from the standard input. If it received password, it
+   runs <firstterm>key derivation function</firstterm>
+   (<acronym>KDF</acronym>) on it in order to derive the key.
   </para>
 
   <para>
    The encryption key is written either to the standard output (the default
-   behavior) or (if both host name and port number are specified) sent to via
-   frontend/backend protocol to postmaster process which is being started up.
+   behavior) or, if both host name and port number are specified, sent via
+   frontend/backend protocol to <productname>PostgreSQL</productname> server
+   during start up.
   </para>
 
   <para>
-    One common use case is that <application>pg_keytool</application> is used
-    within encryption key command, see the examples in
-    <xref linkend="encryption"/>. In this case it sends the key to the
-    standard output.
+   One common use case is that <application>pg_keytool</application> is used
+   within encryption key command, see the examples in
+   <xref linkend="encryption"/>. In this case it sends the encryption key to
+   the standard output.
   </para>
 
   <para>
-    The other use case is that <productname>PostgreSQL</productname> is
-    started other way than using <xref linkend="app-pg-ctl"/>, typically
-    via <firstterm>systemd</firstterm> or a custom script. In this
-    case <application>pg_keytool</application> can be used to send the key to
-    specified server via Unix-domain socket on which the server listens. This
-    is the same port or socket to which applications will eventually connect,
-    but when the encrypted cluster starts up, it only accepts the key.
+   The other use case is that <productname>PostgreSQL</productname> is started
+   other way than using <xref linkend="app-pg-ctl"/>, typically
+   using <firstterm>systemd</firstterm> or a custom script. In this
+   case <application>pg_keytool</application> can be used to send the key to
+   specified server. (<application>pg_keytool</application> should connect to
+   the same port or Unix-domain socket to which applications will eventually
+   connect.)
+  </para>
+
+  <para>
+   If in the latter case you provide <application>pg_keytool</application>
+   with an encryption key (as opposed to password), the utility only ensures
+   transmission of the key to the database server.
   </para>
  </refsect1>
 
@@ -79,9 +85,9 @@ PostgreSQL documentation
        </para>
 
        <para>
-         If this option is not passed, <xref linkend="app-pg-keytool"/> tries
-         to get the data directory from <envar>PGDATA</envar> environment
-         variable.
+         If this option is not passed, <application>pg_keytool</application>
+         tries to get the data directory from <envar>PGDATA</envar>
+         environment variable.
        </para>
       </listitem>
      </varlistentry>
@@ -95,21 +101,6 @@ PostgreSQL documentation
           running. If the value begins with a slash, it is used as the
           directory for the Unix-domain socket.
         </para>
-
-        <note>
-         <para>
-          If you specify host name or network address (for example because the
-          machine on which the database server runs does not support
-          Unix-domain sockets), consider setting <envar>PGSSLMODE</envar>
-          environment variable to <literal>require</literal> or higher before
-          you run
-          <application>pg_keytool</application>. Otherwise the key may be
-          subject to eavesdropping. See
-          <xref linkend="libpq-connect-sslmode"/> or
-          <xref linkend="libpq-ssl-sslmode-statements"/> for more information
-          on encrypted connections.
-         </para>
-        </note>
        </listitem>
      </varlistentry>
 

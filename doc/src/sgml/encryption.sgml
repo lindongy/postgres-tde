@@ -53,7 +53,7 @@ echo &lt;your key&gt;
    following example, the DBA will be asked for password interactively:
 
 <screen>
-<prompt>$</prompt> <userinput>initdb -K 'read -sp "Cluster encryption password: " PGENCRPWD; echo $PGENCRPWD | pg_keytool -D %D -w' -D data
+<prompt>$</prompt> <userinput>initdb -K '(read -sp "Cluster encryption password: " PGENCRPWD; echo $PGENCRPWD | pg_keytool -D %D -w)' -D data
 </userinput>
 </screen>
 
@@ -74,28 +74,26 @@ echo &lt;your key&gt;
    variable.
  </para>
 
- <note>
-   <para>
-     If the encryption key command needs to read the password from console
-     like this one, you need to comment out
-     the <literal>encryption_key_command</literal> parameter
-     in <filename>postgresql.conf</filename> and pass the command
-     to <application>pg_ctl</application> as explained below.
-   </para>
- </note>
-
  <para>
    If the <literal>encryption_key_command</literal> setting is not present
-   in <filename>postgresql.conf</filename>, and if the server supports
-   Unix-domain sockets, the command can be passed to
+   in <filename>postgresql.conf</filename>, the command can be passed to
    <xref linkend="app-pg-ctl"/> when starting the cluster:
 
 <screen>
-<prompt>$</prompt> <userinput>pg_ctl -K 'read -sp "Cluster encryption
-  password: " PGENCRPWD; echo $PGENCRPWD | pg_keytool -D %D -w' -D data start
+<prompt>$</prompt> <userinput>pg_ctl -K '(read -sp "Cluster encryption password: " PGENCRPWD; echo $PGENCRPWD | pg_keytool -D %D -w)' -D data start
 </userinput>
 </screen>
  </para>
+
+ <note>
+   <para>
+     You need to use the <option>-K</option> option if the encryption key
+     command needs to read the password from console, like it does in the
+     example above. In such a case, please comment out
+     the <literal>encryption_key_command</literal> parameter
+     in <filename>postgresql.conf</filename>.
+   </para>
+ </note>
 
  <para>
   Once the <productname>PostgreSQL</productname> server is running, client
@@ -107,7 +105,16 @@ echo &lt;your key&gt;
   Since WAL is encrypted, any replication solution based on log shipping
   (<xref linkend="warm-standby"/>) assumes that all standby servers are
   encrypted using the same key as their primary server. On the other hand,
-  <xref linkend="logical-replication"/> allows replication between encrypted
-  and unencrypted clusters, or between clusters encrypted with different keys.
+  logical replication (see <xref linkend="logical-replication"/>) allows
+  replication between encrypted and unencrypted clusters, or between clusters
+  encrypted with different keys.
  </para>
+
+ <note>
+  <para>
+   Key rotation is currently not supported. If you need it, you can use key
+   management system of your choice and rotate the corresponding key encryption
+   key (KEK) instead.
+  </para>
+ </note>
 </chapter>

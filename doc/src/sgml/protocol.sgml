@@ -2016,12 +2016,7 @@ The commands accepted in replication mode are:
   </varlistentry>
 
   <varlistentry>
-    <term><literal>START_REPLICATION</literal>
-    [ <literal>SLOT</literal> <replaceable class="parameter">slot_name</replaceable>
-    ] [ <literal>PHYSICAL</literal>
-    ] <replaceable class="parameter">XXX/XXX</replaceable>
-    [ <literal>TIMELINE</literal> <replaceable class="parameter">tli</replaceable>
-      ] [ <literal>DECRYPT</literal> ]
+    <term><literal>START_REPLICATION</literal> [ <literal>SLOT</literal> <replaceable class="parameter">slot_name</replaceable> ] [ <literal>PHYSICAL</literal> ] <replaceable class="parameter">XXX/XXX</replaceable> [ <literal>TIMELINE</literal> <replaceable class="parameter">tli</replaceable> ] [ <literal>DECRYPT</literal> ]
      <indexterm><primary>START_REPLICATION</primary></indexterm>
     </term>
     <listitem>
@@ -2476,7 +2471,7 @@ The commands accepted in replication mode are:
   </varlistentry>
 
   <varlistentry>
-    <term><literal>BASE_BACKUP</literal> [ <literal>LABEL</literal> <replaceable>'label'</replaceable> ] [ <literal>PROGRESS</literal> ] [ <literal>FAST</literal> ] [ <literal>WAL</literal> ] [ <literal>NOWAIT</literal> ] [ <literal>MAX_RATE</literal> <replaceable>rate</replaceable> ] [ <literal>TABLESPACE_MAP</literal> ] [ <literal>NOVERIFY_CHECKSUMS</literal> ]
+    <term><literal>BASE_BACKUP</literal> [ <literal>LABEL</literal> <replaceable>'label'</replaceable> ] [ <literal>PROGRESS</literal> ] [ <literal>FAST</literal> ] [ <literal>WAL</literal> ] [ <literal>NOWAIT</literal> ] [ <literal>MAX_RATE</literal> <replaceable>rate</replaceable> ] [ <literal>TABLESPACE_MAP</literal> ] [ <literal>NOVERIFY_CHECKSUMS</literal> ] [ <literal>DECRYPT</literal> ]
      <indexterm><primary>BASE_BACKUP</primary></indexterm>
     </term>
     <listitem>

@@ -235,8 +235,9 @@ PostgreSQL documentation
       <term><option>--decrypt</option></term>
       <listitem>
        <para>
-        If the cluster is encrypted, this option can be passed to tell the
-        server that the data should be decrypted before it's sent
+        If the cluster is encrypted (see <xref linkend="encryption"/>), this
+        option can be passed to tell the server that the data should be
+        decrypted before it's sent
         to <application>pg_receivewal</application>.
        </para>
       </listitem>

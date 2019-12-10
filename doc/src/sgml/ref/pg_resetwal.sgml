@@ -104,8 +104,8 @@ PostgreSQL documentation
      <term><option>--encryption-key-command=<replaceable class="parameter">command</replaceable></option></term>
      <listitem>
        <para>
-         If the cluster is encrypted, run this command to retrieve the
-         encryption key. See <xref linkend="encryption"/> for details.
+        If the cluster is encrypted (see <xref linkend="encryption"/>), run
+        this command to retrieve the encryption key.
        </para>
      </listitem>
    </varlistentry>

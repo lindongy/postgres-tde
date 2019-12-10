@@ -133,19 +133,6 @@
        </para>
 
        <note>
-        <para>
-         If the machine on which the database server runs does not support
-         Unix-domain sockets, consider setting <envar>PGSSLMODE</envar>
-         environment variable to <literal>require</literal> or higher before
-         you run <application>pg_upgrade</application>. Otherwise the key may
-         be subject to eavesdropping. See
-         <xref linkend="libpq-connect-sslmode"/> or
-         <xref linkend="libpq-ssl-sslmode-statements"/> for more information
-         on encrypted connections.
-        </para>
-       </note>
-
-       <note>
          <para>
            If you are using <xref linkend="app-pg-keytool"/> to derive the
            encryption key (see <xref linkend="app-initdb-data-encr-cmd"/>),
