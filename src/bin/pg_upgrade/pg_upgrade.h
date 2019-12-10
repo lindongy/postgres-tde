@@ -13,7 +13,6 @@
 
 #include "fe_utils/encryption.h"
 #include "libpq-fe.h"
-#include "storage/relfilenode.h"
 #include "storage/encryption.h"
 
 /* Use port in the private/dynamic port number range */

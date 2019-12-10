@@ -14,8 +14,6 @@
 #ifndef BINARY_UPGRADE_H
 #define BINARY_UPGRADE_H
 
-extern PGDLLIMPORT Oid binary_upgrade_next_pg_tablespace_oid;
-
 extern PGDLLIMPORT Oid binary_upgrade_next_pg_type_oid;
 extern PGDLLIMPORT Oid binary_upgrade_next_array_pg_type_oid;
 extern PGDLLIMPORT Oid binary_upgrade_next_toast_pg_type_oid;
