@@ -324,7 +324,7 @@ send_key_to_postmaster(SendKeyArgs *args)
 
 		/*
 		 * Although we don't expect the server to accept regular libpq
-		 * messages, we try to get at least a valid socket.
+		 * messages at the moment, try to get at least a valid socket.
 		 */
 		conn = PQconnectStartParams(keywords, values, false);
 		if (conn == NULL)
