@@ -5619,7 +5619,6 @@ validateRecoveryParameters(void)
 static void
 exitArchiveRecovery(TimeLineID endTLI, XLogRecPtr endOfLog)
 {
-	char		recoveryPath[MAXPGPATH];
 	char		xlogfname[MAXFNAMELEN];
 	XLogSegNo	endLogSegNo;
 	XLogSegNo	startLogSegNo;
@@ -5698,17 +5697,6 @@ exitArchiveRecovery(TimeLineID endTLI, XLogRecPtr endOfLog)
 	 */
 	XLogFileName(xlogfname, ThisTimeLineID, startLogSegNo, wal_segment_size);
 	XLogArchiveCleanup(xlogfname);
-
-	/*
-	 * Since there might be a partial WAL segment named RECOVERYXLOG, get rid
-	 * of it.
-	 */
-	snprintf(recoveryPath, MAXPGPATH, XLOGDIR "/RECOVERYXLOG");
-	unlink(recoveryPath);		/* ignore any error */
-
-	/* Get rid of any remaining recovered timeline-history file, too */
-	snprintf(recoveryPath, MAXPGPATH, XLOGDIR "/RECOVERYHISTORY");
-	unlink(recoveryPath);		/* ignore any error */
 
 	/*
 	 * Remove the signal files out of the way, so that we don't accidentally
@@ -6147,6 +6135,10 @@ recoveryApplyDelay(XLogReaderState *record)
 	if (!reachedConsistency)
 		return false;
 
+	/* nothing to do if crash recovery is requested */
+	if (!ArchiveRecoveryRequested)
+		return false;
+
 	/*
 	 * Is it a COMMIT record?
 	 *
@@ -6517,7 +6509,7 @@ StartupXLOG(void)
 	 * Take ownership of the wakeup latch if we're going to sleep during
 	 * recovery.
 	 */
-	if (StandbyModeRequested)
+	if (ArchiveRecoveryRequested)
 		OwnLatch(&XLogCtl->recoveryWakeupLatch);
 
 	/* Set up XLOG reader facility */
@@ -6849,7 +6841,7 @@ StartupXLOG(void)
 	if (ControlFile->state == DB_SHUTDOWNED)
 		XLogCtl->unloggedLSN = ControlFile->unloggedLSN;
 	else
-		XLogCtl->unloggedLSN = 1;
+		XLogCtl->unloggedLSN = FirstNormalUnloggedLSN;
 
 	/*
 	 * We must replay WAL entries using the same TimeLineID they were created
@@ -7500,7 +7492,7 @@ StartupXLOG(void)
 	 * We don't need the latch anymore. It's not strictly necessary to disown
 	 * it, but let's do it for the sake of tidiness.
 	 */
-	if (StandbyModeRequested)
+	if (ArchiveRecoveryRequested)
 		DisownLatch(&XLogCtl->recoveryWakeupLatch);
 
 	/*
@@ -7587,6 +7579,7 @@ StartupXLOG(void)
 	if (ArchiveRecoveryRequested)
 	{
 		char		reason[200];
+		char		recoveryPath[MAXPGPATH];
 
 		Assert(InArchiveRecovery);
 
@@ -7643,6 +7636,17 @@ StartupXLOG(void)
 		 */
 		writeTimeLineHistory(ThisTimeLineID, recoveryTargetTLI,
 							 EndRecPtr, reason);
+
+		/*
+		 * Since there might be a partial WAL segment named RECOVERYXLOG, get
+		 * rid of it.
+		 */
+		snprintf(recoveryPath, MAXPGPATH, XLOGDIR "/RECOVERYXLOG");
+		unlink(recoveryPath);	/* ignore any error */
+
+		/* Get rid of any remaining recovered timeline-history file, too */
+		snprintf(recoveryPath, MAXPGPATH, XLOGDIR "/RECOVERYHISTORY");
+		unlink(recoveryPath);	/* ignore any error */
 	}
 
 	/* Save the selected TimeLineID in shared memory, too */
@@ -7764,7 +7768,10 @@ StartupXLOG(void)
 		}
 		else
 			CreateCheckPoint(CHECKPOINT_END_OF_RECOVERY | CHECKPOINT_IMMEDIATE);
+	}
 
+	if (ArchiveRecoveryRequested)
+	{
 		/*
 		 * And finally, execute the recovery_end_command, if any.
 		 */
@@ -7772,10 +7779,7 @@ StartupXLOG(void)
 			ExecuteRecoveryCommand(recoveryEndCommand,
 								   "recovery_end_command",
 								   true);
-	}
 
-	if (ArchiveRecoveryRequested)
-	{
 		/*
 		 * We switched to a new timeline. Clean up segments on the old
 		 * timeline.
@@ -12037,6 +12041,12 @@ WaitForWALToBecomeAvailable(XLogRecPtr RecPtr, bool randAccess,
 					 */
 
 					/*
+					 * We should be able to move to XLOG_FROM_STREAM
+					 * only in standby mode.
+					 */
+					Assert(StandbyMode);
+
+					/*
 					 * Before we leave XLOG_FROM_STREAM state, make sure that
 					 * walreceiver is not active, so that it won't overwrite
 					 * WAL that we restore from archive.
@@ -12148,6 +12158,12 @@ WaitForWALToBecomeAvailable(XLogRecPtr RecPtr, bool randAccess,
 			case XLOG_FROM_STREAM:
 				{
 					bool		havedata;
+
+					/*
+					 * We should be able to move to XLOG_FROM_STREAM
+					 * only in standby mode.
+					 */
+					Assert(StandbyMode);
 
 					/*
 					 * Check if WAL receiver is still active.
