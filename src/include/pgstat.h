@@ -3,6 +3,7 @@
  *
  *	Definitions for the PostgreSQL statistics collector daemon.
  *
+ *	Portions Copyright (c) 2019, Cybertec Schönig & Schönig GmbH
  *	Copyright (c) 2001-2019, PostgreSQL Global Development Group
  *
  *	src/include/pgstat.h

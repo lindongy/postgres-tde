@@ -86,6 +86,7 @@ typedef struct _MdfdVec
 
 static MemoryContext MdCxt;		/* context for all MdfdVec objects */
 
+
 /* Populate a file tag describing an md.c segment file. */
 #define INIT_MD_FILETAG(a,xx_rnode,xx_forknum,xx_segno) \
 ( \

@@ -1,3 +1,14 @@
+#-------------------------------------------------------------------------
+#
+# Makefile
+#    Makefile for src/test/modules/buffile
+#
+# Regression tests for src/backend/storage/file/buffile.c
+#
+# IDENTIFICATION
+#    src/test/modules/buffile/Makefile
+#
+#-------------------------------------------------------------------------
 PG_CONFIG ?= pg_config
 MODULE_big = buffile_test
 OBJS = buffile.o $(WIN32RES)

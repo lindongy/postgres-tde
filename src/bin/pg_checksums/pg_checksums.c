@@ -4,6 +4,7 @@
  *	  Checks, enables or disables page level checksums for an offline
  *	  cluster
  *
+ * Portions Copyright (c) 2019, Cybertec Schönig & Schönig GmbH
  * Copyright (c) 2010-2019, PostgreSQL Global Development Group
  *
  * IDENTIFICATION

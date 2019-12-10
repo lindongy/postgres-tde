@@ -1,3 +1,16 @@
+/*-------------------------------------------------------------------------
+ *
+ * encryption.c
+ *	  Transparent Data Encryption specific code usable by both frontend and
+ *	  backend.
+ *
+ * Portions Copyright (c) 2019, Cybertec Schönig & Schönig GmbH
+ *
+ * IDENTIFICATION
+ *	  src/common/encryption.c
+ *
+ *-------------------------------------------------------------------------
+ */
 #ifndef FRONTEND
 #include "postgres.h"
 #else

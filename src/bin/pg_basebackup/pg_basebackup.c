@@ -4,6 +4,7 @@
  *
  * Author: Magnus Hagander <magnus@hagander.net>
  *
+ * Portions Copyright (c) 2019, Cybertec Schönig & Schönig GmbH
  * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  *
  * IDENTIFICATION

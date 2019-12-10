@@ -3,6 +3,7 @@
  *
  *	options functions
  *
+ *	Portions Copyright (c) 2019, Cybertec Schönig & Schönig GmbH
  *	Copyright (c) 2010-2019, PostgreSQL Global Development Group
  *	src/bin/pg_upgrade/option.c
  */

@@ -3,6 +3,7 @@
  * pg_rewind.c
  *	  Synchronizes a PostgreSQL data directory to a new timeline
  *
+ * Portions Copyright (c) 2019, Cybertec Schönig & Schönig GmbH
  * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  *
  *-------------------------------------------------------------------------

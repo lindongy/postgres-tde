@@ -6,6 +6,7 @@
  * See src/backend/utils/misc/README for more information.
  *
  *
+ * Portions Copyright (c) 2019, Cybertec Schönig & Schönig GmbH
  * Copyright (c) 2000-2019, PostgreSQL Global Development Group
  * Written by Peter Eisentraut <peter_e@gmx.net>.
  *

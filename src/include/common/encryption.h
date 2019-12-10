@@ -1,3 +1,16 @@
+/*-------------------------------------------------------------------------
+ *
+ * encryption.h
+ *	  Transparent Data Encryption specific code usable by both frontend and
+ *	  backend.
+ *
+ * Portions Copyright (c) 2019, Cybertec Schönig & Schönig GmbH
+ *
+ * IDENTIFICATION
+ *	  src/include/common/encryption.c
+ *
+ *-------------------------------------------------------------------------
+ */
 #ifndef COMMON_ENCRYPTION_H
 #define COMMON_ENCRYPTION_H
 

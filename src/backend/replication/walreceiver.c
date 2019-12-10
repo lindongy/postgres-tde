@@ -33,6 +33,7 @@
  * specific parts are in the libpqwalreceiver module. It's loaded
  * dynamically to avoid linking the server with libpq.
  *
+ * Portions Copyright (c) 2019, Cybertec Schönig & Schönig GmbH
  * Portions Copyright (c) 2010-2019, PostgreSQL Global Development Group
  *
  *

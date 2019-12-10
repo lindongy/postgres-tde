@@ -1,3 +1,15 @@
+/*-------------------------------------------------------------------------
+ *
+ * buffile.c
+ *	  Regression tests for src/backend/storage/file/buffile.c
+ *
+ * Portions Copyright (c) 2019, Cybertec Schönig & Schönig GmbH
+ *
+ * IDENTIFICATION
+ *	  src/test/modules/buffile/buffile.c
+ *
+ *-------------------------------------------------------------------------
+ */
 #include <fcntl.h>
 
 #include "postgres.h"

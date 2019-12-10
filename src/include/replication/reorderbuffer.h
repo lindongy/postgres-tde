@@ -2,6 +2,7 @@
  * reorderbuffer.h
  *	  PostgreSQL logical replay/reorder buffer management.
  *
+ * Portions Copyright (c) 2019, Cybertec Schönig & Schönig GmbH
  * Copyright (c) 2012-2019, PostgreSQL Global Development Group
  *
  * src/include/replication/reorderbuffer.h

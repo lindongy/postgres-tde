@@ -3,6 +3,7 @@
  * basebackup.c
  *	  code for taking a base backup and streaming it to a standby
  *
+ * Portions Copyright (c) 2019, Cybertec Schönig & Schönig GmbH
  * Portions Copyright (c) 2010-2019, PostgreSQL Global Development Group
  *
  * IDENTIFICATION

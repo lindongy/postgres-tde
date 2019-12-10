@@ -1,4 +1,12 @@
-# src/bin/pg_keysetup/Makefile
+#-------------------------------------------------------------------------
+#
+# Makefile for src/bin/pg_keytool
+#
+# Portions Copyright (c) 2019, Cybertec Schönig & Schönig GmbH
+#
+# src/bin/pg_keytool/Makefile
+#
+#-------------------------------------------------------------------------
 
 PGFILEDESC = "pg_keytool - handle cluster encryption key"
 PGAPPICON=win32

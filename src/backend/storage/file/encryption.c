@@ -3,8 +3,7 @@
  * encryption.c
  *	  This code handles encryption and decryption of data.
  *
- * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
- * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2019, Cybertec Schönig & Schönig GmbH
  *
  * See src/backend/storage/file/README.encryption for explanation of the
  * design.

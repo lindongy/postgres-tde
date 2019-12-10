@@ -2,6 +2,7 @@
  *
  * pg_waldump.c - decode and display WAL
  *
+ * Portions Copyright (c) 2019, Cybertec Schönig & Schönig GmbH
  * Copyright (c) 2013-2019, PostgreSQL Global Development Group
  *
  * IDENTIFICATION

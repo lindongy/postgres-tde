@@ -2,6 +2,7 @@
  *
  * pg_ctl --- start/stops/restarts the PostgreSQL server
  *
+ * Portions Copyright (c) 2019, Cybertec Schönig & Schönig GmbH
  * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  *
  * src/bin/pg_ctl/pg_ctl.c

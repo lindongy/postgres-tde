@@ -37,6 +37,7 @@
  * record, wait for it to be replicated to the standby, and then exit.
  *
  *
+ * Portions Copyright (c) 2019, Cybertec Schönig & Schönig GmbH
  * Portions Copyright (c) 2010-2019, PostgreSQL Global Development Group
  *
  * IDENTIFICATION

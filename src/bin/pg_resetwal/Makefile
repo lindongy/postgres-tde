@@ -2,6 +2,7 @@
 #
 # Makefile for src/bin/pg_resetwal
 #
+# Portions Copyright (c) 2019, Cybertec Schönig & Schönig GmbH
 # Copyright (c) 1998-2019, PostgreSQL Global Development Group
 #
 # src/bin/pg_resetwal/Makefile
