@@ -921,12 +921,13 @@ do_start(void)
 	}
 #endif	/* USE_ENCRYPTION */
 
-	sk_args.pm_pid = pm_pid = start_postmaster();
+	pm_pid = start_postmaster();
 #ifdef WIN32
 	sk_args.pmProcess = postmasterProcess;
 #endif
 
 #ifdef USE_ENCRYPTION
+	sk_args.pm_pid = pm_pid;
 	if (encryption_key_command)
 	{
 		char	*keycmd_conf_file;

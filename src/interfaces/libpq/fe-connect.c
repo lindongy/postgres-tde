@@ -2101,6 +2101,7 @@ connectDBComplete(PGconn *conn, bool ssl_handshake_only)
 			last_addr_cur = conn->addr_cur;
 		}
 
+#ifdef USE_ENCRYPTION
 		if (ssl_handshake_only)
 		{
 			if (conn->status == CONNECTION_MADE)
@@ -2117,6 +2118,7 @@ connectDBComplete(PGconn *conn, bool ssl_handshake_only)
 					return 0;
 			}
 		}
+#endif	/* USE_ENCRYPTION */
 
 		/*
 		 * Wait, if necessary.  Note that the initial state (just after

@@ -22,13 +22,6 @@
 #include "storage/relfilenode.h"
 #include "port/pg_crc32c.h"
 
-/*
- * Common error message issued when particular code path cannot be executed
- * due to absence of the OpenSSL library.
- */
-#define ENCRYPTION_NOT_SUPPORTED_MSG \
-	"compile postgres with --with-openssl to use encryption."
-
 /* Is the cluster encrypted? */
 extern bool data_encrypted;
 

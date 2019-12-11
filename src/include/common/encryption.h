@@ -32,6 +32,13 @@
 #define	ENCRYPTION_KDF_SALT_LEN		sizeof(uint64)
 
 /*
+ * Common error message issued when particular code path cannot be executed
+ * due to absence of the OpenSSL library.
+ */
+#define ENCRYPTION_NOT_SUPPORTED_MSG \
+	"compile postgres with --with-openssl to use encryption."
+
+/*
  * Cipher used to encrypt data. This value is stored in the control file.
  *
  * Due to very specific requirements, the ciphers are not likely to change,

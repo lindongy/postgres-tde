@@ -4470,6 +4470,7 @@ BackendStartup(Port *port)
 		/* Perform additional initialization and collect startup packet */
 		BackendInitialize(port);
 
+#ifdef USE_ENCRYPTION
 		if (key_only_backend)
 		{
 			/*
@@ -4479,6 +4480,7 @@ BackendStartup(Port *port)
 			shareEncryptionKey();
 			proc_exit(0);
 		}
+#endif	/* USE_ENCRYPTION */
 
 		/* And run the backend */
 		BackendRun(port);
