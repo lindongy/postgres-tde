@@ -952,6 +952,8 @@ XLogSaveBufferForHint(Buffer buffer, bool buffer_std)
 
 		recptr = XLogInsert(RM_XLOG_ID, XLOG_FPI_FOR_HINT);
 	}
+	else if (data_encrypted)
+		recptr = get_regular_lsn_for_encryption();
 
 	return recptr;
 }

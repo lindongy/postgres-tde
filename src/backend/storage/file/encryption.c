@@ -580,10 +580,7 @@ mdtweak(char *tweak, RelFileNode *relnode, ForkNumber forknum, BlockNumber block
  *
  * The function should not be called on all-zero pages, pages satisfying
  * PageIsNew() or pages just initialized using PageInit() - all these have
- * invalid LSN and so are not eligible for AES-CRT encryption. We might set
- * the "fake LSN" if such an empty page belongs to unlogged / temporary table,
- * but it'd be harder for permanent ones. Let's reject all cases to be
- * consistent.
+ * invalid LSN and so they are not eligible for AES-CRT encryption.
  */
 void
 enforce_lsn_for_encryption(char relpersistence, char *buf_contents)
@@ -597,7 +594,6 @@ enforce_lsn_for_encryption(char relpersistence, char *buf_contents)
 		if (XLogRecPtrIsInvalid(PageGetLSN(buf_contents)))
 		{
 			XLogRecPtr	lsn;
-			char	xlr_data = '\0';
 
 			/*
 			 * If wal_level > WAL_LEVEL_MINIMAL, pages containing user data
@@ -607,21 +603,7 @@ enforce_lsn_for_encryption(char relpersistence, char *buf_contents)
 			 * crash recovery because the relation is fsync'd before commit.
 			 */
 			Assert(!XLogIsNeeded());
-
-			/*
-			 * XLOG_NOOP is the easiest way to generate a valid LSN. Fake LSN
-			 * is not suitable for permanent relation because it'd be hard to
-			 * guarantee that it's not equal to any (existing or future)
-			 * regular LSN.
-			 *
-			 * This approach introduces some overhead (no WAL would be written
-			 * w/o encryption) but such a small record per page doesn't seem
-			 * terrible.
-			 */
-			XLogBeginInsert();
-			/* At least 1 byte is required. */
-			XLogRegisterData(&xlr_data, 1);
-			lsn = XLogInsert(RM_XLOG_ID, XLOG_NOOP);
+			lsn = get_regular_lsn_for_encryption();
 
 			PageSetLSN(buf_contents, lsn);
 		}
@@ -633,5 +615,30 @@ enforce_lsn_for_encryption(char relpersistence, char *buf_contents)
 		 */
 		PageSetLSN(buf_contents, GetFakeLSNForUnloggedRel());
 	}
+}
+
+/*
+ * Generate non-fake LSN.
+ *
+ * XLOG_NOOP is the easiest way to generate a valid LSN. Fake LSN
+ * is not suitable for permanent relation because it'd be hard to
+ * guarantee that it's not equal to any (existing or future)
+ * regular LSN.
+ *
+ * This approach introduces some overhead (no WAL would be written
+ * w/o encryption) but such a small record per page doesn't seem
+ * terrible.
+ */
+XLogRecPtr
+get_regular_lsn_for_encryption(void)
+{
+	char	xlr_data = '\0';
+	XLogRecPtr	lsn;
+
+	XLogBeginInsert();
+	/* At least 1 byte is required. */
+	XLogRegisterData(&xlr_data, 1);
+	lsn = XLogInsert(RM_XLOG_ID, XLOG_NOOP);
+	return lsn;
 }
 #endif	/* !FRONTEND */

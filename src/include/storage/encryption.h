@@ -56,6 +56,7 @@ extern char encryption_verification[];
 
 extern void enforce_lsn_for_encryption(char relpersistence,
 									   char *buf_contents);
+extern XLogRecPtr get_regular_lsn_for_encryption(void);
 #endif	/* FRONTEND */
 
 #define TWEAK_SIZE 16
