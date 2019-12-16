@@ -132,7 +132,7 @@ PostgreSQL documentation
        <term><option>-w</option></term>
        <listitem>
          <para>
-           Expect the password on standard input rather than the encryption key.
+           Expect the password rather than the encryption key on standard input.
          </para>
        </listitem>
      </varlistentry>
