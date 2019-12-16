@@ -294,18 +294,6 @@
  <sect2>
   <title>Where to Report Bugs</title>
 
-  <caution>
-   <para>
-    If the bug seems to be specific to Transparent Data Encryption
-    (<xref linkend="encryption"/>), please send your report
-    to <email>bugs-tde@cybertec.at</email>. If you're not sure, please try to
-    find out if the community <productname>PostgreSQL</productname> edition of
-    the corresponding version has the bug as well. If it does, please report
-    the bug to <corpauthor>The PostgreSQL Global Development
-    Group</corpauthor> according to the instructions below.
-   </para>
-  </caution>
-
   <para>
    In general, send bug reports to the bug report mailing list at
    <email>pgsql-bugs@lists.postgresql.org</email>.

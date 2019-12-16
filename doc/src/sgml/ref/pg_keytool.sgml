@@ -16,7 +16,7 @@ PostgreSQL documentation
 
  <refnamediv>
   <refname>pg_keytool</refname>
-  <refpurpose>generate cluster encryption key and/or send it to
+  <refpurpose>generate cluster encryption key and/or send it to the
     <productname>PostgreSQL</productname> server</refpurpose>
  </refnamediv>
 
@@ -30,39 +30,39 @@ PostgreSQL documentation
  <refsect1>
   <title>Description</title>
   <para>
-   <application>pg_keytool</application> reads either encryption key or
-   password from the standard input. If it received password, it
-   runs <firstterm>key derivation function</firstterm>
+   <application>pg_keytool</application> reads either an encryption key or
+   a password from standard input. If it receives a password, it
+   runs the <firstterm>key derivation function</firstterm>
    (<acronym>KDF</acronym>) on it in order to derive the key.
   </para>
 
   <para>
-   The encryption key is written either to the standard output (the default
+   The encryption key is written either to standard output (the default
    behavior) or, if both host name and port number are specified, sent via
-   frontend/backend protocol to <productname>PostgreSQL</productname> server
+   a frontend/backend protocol to the <productname>PostgreSQL</productname> server
    during start up.
   </para>
 
   <para>
    One common use case is that <application>pg_keytool</application> is used
-   within encryption key command, see the examples in
+   within the encryption key command, see the examples in
    <xref linkend="encryption"/>. In this case it sends the encryption key to
-   the standard output.
+   standard output.
   </para>
 
   <para>
    The other use case is that <productname>PostgreSQL</productname> is started
-   other way than using <xref linkend="app-pg-ctl"/>, typically
+   in another way than using <xref linkend="app-pg-ctl"/>, typically
    using <firstterm>systemd</firstterm> or a custom script. In this
-   case <application>pg_keytool</application> can be used to send the key to
-   specified server. (<application>pg_keytool</application> should connect to
+   case, <application>pg_keytool</application> can be used to send the key to
+   the server. (<application>pg_keytool</application> should connect to
    the same port or Unix-domain socket to which applications will eventually
    connect.)
   </para>
 
   <para>
    If in the latter case you provide <application>pg_keytool</application>
-   with an encryption key (as opposed to password), the utility only ensures
+   with an encryption key (as opposed to with a password), the utility only ensures
    transmission of the key to the database server.
   </para>
  </refsect1>
@@ -78,15 +78,15 @@ PostgreSQL documentation
        <para>
         Specifies the directory where the database cluster is stored. In
         particular, <application>pg_keytool</application> looks
-        for <filename>kdf_params</filename> file here. This file contains
-        parameters of key derivation function and is needed to derive the
-        encryption key from password. Thus different data directory generally
+        for the <filename>kdf_params</filename> file here. This file contains
+        parameters of the key derivation function and is needed to derive the
+        encryption key from a password. Thus, a different data directory generally
         means that a different key will be derived from the same password.
        </para>
 
        <para>
          If this option is not passed, <application>pg_keytool</application>
-         tries to get the data directory from <envar>PGDATA</envar>
+         tries to get the data directory from the <envar>PGDATA</envar>
          environment variable.
        </para>
       </listitem>
@@ -109,8 +109,8 @@ PostgreSQL documentation
        <listitem>
          <para>
            Specifies the TCP port or the local Unix-domain socket file
-           extension on which the server is listening for connections. If not
-           set, to the port specified at compile time, usually 5432.
+           extension on which the server is listening for connections. If it is not
+           set, it will be allocated to the port specified at compile time, usually 5432.
          </para>
        </listitem>
      </varlistentry>
@@ -119,9 +119,9 @@ PostgreSQL documentation
        <term><option>-s</option></term>
        <listitem>
          <para>
-           Send the key to <productname>PostgreSQL</productname> server rather
+           Send the key to the <productname>PostgreSQL</productname> server rather
            than to standard output. This option does not have to be specified
-           explicitly if
+           explicitly if the 
            <literal>--host</literal> or <literal>--port</literal> option is
            passed.
          </para>
@@ -132,7 +132,7 @@ PostgreSQL documentation
        <term><option>-w</option></term>
        <listitem>
          <para>
-           Expect password on standard input rather than encryption key.
+           Expect the password on standard input rather than the encryption key.
          </para>
        </listitem>
      </varlistentry>

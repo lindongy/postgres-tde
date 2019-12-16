@@ -302,7 +302,7 @@ PostgreSQL documentation
        <para>
         If the cluster is encrypted and
         if <literal>encryption_key_command</literal> is not present
-        in <filename>postgresql.conf</filename>, this option can be used top
+        in <filename>postgresql.conf</filename>, this option can be used to
         pass the encryption key command to <application>pg_ctl</application>.
         <application>pg_ctl</application> runs this command to retrieve the
         encryption key and sends the key to the database server during startup
@@ -311,12 +311,12 @@ PostgreSQL documentation
 
        <note>
         <para>
-         If you start your cluster other way than
+         If you start your cluster in another way than
          using <application>pg_ctl</application> (for example
          using <firstterm>systemd</firstterm> or a custom script) (and
          if <literal>encryption_key_command</literal> is not present
          in <filename>postgresql.conf</filename>), consider sending the key
-         using <xref linkend="app-pg-keytool"/> utility.
+         using the <xref linkend="app-pg-keytool"/> utility.
         </para>
        </note>
       </listitem>

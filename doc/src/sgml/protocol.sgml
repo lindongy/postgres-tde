@@ -2071,8 +2071,8 @@ The commands accepted in replication mode are:
      </para>
 
      <para>
-      If the server is encrypted, <literal>DECRYPT</literal> option can be
-      passed to tell the server that decrypted WAL stream should be sent.
+      If the server is encrypted, the <literal>DECRYPT</literal> option can be
+      passed to tell the server that the WAL stream should be sent in decrypted form.
      </para>
 
      <para>
@@ -2586,13 +2586,14 @@ The commands accepted in replication mode are:
         <term><literal>DECRYPT</literal></term>
         <listitem>
          <para>
-          If the cluster is encrypted and this option is passed, relation and
-          WAL files are decrypted before they are sent to client. In addition,
-          the <literal>Data encryption</literal> field the control file is set
-          to <literal>off</literal>. This option also ensures that
-          the <filename>global/kdf_params</filename> file (containing
-          parameters of the the key dervivation function, which is used to
-          derive encryption key from password) is not sent to the client.
+          If the cluster is encrypted and this option is passed, the relation
+          files and WAL files are decrypted before they are sent to the
+          client. In addition, the <literal>Data encryption</literal> field of
+          the control file is set to <literal>off</literal>. This option also
+          ensures that the <filename>global/kdf_params</filename> file
+          (containing parameters of the key derivation function, which is used
+          to derive the encryption key from the password) is not sent to the
+          client.
          </para>
         </listitem>
        </varlistentry>
