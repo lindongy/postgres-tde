@@ -16,7 +16,7 @@ PostgreSQL documentation
 
  <refnamediv>
   <refname>pg_keytool</refname>
-  <refpurpose>generate cluster encryption key and/or send it to the
+  <refpurpose>derive cluster encryption key and/or send it to the
     <productname>PostgreSQL</productname> server</refpurpose>
  </refnamediv>
 
@@ -32,15 +32,16 @@ PostgreSQL documentation
   <para>
    <application>pg_keytool</application> reads either an encryption key or a
    password (if the <option>-w</option> was specified) from standard input. If
-   it receives a password, it runs the <firstterm>key derivation
-   function</firstterm> (<acronym>KDF</acronym>) on it in order to derive the
-   key.
+   it receives a password, it runs
+   the <ulink url="https://en.wikipedia.org/wiki/Key_derivation_function"><firstterm>key
+   derivation function</firstterm></ulink> (<acronym>KDF</acronym>) on it in
+   order to derive the key.
   </para>
 
   <para>
    The encryption key is written either to standard output (the default
    behavior) or, if any of the <option>-s</option>, <option>-h</option>
-   and <option>-p</option> options is specified, sent via a frontend/backend
+   or <option>-p</option> options is specified, sent via a frontend/backend
    protocol to the <productname>PostgreSQL</productname> server during start
    up.
   </para>

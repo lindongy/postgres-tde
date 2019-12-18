@@ -67,9 +67,11 @@
   <para>
     If the cluster should be encrypted, <application>initdb</application>
     creates <filename>global/kdf_params</filename> file in the data
-    directory. This file contains parameters of the key derivation function
-    (<acronym>KDF</acronym>) and is needed to derive the encryption key from a
-    password. Currently the only supported <acronym>KDF</acronym>
+    directory. This file contains parameters of
+    the <ulink url="https://en.wikipedia.org/wiki/Key_derivation_function">key
+    derivation function</ulink> (<acronym>KDF</acronym>) and is needed to
+    derive the encryption key from a password. Currently the only
+    supported <acronym>KDF</acronym>
     is <ulink url="https://en.wikipedia.org/wiki/PBKDF2">PBKDF2</ulink>, so
     the parameters stored in the file are: 1) number of iterations and 2)
     salt. Since the salt is data directory specific, a different key will be
@@ -77,9 +79,10 @@
   </para>
 
   <para>
-   If the <filename>kdf_params</filename> gets lost, you can no longer
-   generate the encryption key from the password, but you can still use the
-   encryption key if you have it stored somewhere.
+   The <filename>kdf_params</filename> file contents is not secret, but if it
+   gets lost, you can no longer derive the encryption key from the
+   password. However but you can still use the encryption key if you have it
+   stored somewhere.
   </para>
  </note>
 
