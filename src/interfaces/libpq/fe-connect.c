@@ -872,12 +872,20 @@ PQconnectedToSocket(PGconn *conn)
  * construct the packet. However that would introduce dependency on the
  * encryption specific code.
  *
- * Returns true on success, false on failure.
+ * Returns 1 on success, 0 on failure.
  */
 int
 PQpacketSend(PGconn *conn, char *data, size_t len)
 {
-	if (pqPacketSend(conn, 0, data, len) != STATUS_OK)
+	/*
+	 * All connection states we expect here should have ended up at
+	 * PGRES_POLLING_WRITING, so poll for write.
+	 */
+	if (pqWaitTimed(0, 1, conn, -1) == -1)
+		return 0;
+
+	if (pqPacketSend(conn, 0, data, len) != STATUS_OK ||
+		conn->write_failed)
 	{
 		char		sebuf[PG_STRERROR_R_BUFLEN];
 
