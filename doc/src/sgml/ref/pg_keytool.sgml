@@ -5,7 +5,7 @@ PostgreSQL documentation
 
 <refentry id="app-pg-keytool">
  <indexterm zone="app-pg-keytool">
-  <primary>pg_keysetup</primary>
+  <primary>pg_keytool</primary>
  </indexterm>
 
  <refmeta>
@@ -22,7 +22,7 @@ PostgreSQL documentation
 
  <refsynopsisdiv>
   <cmdsynopsis>
-   <command>pg_keysetup</command>
+   <command>pg_keytool</command>
    <arg rep="repeat"><replaceable class="parameter">option</replaceable></arg>
   </cmdsynopsis>
  </refsynopsisdiv>
@@ -30,22 +30,25 @@ PostgreSQL documentation
  <refsect1>
   <title>Description</title>
   <para>
-   <application>pg_keytool</application> reads either an encryption key or
-   a password from standard input. If it receives a password, it
-   runs the <firstterm>key derivation function</firstterm>
-   (<acronym>KDF</acronym>) on it in order to derive the key.
+   <application>pg_keytool</application> reads either an encryption key or a
+   password (if the <option>-w</option> was specified) from standard input. If
+   it receives a password, it runs the <firstterm>key derivation
+   function</firstterm> (<acronym>KDF</acronym>) on it in order to derive the
+   key.
   </para>
 
   <para>
    The encryption key is written either to standard output (the default
-   behavior) or, if both host name and port number are specified, sent via
-   a frontend/backend protocol to the <productname>PostgreSQL</productname> server
-   during start up.
+   behavior) or, if any of the <option>-s</option>, <option>-h</option>
+   and <option>-p</option> options is specified, sent via a frontend/backend
+   protocol to the <productname>PostgreSQL</productname> server during start
+   up.
   </para>
 
   <para>
    One common use case is that <application>pg_keytool</application> is used
-   within the encryption key command, see the examples in
+   with the <option>-K</option> option of <command>initdb</command> or
+   <command>pg_ctl</command>, see the examples in
    <xref linkend="encryption"/>. In this case it sends the encryption key to
    standard output.
   </para>
@@ -77,11 +80,9 @@ PostgreSQL documentation
       <listitem>
        <para>
         Specifies the directory where the database cluster is stored. In
-        particular, <application>pg_keytool</application> looks
-        for the <filename>kdf_params</filename> file here. This file contains
-        parameters of the key derivation function and is needed to derive the
-        encryption key from a password. Thus, a different data directory generally
-        means that a different key will be derived from the same password.
+        particular, <application>pg_keytool</application> looks for
+        the <filename>global/kdf_params</filename> file here, see
+        <xref linkend="encryption_kdf_file"/>.
        </para>
 
        <para>
@@ -109,8 +110,8 @@ PostgreSQL documentation
        <listitem>
          <para>
            Specifies the TCP port or the local Unix-domain socket file
-           extension on which the server is listening for connections. If it is not
-           set, it will be allocated to the port specified at compile time, usually 5432.
+           extension on which the server is listening for connections.
+           Defaults to the port specified at compile time, usually 5432.
          </para>
        </listitem>
      </varlistentry>
@@ -119,9 +120,9 @@ PostgreSQL documentation
        <term><option>-s</option></term>
        <listitem>
          <para>
-           Send the key to the <productname>PostgreSQL</productname> server rather
-           than to standard output. This option does not have to be specified
-           explicitly if the 
+           Send the key to the <productname>PostgreSQL</productname> server
+           rather than to standard output. This option does not have to be
+           specified explicitly if the
            <literal>--host</literal> or <literal>--port</literal> option is
            passed.
          </para>
@@ -132,7 +133,8 @@ PostgreSQL documentation
        <term><option>-w</option></term>
        <listitem>
          <para>
-           Expect the password rather than the encryption key on standard input.
+           If this option is given, the data read from the standard input is
+           the password, otherwise it is the encryption key itself.
          </para>
        </listitem>
      </varlistentry>
