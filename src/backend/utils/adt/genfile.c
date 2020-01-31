@@ -84,12 +84,30 @@ convert_and_check_filename(text *arg)
 		 * Allow absolute paths if within DataDir or Log_directory, even
 		 * though Log_directory might be outside DataDir.
 		 */
-		if (!path_is_prefix_of_path(DataDir, filename) &&
-			(!is_absolute_path(Log_directory) ||
-			 !path_is_prefix_of_path(Log_directory, filename)))
-			ereport(ERROR,
-					(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-					 (errmsg("absolute path not allowed"))));
+		if (!path_is_prefix_of_path(DataDir, filename))
+		{
+			int			i;
+			bool		accept = false;
+
+			for (i = 0; i < log_streams_active; i++)
+			{
+				LogStream  *stream = &log_streams[i];
+
+				if (!is_absolute_path(stream->directory))
+					continue;
+
+				if (path_is_prefix_of_path(stream->directory, filename))
+				{
+					accept = true;
+					break;
+				}
+			}
+
+			if (!accept)
+				ereport(ERROR,
+						(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+						 (errmsg("absolute path not allowed"))));
+		}
 	}
 	else if (!path_is_relative_and_below_cwd(filename))
 		ereport(ERROR,
@@ -613,7 +631,9 @@ pg_ls_dir_files(FunctionCallInfo fcinfo, const char *dir, bool missing_ok)
 Datum
 pg_ls_logdir(PG_FUNCTION_ARGS)
 {
-	return pg_ls_dir_files(fcinfo, Log_directory, false);
+	LogStream  *stream = &log_streams[0];
+
+	return pg_ls_dir_files(fcinfo, stream->directory, false);
 }
 
 /* Function to return the list of files in the WAL directory */

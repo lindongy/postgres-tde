@@ -1636,7 +1636,7 @@ static struct config_bool ConfigureNamesBool[] =
 			gettext_noop("Truncate existing log files of same name during log rotation."),
 			NULL
 		},
-		&Log_truncate_on_rotation,
+		&log_streams[0].truncate_on_rotation,
 		false,
 		NULL, NULL, NULL
 	},
@@ -2227,7 +2227,7 @@ static struct config_int ConfigureNamesInt[] =
 						 "(To use the customary octal format the number must "
 						 "start with a 0 (zero).)")
 		},
-		&Log_file_mode,
+		&log_streams[0].file_mode,
 		0600, 0000, 0777,
 		NULL, NULL, show_log_file_mode
 	},
@@ -2847,7 +2847,7 @@ static struct config_int ConfigureNamesInt[] =
 			NULL,
 			GUC_UNIT_MIN
 		},
-		&Log_RotationAge,
+		&log_streams[0].rotation_age,
 		HOURS_PER_DAY * MINS_PER_HOUR, 0, INT_MAX / SECS_PER_MINUTE,
 		NULL, NULL, NULL
 	},
@@ -2858,7 +2858,7 @@ static struct config_int ConfigureNamesInt[] =
 			NULL,
 			GUC_UNIT_KB
 		},
-		&Log_RotationSize,
+		&log_streams[0].rotation_size,
 		10 * 1024, 0, INT_MAX / 1024,
 		NULL, NULL, NULL
 	},
@@ -3626,7 +3626,7 @@ static struct config_string ConfigureNamesString[] =
 			gettext_noop("Controls information prefixed to each log line."),
 			gettext_noop("If blank, no prefix is used.")
 		},
-		&Log_line_prefix,
+		&log_streams[0].line_prefix,
 		"%m [%p] ",
 		NULL, NULL, NULL
 	},
@@ -3896,7 +3896,7 @@ static struct config_string ConfigureNamesString[] =
 						 "or as absolute path."),
 			GUC_SUPERUSER_ONLY
 		},
-		&Log_directory,
+		&log_streams[0].directory,
 		"log",
 		check_canonical_path, NULL, NULL
 	},
@@ -3906,7 +3906,7 @@ static struct config_string ConfigureNamesString[] =
 			NULL,
 			GUC_SUPERUSER_ONLY
 		},
-		&Log_filename,
+		&log_streams[0].filename,
 		"postgresql-%Y-%m-%d_%H%M%S.log",
 		NULL, NULL, NULL
 	},
@@ -4333,7 +4333,7 @@ static struct config_enum ConfigureNamesEnum[] =
 			gettext_noop("Sets the verbosity of logged messages."),
 			NULL
 		},
-		&Log_error_verbosity,
+		&log_streams[0].verbosity,
 		PGERROR_DEFAULT, log_error_verbosity_options,
 		NULL, NULL, NULL
 	},
@@ -11076,7 +11076,14 @@ check_log_destination(char **newval, void **extra, GucSource source)
 static void
 assign_log_destination(const char *newval, void *extra)
 {
-	Log_destination = *((int *) extra);
+	int	i;
+
+	for (i = 0; i < log_streams_active; i++)
+	{
+		LogStream  *log = &log_streams[i];
+
+		log->destination = *((int *) extra);
+	}
 }
 
 static void
@@ -11511,7 +11518,7 @@ show_log_file_mode(void)
 {
 	static char buf[12];
 
-	snprintf(buf, sizeof(buf), "%04o", Log_file_mode);
+	snprintf(buf, sizeof(buf), "%04o", log_streams[0].file_mode);
 	return buf;
 }
 
