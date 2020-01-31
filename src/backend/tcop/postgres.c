@@ -1109,6 +1109,9 @@ exec_simple_query(const char *query_string)
 		/* Make sure we are in a transaction command */
 		start_xact_command();
 
+		/* Check if no GUC limit is being violated. */
+		check_guc_limits_all(InvalidOid);
+
 		/*
 		 * If using an implicit transaction block, and we're not already in a
 		 * transaction block, start an implicit block to force this statement
@@ -1353,6 +1356,9 @@ exec_parse_message(const char *query_string,	/* string to execute */
 	 * necessary.
 	 */
 	start_xact_command();
+
+	/* Check if no GUC limit is being violated. */
+	check_guc_limits_all(InvalidOid);
 
 	/*
 	 * Switch to appropriate context for constructing parsetrees.
@@ -1641,6 +1647,9 @@ exec_bind_message(StringInfo input_message)
 	 * necessary.
 	 */
 	start_xact_command();
+
+	/* Check if no GUC limit is being violated. */
+	check_guc_limits_all(InvalidOid);
 
 	/* Switch back to message context */
 	MemoryContextSwitchTo(MessageContext);
@@ -2043,6 +2052,9 @@ exec_execute_message(const char *portal_name, long max_rows)
 	 */
 	start_xact_command();
 
+	/* Check if no GUC limit is being violated. */
+	check_guc_limits_all(InvalidOid);
+
 	/*
 	 * If we re-issue an Execute protocol request against an existing portal,
 	 * then we are only fetching more rows rather than completely re-executing
@@ -2412,6 +2424,9 @@ exec_describe_statement_message(const char *stmt_name)
 	 */
 	start_xact_command();
 
+	/* Check if no GUC limit is being violated. */
+	check_guc_limits_all(InvalidOid);
+
 	/* Switch back to message context */
 	MemoryContextSwitchTo(MessageContext);
 
@@ -2506,6 +2521,9 @@ exec_describe_portal_message(const char *portal_name)
 	 * current memory context.) Nothing happens if we are already in one.
 	 */
 	start_xact_command();
+
+	/* Check if no GUC limit is being violated. */
+	check_guc_limits_all(InvalidOid);
 
 	/* Switch back to message context */
 	MemoryContextSwitchTo(MessageContext);
@@ -4341,6 +4359,9 @@ PostgresMain(int argc, char *argv[],
 
 				/* start an xact for this function invocation */
 				start_xact_command();
+
+				/* Check if no GUC limit is being violated. */
+				check_guc_limits_all(InvalidOid);
 
 				/*
 				 * Note: we may at this point be inside an aborted

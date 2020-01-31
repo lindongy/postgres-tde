@@ -261,6 +261,9 @@ extern const char *const GucSource_Names[];
 /* get the current set of variables */
 extern struct config_generic **get_guc_variables(void);
 
+/* get a single variable by name */
+extern struct config_generic *get_guc_variable(const char *name);
+
 extern void build_guc_variables(void);
 
 /* search in enum options */
@@ -269,4 +272,9 @@ extern bool config_enum_lookup_by_name(struct config_enum *record,
 									   const char *value, int *retval);
 extern struct config_generic **get_explain_guc_options(int *num);
 
+extern bool check_guc_limits(const char *var_name,
+							 union config_var_val *value,
+							 Oid role,
+							 enum config_type var_type,
+							 int elevel);
 #endif							/* GUC_TABLES_H */

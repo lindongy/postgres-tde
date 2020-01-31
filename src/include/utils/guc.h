@@ -1,8 +1,8 @@
 /*--------------------------------------------------------------------
  * guc.h
  *
- * External declarations pertaining to backend/utils/misc/guc.c and
- * backend/utils/misc/guc-file.l
+ * External declarations pertaining to backend/utils/misc/guc.c,
+ * backend/utils/misc/guc-file.l and backend/utils/misc/guc_limits.c.
  *
  * Copyright (c) 2000-2019, PostgreSQL Global Development Group
  * Written by Peter Eisentraut <peter_e@gmx.net>.
@@ -357,6 +357,10 @@ extern int	NewGUCNestLevel(void);
 extern void AtEOXact_GUC(bool isCommit, int nestLevel);
 extern void BeginReportingGUCOptions(void);
 extern void ParseLongOption(const char *string, char **name, char **value);
+extern void convert_int_from_base_unit(int64 base_value, int base_unit,
+									   int64 *value, const char **unit);
+extern void convert_real_from_base_unit(double base_value, int base_unit,
+										double *value, const char **unit);
 extern bool parse_int(const char *value, int *result, int flags,
 					  const char **hintmsg);
 extern bool parse_real(const char *value, double *result, int flags,
@@ -434,4 +438,7 @@ extern void assign_search_path(const char *newval, void *extra);
 extern bool check_wal_buffers(int *newval, void **extra, GucSource source);
 extern void assign_xlog_sync_method(int new_sync_method, void *extra);
 
+/* in utils/misc/guc_limits.c */
+extern void read_limits_file(void);
+extern void check_guc_limits_all(Oid role);
 #endif							/* GUC_H */

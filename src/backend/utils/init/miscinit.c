@@ -713,8 +713,18 @@ InitializeSessionUserIdStandalone(void)
 void
 SetSessionAuthorization(Oid userid, bool is_superuser)
 {
+	char	*session_auth;
+
 	/* Must have authenticated already, else can't make permission check */
 	AssertState(OidIsValid(AuthenticatedUserId));
+
+	/*
+	 * Check if the new userid violates any GUC limit, but do nothing if
+	 * before backend could apply per-user and per-database settings.
+	 */
+	session_auth = GetConfigOptionByName("session_authorization", NULL, false);
+	if (session_auth && strlen(session_auth) > 0)
+		check_guc_limits_all(userid);
 
 	if (userid != AuthenticatedUserId &&
 		!AuthenticatedUserIsSuperuser)
@@ -778,6 +788,21 @@ SetCurrentRoleId(Oid roleid, bool is_superuser)
 	}
 	else
 		SetRoleIsActive = true;
+
+	/*
+	 * Check if the new role does not violate any limit, however no limits
+	 * apply to superuser.
+	 *
+	 * Also note that the checks will be skipped if we're called during
+	 * transaction abort (see assign_role). We expect that SessionUserId was
+	 * checked earlier for limit violations. (If DBA applied new limits to the
+	 * session user via configuration file, the next command will fail because
+	 * CurrentUserId will also be set below. The user will have to terminate
+	 * the connection because he won't be able to run any command - not sure
+	 * this rare case is worth extra code.)
+	 */
+	if (!is_superuser)
+		check_guc_limits_all(roleid);
 
 	SetOuterUserId(roleid);
 

@@ -1056,6 +1056,20 @@ InitPostgres(const char *in_dbname, Oid dboid, const char *username,
 	/* Process pg_db_role_setting options */
 	process_settings(MyDatabaseId, GetSessionUserId());
 
+	/*
+	 * Now make sure that no limit is violated.
+	 *
+	 * Some variables have already been checked just above, but not the ones
+	 * inherited from postmaster. (We shouldn't do this before
+	 * process_settings() because even if the value inherited from postmaster
+	 * violates its limit, the value resulting from process_settings() may be
+	 * o.k.)
+	 *
+	 * The function raises ERROR, but that becomes FATAL during startup
+	 * automatically, see errstart().
+	 */
+	check_guc_limits_all(InvalidOid);
+
 	/* Apply PostAuthDelay as soon as we've read all options */
 	if (PostAuthDelay > 0)
 		pg_usleep(PostAuthDelay * 1000000L);

@@ -4626,6 +4626,9 @@ static bool reporting_enabled;	/* true to enable GUC_REPORT */
 static int	GUCNestLevel = 0;	/* 1 when in main transaction */
 
 
+static struct config_generic *find_option(const char *name,
+										  bool create_placeholders,
+										  int elevel);
 static int	guc_var_compare(const void *a, const void *b);
 static int	guc_name_compare(const char *namea, const char *nameb);
 static void InitializeGUCOptionsFromEnvironment(void);
@@ -4867,6 +4870,18 @@ get_guc_variables(void)
 	return guc_variables;
 }
 
+/*
+ * Return the variable of given name or NULL if it does not exist.
+ */
+struct config_generic *
+get_guc_variable(const char *name)
+{
+	/*
+	 * As long as we pass create_placeholders=true, elog probably does not
+	 * matter.
+	 */
+	return find_option(name, false, WARNING);
+}
 
 /*
  * Build the sorted array.  This is split out so that it could be
@@ -6165,7 +6180,7 @@ convert_to_base_unit(double value, const char *unit,
  * the value without loss.  For example, if the base unit is GUC_UNIT_KB, 1024
  * is converted to 1 MB, but 1025 is represented as 1025 kB.
  */
-static void
+void
 convert_int_from_base_unit(int64 base_value, int base_unit,
 						   int64 *value, const char **unit)
 {
@@ -6207,7 +6222,7 @@ convert_int_from_base_unit(int64 base_value, int base_unit,
  * Same as above, except we have to do the math a bit differently, and
  * there's a possibility that we don't find any exact divisor.
  */
-static void
+void
 convert_real_from_base_unit(double base_value, int base_unit,
 							double *value, const char **unit)
 {
@@ -6598,7 +6613,7 @@ parse_and_validate_value(struct config_generic *record,
 				const char *hintmsg;
 
 				if (!parse_int(value, &newval->intval,
-							   conf->gen.flags, &hintmsg))
+								   conf->gen.flags, &hintmsg))
 				{
 					ereport(elevel,
 							(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -7053,6 +7068,15 @@ set_config_option(const char *name, const char *value,
 					return -1;
 				}
 
+				/*
+				 * Here we cannot pass elevel because it can be ERROR because
+				 * that way we could raise ERROR even if !changeVal.
+				 */
+				if (!check_guc_limits(name, &newval_union, InvalidOid,
+									  record->vartype,
+									  changeVal ? ERROR : LOG))
+					return 0;
+
 				if (changeVal)
 				{
 					/* Save old value to support transaction abort */
@@ -7143,6 +7167,12 @@ set_config_option(const char *name, const char *value,
 					return -1;
 				}
 
+				/* See above.. */
+				if (!check_guc_limits(name, &newval_union, InvalidOid,
+									  record->vartype,
+									  changeVal ? ERROR : LOG))
+					return 0;
+
 				if (changeVal)
 				{
 					/* Save old value to support transaction abort */
@@ -7232,6 +7262,12 @@ set_config_option(const char *name, const char *value,
 					record->status &= ~GUC_PENDING_RESTART;
 					return -1;
 				}
+
+				/* See above.. */
+				if (!check_guc_limits(name, &newval_union, InvalidOid,
+									  record->vartype,
+									  changeVal ? ERROR : LOG))
+					return 0;
 
 				if (changeVal)
 				{
@@ -7341,6 +7377,12 @@ set_config_option(const char *name, const char *value,
 					return -1;
 				}
 
+				/* See above.. */
+				if (!check_guc_limits(name, &newval_union, InvalidOid,
+									  record->vartype,
+									  changeVal ? ERROR : LOG))
+					return 0;
+
 				if (changeVal)
 				{
 					/* Save old value to support transaction abort */
@@ -7435,6 +7477,12 @@ set_config_option(const char *name, const char *value,
 					record->status &= ~GUC_PENDING_RESTART;
 					return -1;
 				}
+
+				/* See above.. */
+				if (!check_guc_limits(name, &newval_union, InvalidOid,
+									  record->vartype,
+									  changeVal ? ERROR : LOG))
+					return 0;
 
 				if (changeVal)
 				{
@@ -7674,7 +7722,6 @@ GetConfigOptionFlags(const char *name, bool missing_ok)
 	}
 	return record->flags;
 }
-
 
 /*
  * flatten_set_variable_args

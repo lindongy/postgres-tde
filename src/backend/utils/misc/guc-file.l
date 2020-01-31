@@ -155,6 +155,8 @@ ProcessConfigFile(GucContext context)
 	 */
 	(void) ProcessConfigFileInternal(context, true, elevel);
 
+	read_limits_file();
+
 	/* Clean up */
 	MemoryContextSwitchTo(caller_cxt);
 	MemoryContextDelete(config_cxt);
