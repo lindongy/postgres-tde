@@ -3734,6 +3734,9 @@ PostgresMain(int argc, char *argv[],
 	volatile bool send_ready_for_query = true;
 	bool		disable_idle_in_transaction_timeout = false;
 
+	/* Enforce reload of PG_CONF_LIMITS_FILENAME. */
+	read_limits_file();
+
 	/* Initialize startup process environment if necessary. */
 	if (!IsUnderPostmaster)
 		InitStandaloneProcess(argv[0]);
