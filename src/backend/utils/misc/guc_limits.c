@@ -138,12 +138,8 @@ typedef struct GUCLimitEnum
  *
  * TODO
  *
- * 1. Let user specify whether the boundaries are inclusive.
- *
- * 2. Design more generic structure if we want to support GUCs of other types.
- *
- * 3. For boolean vars, check the JSON_TOKEN_TRUE and JSON_TOKEN_FALSE tokens
- * (if "true" and "false" JSON_TOKEN_STRING, these should also be considered
+ * For boolean vars, check the JSON_TOKEN_TRUE and JSON_TOKEN_FALSE tokens (if
+ * "true" and "false" JSON_TOKEN_STRING, these should also be considered
  * valid?)
  */
 typedef struct GUCLimit
@@ -364,11 +360,6 @@ check_guc_limits(const char *var_name, union config_var_val *value,
 	/*
 	 * Parse the input file if not done yet since the last reading.
 	 */
-	/*
-	 * TODO Remove this when no more debugging is needed.
-	 */
-	limits_file_processed = false;
-
 	if (!limits_file_processed)
 	{
 		/* No limit information available? */
@@ -544,9 +535,8 @@ check_guc_limits(const char *var_name, union config_var_val *value,
 
 					if (strcmp(lim_str->value, val_str) != 0)
 					{
-						/* TODO Escape the variable values. */
 						ereport(elevel,
-								(errmsg("\"%s\" role can only set value of the \"%s\" configuration variable to \"%s\" but %s tried",
+								(errmsg("\"%s\" role can only set value of the \"%s\" configuration variable to \"%s\" but \"%s\" tried",
 										role_str,
 										var_name,
 										lim_str->value,
@@ -600,7 +590,6 @@ check_guc_limits(const char *var_name, union config_var_val *value,
 
 					if (!found)
 					{
-						/* TODO Escape the variable value. */
 						ereport(elevel,
 								(errmsg("\"%s\" role cannot set the \"%s\" configuration variable to \"%s\"",
 										role_str,
@@ -1688,7 +1677,6 @@ validate_limit_enum(GUCLimit *limit, void *fields_raw[],
 
 		if (!found)
 		{
-			/* TODO Escape the value. */
 			ereport(LOG,
 					(errmsg("\"%s\" is not valid value of \"%s\" variable",
 							entry_str,
