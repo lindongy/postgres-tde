@@ -9052,6 +9052,227 @@ dynamic_library_path = 'C:\tools\postgresql;H:\my_project\lib;$libdir'
 
    </sect1>
 
+   <sect1 id="runtime-config-limits">
+    <title>Parameter Limits</title>
+
+    <para>
+     Some roles (users or groups) can be restricted in setting the
+     configuration parameters. The administrator can define particular
+     restricions in the <filename>guc_limits.json</filename> file and put it
+     into the data directory.
+    </para>
+
+    <para>
+     The file is a JSON array where each element represents a single
+     limit. Multiple limits can be assigned to a single variable. The
+     following limit attributes are required regardless the parameter data
+     type:
+    </para>
+
+    <itemizedlist>
+     <listitem>
+      <para>
+       <literal>var_name</literal>
+      </para>
+      <para>
+       Name of the variable (parameter) whose values should be limited.
+      </para>
+     </listitem>
+
+     <listitem>
+      <para>
+       <literal>roles</literal>
+      </para>
+      <para>
+       List of roles (users, groups) who cannot change the variable value
+       beyond the limit.
+      </para>
+     </listitem>
+    </itemizedlist>
+
+    <para>
+     The other attributes are only applicable to parameters of specific data
+     types.
+    </para>
+
+    <sect2 id="runtime-config-limits-boolean">
+     <title>Boolean Limits</title>
+     <itemizedlist>
+      <listitem>
+       <para>
+        <literal>value</literal>
+       </para>
+       <para>
+        The allowed value of the parameter.
+       </para>
+      </listitem>
+     </itemizedlist>
+    </sect2>
+
+    <sect2 id="runtime-config-limits-string">
+     <title>String Limits</title>
+     <itemizedlist>
+      <listitem>
+       <para>
+        <literal>value</literal>
+       </para>
+       <para>
+        The allowed value of the parameter.
+       </para>
+      </listitem>
+
+      <listitem>
+       <para>
+        <literal>allow_empty</literal>
+       </para>
+       <para>
+        Can the parameter be set to empty string? The default value
+        is <literal>true</literal>.
+       </para>
+      </listitem>
+     </itemizedlist>
+    </sect2>
+
+    <sect2 id="runtime-config-limits-integer">
+     <title>Integer Limits</title>
+     <itemizedlist>
+      <listitem>
+       <para>
+        <literal>min</literal>
+       </para>
+       <para>
+         Minimum value of the parameter.
+       </para>
+      </listitem>
+
+      <listitem>
+       <para>
+        <literal>max</literal>
+       </para>
+       <para>
+         Maximum value of the parameter.
+       </para>
+      </listitem>
+     </itemizedlist>
+    </sect2>
+
+    <sect2 id="runtime-config-limits-numeric">
+     <title>Numeric Limits</title>
+     <itemizedlist>
+      <listitem>
+       <para>
+        <literal>min</literal>
+       </para>
+       <para>
+         Minimum value of the parameter.
+       </para>
+      </listitem>
+
+      <listitem>
+       <para>
+        <literal>include_min</literal>
+       </para>
+       <para>
+        Is the minimum value allowed itself? The default value
+        is <literal>false</literal>.
+       </para>
+      </listitem>
+
+      <listitem>
+       <para>
+        <literal>max</literal>
+       </para>
+       <para>
+         Maximum value of the parameter.
+       </para>
+      </listitem>
+
+      <listitem>
+       <para>
+        <literal>include_max</literal>
+       </para>
+       <para>
+        Is the maximum value allowed itself? The default value
+        is <literal>false</literal>.
+       </para>
+      </listitem>
+     </itemizedlist>
+    </sect2>
+
+    <sect2 id="runtime-config-limits-enum">
+     <title>Enumerated Limits</title>
+     <itemizedlist>
+      <listitem>
+       <para>
+        <literal>values</literal>
+       </para>
+       <para>
+        The list of values the parameter can be assigned.
+       </para>
+      </listitem>
+     </itemizedlist>
+    </sect2>
+
+    <sect2 id="runtime-config-limits-example">
+     <title>Example configuration</title>
+
+     <para>
+      The following sample file shows how limits can be imposed on
+      configuration parameters of different data types.
+     </para>
+
+<screen>
+[
+    {
+	"var_name" : "enable_seqscan",
+	"value" : true,
+	"roles" : ["app1"]
+    },
+
+    {
+	"var_name" : "work_mem",
+	"min" : 1024,
+	"max" : 2048,
+	"roles" : ["monitor"]
+    },
+
+    {
+	"var_name" : "work_mem",
+	"min" : 1024,
+	"max" : "16MB",
+	"roles" : ["admin"]
+    },
+
+    {
+	"var_name" : "max_parallel_workers",
+	"max" : 10,
+	"roles" : ["app1", "app2"]
+    },
+
+    {
+	"var_name" : "default_tablespace",
+	"value" : "tbsp_app1",
+	"roles" : ["app1"]
+    },
+
+    {
+	"var_name" : "client_min_messages",
+	"values" : ["log", "info", "notice", "warning", "error"],
+	"roles" : ["app1", "app2"]
+    }
+]
+</screen>
+
+     <para>
+      You can enforce rereading of the <filename>guc_limits.json</filename>
+      file in the same way as you would do
+      for <filename>postgresql.conf</filename>: by running <literal>pg_ctl
+      reload</literal> from the command line or by calling the SQL
+      function <function>pg_reload_conf()</function>.
+     </para>
+    </sect2>
+   </sect1>
+
    <sect1 id="runtime-config-preset">
     <title>Preset Options</title>
 
