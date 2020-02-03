@@ -46,6 +46,7 @@ typedef enum LimitField
 	LIMIT_FIELD_INCLUDE_MAX,
 	LIMIT_FIELD_VALUE,
 	LIMIT_FIELD_VALUES,
+	LIMIT_FIELD_ALLOW_EMPTY,
 
 	/* This determines the array size, i.e. not actual index */
 	LIMIT_FIELDS_TOTAL
@@ -54,7 +55,7 @@ typedef enum LimitField
 /* Names of the fields enumerated above. */
 static char	*limit_field_names[LIMIT_FIELDS_TOTAL] = {
 	"var_name", "roles", "min", "max", "include_min", "include_max", "value",
-	"values"};
+	"values", "allow_empty"};
 
 /*
  * Here we declare for each limit data type which fields it can have set in
@@ -63,19 +64,19 @@ static char	*limit_field_names[LIMIT_FIELDS_TOTAL] = {
 static bool limit_fields_allowed[][LIMIT_FIELDS_TOTAL] =
 {
 	/* PGC_BOOL */
-	{true, true, false, false, false, false, true, false},
+	{true, true, false, false, false, false, true, false, false},
 
 	/* PGC_INT */
-	{true, true, true, true, false, false, false, false},
+	{true, true, true, true, false, false, false, false, false},
 
 	/* PGC_REAL */
-	{true, true, true, true, true, true, false, false},
+	{true, true, true, true, true, true, false, false, false},
 
 	/* PGC_STRING */
-	{true, true, false, false, false, false, true, false},
+	{true, true, false, false, false, false, true, false, true},
 
 	/* PGC_ENUM */
-	{true, true, false, false, false, false, false, true}
+	{true, true, false, false, false, false, false, true, false}
 };
 
 /*
@@ -122,6 +123,7 @@ typedef struct GUCLimitReal
 typedef struct GUCLimitString
 {
 	char	*value;
+	bool	allow_empty;
 } GUCLimitString;
 
 /*
@@ -536,6 +538,9 @@ check_guc_limits(const char *var_name, union config_var_val *value,
 				{
 					char	*val_str = value->stringval;
 					GUCLimitString	*lim_str = &limit->value.s;
+
+					if (lim_str->allow_empty && strlen(val_str) == 0)
+						return true;
 
 					if (strcmp(lim_str->value, val_str) != 0)
 					{
@@ -1139,6 +1144,7 @@ process_limits_file(void)
 			str_src = (GUCLimitString *) &src->value.s;
 			str_dst = (GUCLimitString *) &dst->value.s;
 			str_dst->value = pstrdup(str_src->value);
+			str_dst->allow_empty = str_src->allow_empty;
 		}
 		else if (src->vartype == PGC_ENUM)
 		{
@@ -1605,12 +1611,12 @@ validate_limit_real(GUCLimit *limit, void *fields_raw[])
 }
 
 /*
- * Validate fields specific for bool type and finalize the limit instance.
+ * Validate fields specific for string type and finalize the limit instance.
  */
 static bool
 validate_limit_string(GUCLimit *limit, void *fields_raw[])
 {
-	char	*val_str;
+	char	*val_str, *allow_opt_str;
 	GUCLimitString	*lim_string = (GUCLimitString *) &limit->value.s;
 
 	val_str = (char *) get_limit_field(fields_raw, LIMIT_FIELD_VALUE);
@@ -1621,8 +1627,23 @@ validate_limit_string(GUCLimit *limit, void *fields_raw[])
 						limit->var_name)));
 		return false;
 	}
-
 	lim_string->value = val_str;
+
+	lim_string->allow_empty = true;
+	allow_opt_str = (char *) get_limit_field(fields_raw,
+											 LIMIT_FIELD_ALLOW_EMPTY);
+	if (allow_opt_str)
+	{
+		bool	parsed;
+
+		limit->value.s.allow_empty = parse_limit_field_bool(allow_opt_str,
+															limit->var_name,
+															&parsed);
+
+		if (!parsed)
+			return false;
+	}
+
 	return true;
 }
 
