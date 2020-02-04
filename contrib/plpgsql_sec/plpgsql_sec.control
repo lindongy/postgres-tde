@@ -1,0 +1,7 @@
+# plpgsql_sec extension
+comment = 'PL/pgSQL_sec procedural language'
+default_version = '1.0'
+module_pathname = '$libdir/plpgsql_sec'
+relocatable = false
+schema = pg_catalog
+superuser = false

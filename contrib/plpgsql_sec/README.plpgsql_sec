@@ -1,0 +1,117 @@
+plpgsql_sec v12.x
+------------------
+
+An encrypted PL/pgSQL implementation that encrypts and decrypts
+function bodies on the fly. It helps hiding implementation of
+PL/pgSQL functions.
+
+The PL/pgSQL version embedded is taken from PostgreSQL 9.2.4
+and only works on PostgreSQL 9.2.4+ as a contrib module.
+
+The encryption/decryption uses the pgcrypto module from PostgreSQL
+so it doesn't require any third party software.
+
+Usage
+-----
+
+To compile the code, run:
+
+$ make
+
+During compilation, the 'pwdgen' program will be compiled
+and run to generate the 'passwd.h' C header file that will
+contain an encrypted password using the selected encryption
+(hashing) method. This password will be used to encrypt/decrypt
+the function body.
+
+Installation as root:
+
+# make install
+
+or using sudo:
+
+$ sudo make install
+
+The language is installed via the SQL script that's installed
+alongside other contrib modules' scripts. The pgcrypto module
+must be installed on the system before this language module is
+installed. The presence of "pgcrypto.so" or "pgcrypto.dll" in
+the system in the directory expected by PostgreSQL is enough,
+the actual "pgcrypto" extension doesn't need to be created
+in the database.
+
+Before you start the server, make sure that this setting is in place:
+
+shared_preload_libraries = 'plpgsql'
+
+
+Then using a PostgreSQL client (like psql from the command line
+or pgAdmin) this command must be executed as the database superuser:
+
+dbname=# CREATE EXTENSION plpgsql_sec;
+
+From this point when a PL/pgSQL function is created this way:
+
+CREATE OR REPLACE FUNCTION func_name(... ) ... LANGUAGE plpgsql_sec;
+
+then the function body is stored in an encrypted way which can be
+recognized later.
+
+If such a function is dumped and reloaded then the encryption
+scheme is recognized and encryption is skipped, the function is
+stored with the already provided encryption.
+
+As described above, the password is stored in the 'passwd.h'
+C header file, which is preserved during executing:
+
+make clean
+
+The 'passwd.h' file needs to be kept in case this module gets
+upgraded or rebuilt for a different system and database dumps
+that contain encrypted function bodies need to be exchanged
+between systems. This is because 'pwdgen' will generate a random
+"salt" value for the password encryption and even if we supply
+the same password, the encrypted password will most likely differ.
+If the password is changed then the system cannot decrypt the
+encrypted functions anymore. The error message is the one below
+and is raised by the pgcrypto module itself:
+
+ERROR:  Wrong key or corrupt data
+
+Implementation details:
+-----------------------
+
+Upon a client connection the plpgsql_sec language module
+automatically loads the pgcrypto module. As a pre-requisite,
+PostgreSQL must be configured to use OpenSSL:
+
+./configure ... --with-openssl ...
+
+The encryption/decryption is done symmetrically by pgp_sym_encrypt()
+and pgp_sym_decrypt().
+
+The function body when encrypted is stored as text as follows:
+
+<space>#ENCRYPTED#<bytes-in-hex><space>
+
+where <bytes-in-hex> is the encrypted function body converted
+from type bytea to type text using encode( ... , 'hex').
+
+Encryption is done at function validation time regardless of the
+setting of the GUC variable "check_function_bodies". This setting
+is used globally for all languages for e.g. syntax checking at
+CREATE FUNCTION time. When this variable is set to false, functions
+can be created without actually checking them and syntax errors
+will be discovered at the first run.
+
+Decryption is done when the function is compiled. Compilation may
+happen at function validation or at first run.
+
+This will result in slightly slower performance when the function
+is created and at the first run of the function in other client
+connections. The functions' execution tree is cached so there
+won't be any performance hit after the first run.
+
+2007-2016 Cybertec Schönig & Schönig GmbH
+      Zoltán Böszörményi <zb@cybertec.at>
+      Hans-Jürgen Schönig <hs@cybertec.at>
