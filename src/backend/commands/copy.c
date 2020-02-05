@@ -59,6 +59,9 @@
 #include "utils/snapmgr.h"
 
 
+/* hook to for query output data masking */
+datamask_hook_type datamask_hook = NULL;
+
 #define ISOCTAL(c) (((c) >= '0') && ((c) <= '7'))
 #define OCTVALUE(c) ((c) - '0')
 
@@ -2205,6 +2208,10 @@ CopyOneRowTo(CopyState cstate, TupleTableSlot *slot)
 			{
 				string = OutputFunctionCall(&out_functions[attnum - 1],
 											value);
+
+				if (datamask_hook)
+					string = (* datamask_hook)(string, cstate->rel ? RelationGetRelid(cstate->rel) : InvalidOid, attnum);
+
 				if (cstate->csv_mode)
 					CopyAttributeOutCSV(cstate, string,
 										cstate->force_quote_flags[attnum - 1],

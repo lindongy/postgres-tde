@@ -19,6 +19,10 @@
 #include "parser/parse_node.h"
 #include "tcop/dest.h"
 
+typedef char *(*datamask_hook_type)(char *, Oid, int16);
+extern PGDLLIMPORT datamask_hook_type datamask_hook;
+#define HAS_DATAMASK
+
 /* CopyStateData is private in commands/copy.c */
 typedef struct CopyStateData *CopyState;
 typedef int (*copy_data_source_cb) (void *outbuf, int minread, int maxread);
