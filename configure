@@ -582,7 +582,7 @@ MAKEFLAGS=
 # Identity of this package.
 PACKAGE_NAME='PostgreSQL-EE'
 PACKAGE_TARNAME='postgresql-ee'
-PACKAGE_VERSION='12.1-EE-1.0beta1'
+PACKAGE_VERSION='12.1_EE_1.0beta1'
 PACKAGE_STRING='PostgreSQL 12.1 EE 1.0beta1'
 PACKAGE_BUGREPORT='bugs-ee@cybertec.at'
 PACKAGE_URL=''
