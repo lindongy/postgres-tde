@@ -1431,8 +1431,8 @@ validate_limit(GUCLimit *limit, JsonNode *node)
 			}
 			break;
 
-		default:
 #ifdef USE_ASSERT_CHECKING
+		default:
 			/* Should not happen. */
 			Assert(false);
 #endif	/* USE_ASSERT_CHECKING */
