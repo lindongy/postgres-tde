@@ -654,7 +654,7 @@ fsm_extend(Relation rel, BlockNumber fsm_nblocks)
 		 */
 		Assert(XLogRecPtrIsInvalid(PageGetLSN(pg.data)));
 
-		PageSetChecksumInplace((Page) pg.data, fsm_nblocks_now);
+		PageSetChecksumInplace((Page) pg.data, fsm_nblocks_now, NULL);
 
 		smgrextend(rel->rd_smgr, FSM_FORKNUM, fsm_nblocks_now,
 				   pg.data, false);

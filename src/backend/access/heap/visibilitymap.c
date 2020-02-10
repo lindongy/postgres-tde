@@ -665,7 +665,7 @@ vm_extend(Relation rel, BlockNumber vm_nblocks)
 		 */
 		Assert(XLogRecPtrIsInvalid(PageGetLSN(pg.data)));
 
-		PageSetChecksumInplace((Page) pg.data, vm_nblocks_now);
+		PageSetChecksumInplace((Page) pg.data, vm_nblocks_now, NULL);
 		smgrextend(rel->rd_smgr, VISIBILITYMAP_FORKNUM, vm_nblocks_now,
 				   pg.data, false);
 		vm_nblocks_now++;
