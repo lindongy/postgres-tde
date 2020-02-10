@@ -336,6 +336,7 @@ RelationCopyStorage(SMgrRelation src, SMgrRelation dst,
 	{
 		char	*buf_read, *buf_dst;
 		Page	page_encr = NULL;
+		char	*buf_plain = NULL;
 
 		/* If we got a cancel signal during the copy of the data, quit */
 		CHECK_FOR_INTERRUPTS();
@@ -379,10 +380,12 @@ RelationCopyStorage(SMgrRelation src, SMgrRelation dst,
 						 encrypt_buf.data,
 						 blkno,
 						 relpersistence);
+
+			buf_plain = buf_dst;
 			buf_dst = encrypt_buf.data;
 		}
 
-		PageSetChecksumInplace(buf_dst, blkno);
+		PageSetChecksumInplace(buf_dst, blkno, buf_plain);
 
 		/*
 		 * Now write the page.  We say isTemp = true even if it's not a temp

@@ -653,6 +653,7 @@ static void
 _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 {
 	char	*buf;
+	char	*buf_plain = NULL;
 
 	/* Ensure rd_smgr is open (could have been closed by relcache flush!) */
 	RelationOpenSmgr(wstate->index);
@@ -697,10 +698,12 @@ _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 					 encrypt_buf.data,
 					 blkno,
 					 wstate->index->rd_rel->relpersistence);
+
+		buf_plain = buf;
 		buf = encrypt_buf.data;
 	}
 
-	PageSetChecksumInplace(buf, blkno);
+	PageSetChecksumInplace(buf, blkno, buf_plain);
 
 	/*
 	 * Now write the page.  There's no need for smgr to schedule an fsync for

@@ -91,6 +91,7 @@ PageIsVerified(Page page, BlockNumber blkno, Page page_encr)
 	bool		checksum_failure = false;
 	bool		header_sane = false;
 	uint16		checksum = 0;
+	uint16		checksum_expected = p->pd_checksum;
 
 	/*
 	 * Don't verify page data unless the page passes basic non-zero test
@@ -106,11 +107,15 @@ PageIsVerified(Page page, BlockNumber blkno, Page page_encr)
 				page_save = page;
 				page = page_encr;
 				p = (PageHeader) page;
+				checksum_expected = p->pd_checksum;
 			}
+
+			/* See the comment of the InvalidChecksum constant. */
+			Assert(checksum_expected != InvalidChecksum);
 
 			checksum = pg_checksum_page((char *) page, blkno);
 
-			if (checksum != p->pd_checksum)
+			if (checksum != checksum_expected)
 				checksum_failure = true;
 
 			if (page_save)
@@ -150,7 +155,7 @@ PageIsVerified(Page page, BlockNumber blkno, Page page_encr)
 		ereport(WARNING,
 				(ERRCODE_DATA_CORRUPTED,
 				 errmsg("page verification failed, calculated checksum %u but expected %u",
-						checksum, p->pd_checksum)));
+						checksum, checksum_expected)));
 
 		pgstat_report_checksum_failure();
 
@@ -1164,14 +1169,19 @@ PageIndexTupleOverwrite(Page page, OffsetNumber offnum,
  * Returns a pointer to the block-sized data that needs to be written. Uses
  * statically-allocated memory, so the caller must immediately write the
  * returned page and not refer to it again.
+ *
+ * If "page_plain" is passed, it points to non-encrypted page and "page" is
+ * its encrypted form. The problem is that PageIsNew() cannot be used safely
+ * on the encrypted page (->pd_upper can become zero due to encryption).
  */
 char *
-PageSetChecksumCopy(Page page, BlockNumber blkno)
+PageSetChecksumCopy(Page page, BlockNumber blkno, Page page_plain)
 {
 	static char *pageCopy = NULL;
+	Page	page_new_test = page_plain != NULL ? page_plain : page;
 
 	/* If we don't need a checksum, just return the passed-in data */
-	if (PageIsNew(page) || !DataChecksumsEnabled())
+	if (PageIsNew(page_new_test) || !DataChecksumsEnabled())
 		return (char *) page;
 
 	/*
@@ -1195,10 +1205,12 @@ PageSetChecksumCopy(Page page, BlockNumber blkno)
  * the page buffer.
  */
 void
-PageSetChecksumInplace(Page page, BlockNumber blkno)
+PageSetChecksumInplace(Page page, BlockNumber blkno, Page page_plain)
 {
+	Page	page_new_test = page_plain != NULL ? page_plain : page;
+
 	/* If we don't need a checksum, just return */
-	if (PageIsNew(page) || !DataChecksumsEnabled())
+	if (PageIsNew(page_new_test) || !DataChecksumsEnabled())
 		return;
 
 	((PageHeader) page)->pd_checksum = pg_checksum_page((char *) page, blkno);
