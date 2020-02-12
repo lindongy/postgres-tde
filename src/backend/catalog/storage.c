@@ -337,6 +337,7 @@ RelationCopyStorage(SMgrRelation src, SMgrRelation dst,
 		char	*buf_read, *buf_dst;
 		Page	page_encr = NULL;
 		char	*buf_plain = NULL;
+		XLogRecPtr	lsn;
 
 		/* If we got a cancel signal during the copy of the data, quit */
 		CHECK_FOR_INTERRUPTS();
@@ -369,15 +370,25 @@ RelationCopyStorage(SMgrRelation src, SMgrRelation dst,
 		 * space.
 		 */
 		if (use_wal)
+		{
 			log_newpage(&dst->smgr_rnode.node, forkNum, blkno, page, false);
+			lsn = PageGetLSN(page);
+		}
 		else if (data_encrypted)
-			enforce_lsn_for_encryption(relpersistence, page);
+			lsn = get_lsn_for_encryption(relpersistence);
 
 		buf_dst = (char *) page;
-		if (data_encrypted)
+
+		/*
+		 * Encrypt only if we have valid IV. It should be always except when
+		 * log_newpage() encountered an empty page - it should be safe not to
+		 * encrypt such one.
+		 */
+		if (data_encrypted && !XLogRecPtrIsInvalid(lsn))
 		{
 			encrypt_page(buf_dst,
 						 encrypt_buf.data,
+						 lsn,
 						 blkno,
 						 relpersistence);
 

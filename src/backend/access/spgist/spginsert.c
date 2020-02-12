@@ -170,7 +170,14 @@ spgbuildempty(Relation index)
 	 * replayed.
 	 */
 	PageSetChecksumInplace(page, SPGIST_METAPAGE_BLKNO, NULL);
-	/* Encryption: no-op, the page has no LSN (i.e. IV) yet. */
+	/*
+	 * On encryption: LSN is used as the encryption IV, but all the three
+	 * pages created here have initially invalid LSN. Since no user data will
+	 * be written so far, it doesn't seem worth the complexity to generate
+	 * either regular or fake LSN (depending on relperistence) and to encrypt
+	 * the pages before they are logged. Let's just leave them unencrypted
+	 * until any data is added to the index.
+	 */
 	smgrwrite(index->rd_smgr, INIT_FORKNUM, SPGIST_METAPAGE_BLKNO,
 			  (char *) page, true);
 	log_newpage(&index->rd_smgr->smgr_rnode.node, INIT_FORKNUM,

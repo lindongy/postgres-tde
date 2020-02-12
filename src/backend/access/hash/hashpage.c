@@ -995,6 +995,7 @@ _hash_alloc_buckets(Relation rel, BlockNumber firstblock, uint32 nblocks)
 	Page		page;
 	Page	page_plain = NULL;
 	HashPageOpaque ovflopaque;
+	XLogRecPtr	lsn;
 
 	lastblock = firstblock + nblocks - 1;
 
@@ -1023,18 +1024,27 @@ _hash_alloc_buckets(Relation rel, BlockNumber firstblock, uint32 nblocks)
 	ovflopaque->hasho_page_id = HASHO_PAGE_ID;
 
 	if (RelationNeedsWAL(rel))
+	{
 		log_newpage(&rel->rd_node,
 					MAIN_FORKNUM,
 					lastblock,
 					zerobuf.data,
 					true);
+		lsn = PageGetLSN(zerobuf.data);
+	}
 	else if (data_encrypted)
-		enforce_lsn_for_encryption(rel->rd_rel->relpersistence, zerobuf.data);
+		lsn = get_lsn_for_encryption(rel->rd_rel->relpersistence);
 
-	if (data_encrypted)
+	/*
+	 * Encrypt only if we have valid IV. It should be always except when
+	 * log_newpage() encountered an empty page - it should be safe not to
+	 * encrypt such one.
+	 */
+	if (data_encrypted && !XLogRecPtrIsInvalid(lsn))
 	{
 		encrypt_page(zerobuf.data,
 					 encrypt_buf.data,
+					 lsn,
 					 lastblock,
 					 rel->rd_rel->relpersistence);
 

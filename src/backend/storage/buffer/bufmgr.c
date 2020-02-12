@@ -2766,13 +2766,24 @@ FlushBuffer(BufferDesc *buf, SMgrRelation reln)
 
 	if (data_encrypted)
 	{
-		char relpersistence = buf_state & BM_PERMANENT ?
-			RELPERSISTENCE_PERMANENT : RELPERSISTENCE_UNLOGGED;
+		char	relpersistence;
 
-		enforce_lsn_for_encryption(relpersistence, (char *) bufBlock);
+		/* Make sure we have valid encryption IV. */
+		if (buf_state & BM_PERMANENT)
+		{
+			if (XLogRecPtrIsInvalid(recptr))
+				recptr = get_regular_lsn_for_encryption();
 
-		encrypt_page(bufBlock, encrypt_buf.data, buf->tag.blockNum,
-					 relpersistence);
+			relpersistence = RELPERSISTENCE_PERMANENT;
+		}
+		else
+		{
+			recptr = GetFakeLSNForUnloggedRel();
+			relpersistence = RELPERSISTENCE_UNLOGGED;
+		}
+
+		encrypt_page(bufBlock, encrypt_buf.data, recptr,
+					 buf->tag.blockNum, relpersistence);
 
 		bufBlockPlain = bufBlock;
 		bufBlock = encrypt_buf.data;
@@ -3258,11 +3269,15 @@ FlushRelationBuffers(Relation rel)
 
 				if (data_encrypted)
 				{
-					enforce_lsn_for_encryption(rel->rd_rel->relpersistence,
-											   (char *) localpage);
+					XLogRecPtr	lsn;
+
+					/* Generate fake LSN to become the encryption IV. */
+					Assert(XLogRecPtrIsInvalid(PageGetLSN(localpage)));
+					lsn = GetFakeLSNForUnloggedRel();
 
 					encrypt_page((char *) localpage,
 								 encrypt_buf.data,
+								 lsn,
 								 bufHdr->tag.blockNum,
 								 rel->rd_rel->relpersistence);
 

@@ -2524,6 +2524,7 @@ XLogWrite(XLogwrtRqst WriteRqst, bool flexible)
 								  to,
 								  nbytes,
 								  tweak,
+								  InvalidXLogRecPtr,
 								  InvalidBlockNumber,
 								  EDK_PERMANENT);
 					nencrypted++;
@@ -3563,6 +3564,7 @@ XLogFileCopy(XLogSegNo destsegno, TimeLineID srcTLI, XLogSegNo srcsegno,
 						  buffer.data,
 						  nread,
 						  tweak,
+						  InvalidXLogRecPtr,
 						  InvalidBlockNumber,
 						  EDK_PERMANENT);
 		}
@@ -5340,6 +5342,7 @@ BootStrapXLOG(void)
 					  (char *) page,
 					  XLOG_BLCKSZ,
 					  tweak,
+					  InvalidXLogRecPtr,
 					  InvalidBlockNumber,
 					  EDK_PERMANENT);
 	}

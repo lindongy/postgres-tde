@@ -215,7 +215,7 @@ sample_encryption(char *buf)
 		tweak[i] = i;
 
 	encrypt_block("postgresqlcrypt", buf, ENCRYPTION_SAMPLE_SIZE, tweak,
-				  InvalidBlockNumber, EDK_PERMANENT);
+				  InvalidXLogRecPtr, InvalidBlockNumber, EDK_PERMANENT);
 }
 
 /*
@@ -226,15 +226,16 @@ sample_encryption(char *buf)
  *
  * "size" must be a (non-zero) multiple of ENCRYPTION_BLOCK.
  *
- * "tweak" value must be TWEAK_SIZE bytes long. If NULL is passed, we suppose
- * that the input data start with PageHeaderData. In this case page LSN is not
- * encrypted because we use it as an encryption initialization vector (IV),
- * and will need that for decryption. Page checksum stays unencrypted too
- * because it should be computed out of the encrypted data (the encrypted data
- * is what we actually store to disk).
+ * "tweak" value must be an array of at least TWEAK_SIZE bytes. If NULL is
+ * passed, we suppose that the input data starts with PageHeaderData. In this
+ * case page LSN is not encrypted because we use it as an encryption
+ * initialization vector (IV), and will need that for decryption. Therefore,
+ * if tweak==NULL, valid LSN must be passed. In such a case, page checksum
+ * stays unencrypted too because it should be computed later out of the
+ * encrypted data (the encrypted data is what we actually store to disk).
  *
  * "block" is number of relation block to be added to the tweak if we
- * construct it here. Ignored if valid tweak is passed.
+ * construct it here. Ignored if a valid tweak is passed.
  *
  * All-zero blocks are not encrypted to correctly handle relation extension,
  * and also to simplify handling of holes created by seek past EOF and
@@ -243,7 +244,8 @@ sample_encryption(char *buf)
  */
 void
 encrypt_block(const char *input, char *output, Size size, char *tweak,
-			  BlockNumber block, EncryptedDataKind data_kind)
+			  XLogRecPtr lsn, BlockNumber block,
+			  EncryptedDataKind data_kind)
 {
 #ifdef USE_ENCRYPTION
 	EVP_CIPHER_CTX *ctx;
@@ -258,26 +260,11 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
 	 */
 	if (tweak == NULL)
 	{
-		size_t	lsn_size, unencr_size;
+		size_t	unencr_size;
 		char	*c = tweak_loc;
 
 		Assert(block != InvalidBlockNumber);
-
-		/*
-		 * New page should not be encrypted because it does not have LSN
-		 * (i.e. the IV) initialized. This includes all-zeroes page.
-		 */
-		if (PageIsNew(input))
-		{
-			Assert(XLogRecPtrIsInvalid(PageGetLSN(input)));
-
-			if (input != output)
-				memcpy(output, input, size);
-			return;
-		}
-
-		/* We're going to encrypt the page, so the IV should be valid. */
-		Assert(!XLogRecPtrIsInvalid(PageGetLSN(input)));
+		Assert(!XLogRecPtrIsInvalid(lsn));
 
 		memset(c, 0, TWEAK_SIZE);
 
@@ -290,12 +277,15 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
 		 * it's not possible for the lower part to overflow into the upper
 		 * one.
 		 *
-		 * Endian of the LSN does not matter: no one cares about the actual
-		 * value as long as it's unique for each encryption run.
+		 * Note that we copy the lsn from the argument, not from the input
+		 * buffer. Since "input" can be a shared buffer locked only in shared
+		 * mode, MarkBufferDirtyHint() can update the LSN while we're copying
+		 * it. Thus the LSN we use in the tweak could be different from the
+		 * one we write to "output" below, and it would be impossible to
+		 * decrypt the page.
 		 */
-		lsn_size = sizeof(PageXLogRecPtr);
-		memcpy(c, input, lsn_size);
-		c += lsn_size;
+		PageSetLSN(c, lsn);
+		c += sizeof(PageXLogRecPtr);
 
 		/*
 		 * Add the block number, in case a single WAL record affects two (or
@@ -321,9 +311,12 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
 
 		tweak = tweak_loc;
 
-		/* Copy the LSN to the output. */
+		/*
+		 * Copy the LSN to the output. Again, use the argument, not the
+		 * input buffer.
+		 */
 		if (input != output)
-			memcpy(output, input, lsn_size);
+			PageSetLSN(output, lsn);
 
 		/* Do not encrypt the LSN and checksum. */
 		unencr_size = offsetof(PageHeaderData, pd_flags);
@@ -369,6 +362,9 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
  * Input and output buffer may point to the same location.
  *
  * For detailed comments see encrypt_block().
+ *
+ * Unlike encrypt_block(), we don't expect page LSN to change during
+ * decryption, so we can read it from the input buffer.
  */
 void
 decrypt_block(const char *input, char *output, Size size, char *tweak,
@@ -574,49 +570,6 @@ mdtweak(char *tweak, RelFileNode *relnode, ForkNumber forknum, BlockNumber block
 }
 
 #ifndef FRONTEND
-/*
- * Page LSN is used as initialization vector (IV) so encrypted page needs some
- * value here even if no real LSN is actually needed.
- *
- * The function should not be called on all-zero pages, pages satisfying
- * PageIsNew() or pages just initialized using PageInit() - all these have
- * invalid LSN and so they are not eligible for AES-CRT encryption.
- */
-void
-enforce_lsn_for_encryption(char relpersistence, char *buf_contents)
-{
-	/* Failure indicates incorrect use of the function. */
-	Assert(data_encrypted);
-
-	if (relpersistence == RELPERSISTENCE_PERMANENT)
-	{
-		/* Set the LSN if there is none. */
-		if (XLogRecPtrIsInvalid(PageGetLSN(buf_contents)))
-		{
-			XLogRecPtr	lsn;
-
-			/*
-			 * If wal_level > WAL_LEVEL_MINIMAL, pages containing user data
-			 * should always have the LSN set. Pages having invalid LSN can
-			 * only be produced if relation was copied or rewritten and
-			 * wal_level is WAL_LEVEL_MINIMAL, in which case we don't WAL for
-			 * crash recovery because the relation is fsync'd before commit.
-			 */
-			Assert(!XLogIsNeeded());
-			lsn = get_regular_lsn_for_encryption();
-
-			PageSetLSN(buf_contents, lsn);
-		}
-	}
-	else
-	{
-		/*
-		 * For unlogged and temporary tables, simply assign the fake LSN.
-		 */
-		PageSetLSN(buf_contents, GetFakeLSNForUnloggedRel());
-	}
-}
-
 /*
  * Generate non-fake LSN.
  *

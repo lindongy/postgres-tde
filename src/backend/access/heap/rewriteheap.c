@@ -333,20 +333,30 @@ end_heap_rewrite(RewriteState state)
 	{
 		char	*buf = (char *) state->rs_buffer;
 		char	*buf_plain = NULL;
+		XLogRecPtr	lsn;
 
 		if (state->rs_use_wal)
+		{
 			log_newpage(&state->rs_new_rel->rd_node,
 						MAIN_FORKNUM,
 						state->rs_blockno,
 						buf,
 						true);
+			lsn = PageGetLSN(buf);
+		}
 		else if (data_encrypted)
-			enforce_lsn_for_encryption(state->rs_new_rel->rd_rel->relpersistence,
-									   buf);
-		if (data_encrypted)
+			lsn = get_lsn_for_encryption(state->rs_new_rel->rd_rel->relpersistence);
+
+		/*
+		 * Encrypt only if we have valid IV. It should be always except when
+		 * log_newpage() encountered an empty page - it should be safe not to
+		 * encrypt such one.
+		 */
+		if (data_encrypted && !XLogRecPtrIsInvalid(lsn))
 		{
 			encrypt_page(buf,
 						 encrypt_buf.data,
+						 lsn,
 						 state->rs_blockno,
 						 state->rs_new_rel->rd_rel->relpersistence);
 
@@ -711,19 +721,22 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 		{
 			char	*buf = (char *) page;
 			char	*buf_plain = NULL;
+			XLogRecPtr	lsn;
 
 			/* Doesn't fit, so write out the existing page */
 
 			/* XLOG stuff */
 			if (state->rs_use_wal)
+			{
 				log_newpage(&state->rs_new_rel->rd_node,
 							MAIN_FORKNUM,
 							state->rs_blockno,
 							buf,
 							true);
+				lsn = PageGetLSN(buf);
+			}
 			else if (data_encrypted)
-				enforce_lsn_for_encryption(state->rs_new_rel->rd_rel->relpersistence,
-										   buf);
+				lsn = get_lsn_for_encryption(state->rs_new_rel->rd_rel->relpersistence);
 
 			/*
 			 * Now write the page. We say isTemp = true even if it's not a
@@ -733,10 +746,16 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 			 */
 			RelationOpenSmgr(state->rs_new_rel);
 
-			if (data_encrypted)
+			/*
+			 * Encrypt only if we have valid IV. It should be always except
+			 * when log_newpage() encountered an empty page - it should be
+			 * safe not to encrypt such one.
+			 */
+			if (data_encrypted && !XLogRecPtrIsInvalid(lsn))
 			{
 				encrypt_page(buf,
 							 encrypt_buf.data,
+							 lsn,
 							 state->rs_blockno,
 							 state->rs_new_rel->rd_rel->relpersistence);
 
