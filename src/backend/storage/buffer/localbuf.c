@@ -17,6 +17,7 @@
 #include "postgres.h"
 
 #include "access/parallel.h"
+#include "access/xlog.h"
 #include "catalog/catalog.h"
 #include "executor/instrument.h"
 #include "storage/buf_internals.h"
@@ -217,11 +218,15 @@ LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber blockNum,
 		/* And write... */
 		if (data_encrypted)
 		{
-			enforce_lsn_for_encryption(RELPERSISTENCE_TEMP,
-									   (char *) localpage);
+			XLogRecPtr	lsn;
+
+			/* Generate fake LSN to become the encryption IV. */
+			Assert(XLogRecPtrIsInvalid(PageGetLSN(localpage)));
+			lsn = GetFakeLSNForUnloggedRel();
 
 			encrypt_page((char *) localpage,
 						 encrypt_buf.data,
+						 lsn,
 						 bufHdr->tag.blockNum,
 						 RELPERSISTENCE_TEMP);
 

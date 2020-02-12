@@ -835,6 +835,7 @@ BufFileDumpBufferEncrypted(BufFile *file)
 				  encrypt_buf.data,
 				  BLCKSZ,
 				  tweak,
+				  InvalidXLogRecPtr,
 				  InvalidBlockNumber,
 				  EDK_BUFFILE);
 
@@ -1740,6 +1741,7 @@ BufFileDumpBufferTransient(TransientBufFile *file)
 					  encrypt_buf.data,
 					  BLCKSZ,
 					  tweak,
+					  InvalidXLogRecPtr,
 					  InvalidBlockNumber,
 					  EDK_BUFFILE);
 		write_ptr = encrypt_buf.data;

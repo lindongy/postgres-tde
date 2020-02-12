@@ -654,6 +654,7 @@ _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 {
 	char	*buf;
 	char	*buf_plain = NULL;
+	XLogRecPtr	lsn;
 
 	/* Ensure rd_smgr is open (could have been closed by relcache flush!) */
 	RelationOpenSmgr(wstate->index);
@@ -663,10 +664,10 @@ _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 	{
 		/* We use the heap NEWPAGE record type for this */
 		log_newpage(&wstate->index->rd_node, MAIN_FORKNUM, blkno, page, true);
+		lsn = PageGetLSN(page);
 	}
 	else if (data_encrypted)
-		enforce_lsn_for_encryption(wstate->index->rd_rel->relpersistence,
-								   (char *) page);
+		lsn = get_lsn_for_encryption(wstate->index->rd_rel->relpersistence);
 
 	/*
 	 * If we have to write pages nonsequentially, fill in the space with
@@ -692,10 +693,17 @@ _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 	}
 
 	buf = (char *) page;
-	if (data_encrypted)
+
+	/*
+	 * Encrypt only if we have valid IV. It should be always except when
+	 * log_newpage() encountered an empty page - it should be safe not to
+	 * encrypt such one.
+	 */
+	if (data_encrypted && !XLogRecPtrIsInvalid(lsn))
 	{
 		encrypt_page(buf,
 					 encrypt_buf.data,
+					 lsn,
 					 blkno,
 					 wstate->index->rd_rel->relpersistence);
 

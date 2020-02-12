@@ -1226,6 +1226,7 @@ WriteEmptyXLOG(void)
 					  buffer.data,
 					  XLOG_BLCKSZ,
 					  tweak,
+					  InvalidXLogRecPtr,
 					  InvalidBlockNumber,
 					  EDK_PERMANENT);;
 	}

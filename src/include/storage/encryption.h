@@ -47,8 +47,14 @@ extern void setup_encryption(void);
 /* Copy of the same field of ControlFileData. */
 extern char encryption_verification[];
 
-extern void enforce_lsn_for_encryption(char relpersistence,
-									   char *buf_contents);
+/*
+ * Generate LSN to in case we only need it for the sake of encryption IV.
+ */
+#define get_lsn_for_encryption(relpersistence)	\
+	(((relpersistence) == RELPERSISTENCE_PERMANENT) ?	\
+	 get_regular_lsn_for_encryption() :					\
+	 GetFakeLSNForUnloggedRel());
+
 extern XLogRecPtr get_regular_lsn_for_encryption(void);
 #endif	/* FRONTEND */
 
@@ -130,7 +136,7 @@ typedef enum EncryptedDataKind
  * and the encryption code is less invasive.
  */
 extern void encrypt_block(const char *input, char *output, Size size,
-						  char *tweak, BlockNumber block,
+						  char *tweak, XLogRecPtr lsn, BlockNumber block,
 						  EncryptedDataKind data_kind);
 extern void decrypt_block(const char *input, char *output, Size size,
 						  char *tweak, BlockNumber block,
@@ -139,8 +145,8 @@ extern void decrypt_block(const char *input, char *output, Size size,
 /*
  * Convenience macros to encrypt / decrypt relation page.
  */
-#define encrypt_page(input, output, block, relpersistence)	\
-	encrypt_block((input), (output), BLCKSZ, NULL, (block), \
+#define encrypt_page(input, output, lsn, block, relpersistence)			\
+	encrypt_block((input), (output), BLCKSZ, NULL, (lsn), (block),		\
 				  ((relpersistence) == RELPERSISTENCE_PERMANENT) ? EDK_PERMANENT : EDK_TEMP)
 #define decrypt_page(input, output, block, relpersistence)	\
 	decrypt_block((input), (output), BLCKSZ, NULL, (block), \
