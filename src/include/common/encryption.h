@@ -53,14 +53,11 @@ typedef enum CipherKind
 	PG_CIPHER_NONE = 0,
 
 	/*
-	 * AES (Rijndael) in CTR mode of operation. Only key length 128 bits is
-	 * supported now, so the constant name does not contain the key length.
+	 * AES (Rijndael) in CTR mode of operation, key length 128 bits.
 	 *
-	 * TODO Get rid of the CBC mode that we use for buffile.c before we use
-	 * buffile.c to encrypt any file that needs to be handled by
-	 * pg_upgrade. (As long as no file encrypted by buffile.c needs
-	 * pg_upgrade, the control file does not have to be aware of the CBC
-	 * mode.)
+	 * The fact that buffile.c uses AES-CBC is not important here because
+	 * neither temporary files nor serialized data changes
+	 * (ReorderBufferSerializeTXN) can survive cluster restart.
 	 */
 	PG_CIPHER_AES_CTR_128
 }			CipherKind;
