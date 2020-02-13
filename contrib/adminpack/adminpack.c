@@ -88,6 +88,8 @@ convert_and_check_filename(text *arg, bool logAllowed)
 	/* User isn't a member of the default role, so check if it's allowable */
 	if (is_absolute_path(filename))
 	{
+		bool	allowed	= true;
+
 		/* Disallow '/a/b/data/..' */
 		if (path_contains_parent_reference(filename))
 			ereport(ERROR,
@@ -98,12 +100,29 @@ convert_and_check_filename(text *arg, bool logAllowed)
 		 * Allow absolute paths if within DataDir or Log_directory, even
 		 * though Log_directory might be outside DataDir.
 		 */
-		if (!path_is_prefix_of_path(DataDir, filename) &&
-			(!logAllowed || !is_absolute_path(Log_directory) ||
-			 !path_is_prefix_of_path(Log_directory, filename)))
-			ereport(ERROR,
-					(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-					 (errmsg("absolute path not allowed"))));
+		if (!path_is_prefix_of_path(DataDir, filename))
+		{
+			if (!logAllowed)
+				allowed = false;
+			else {
+				for (int i = 0; i < log_streams_active; i++)
+				{
+					LogStream  *stream = &log_streams[i];
+
+					if (!is_absolute_path(stream->directory) ||
+						!path_is_prefix_of_path(stream->directory, filename))
+					{
+						allowed = false;
+						break;
+					}
+				}
+			}
+
+			if (!allowed)
+				ereport(ERROR,
+						(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+						 (errmsg("absolute path not allowed"))));
+		}
 	}
 	else if (!path_is_relative_and_below_cwd(filename))
 		ereport(ERROR,
@@ -486,8 +505,9 @@ pg_logdir_ls_internal(FunctionCallInfo fcinfo)
 	FuncCallContext *funcctx;
 	struct dirent *de;
 	directory_fctx *fctx;
+	LogStream  *stream = &log_streams[0];
 
-	if (strcmp(Log_filename, "postgresql-%Y-%m-%d_%H%M%S.log") != 0)
+	if (strcmp(stream->filename, "postgresql-%Y-%m-%d_%H%M%S.log") != 0)
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 				 (errmsg("the log_filename parameter must equal 'postgresql-%%Y-%%m-%%d_%%H%%M%%S.log'"))));
@@ -510,7 +530,7 @@ pg_logdir_ls_internal(FunctionCallInfo fcinfo)
 
 		funcctx->attinmeta = TupleDescGetAttInMetadata(tupdesc);
 
-		fctx->location = pstrdup(Log_directory);
+		fctx->location = pstrdup(stream->directory);
 		fctx->dirdesc = AllocateDir(fctx->location);
 
 		if (!fctx->dirdesc)
