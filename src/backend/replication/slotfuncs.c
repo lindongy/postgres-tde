@@ -371,6 +371,14 @@ pg_physical_replication_slot_advance(XLogRecPtr moveto)
 		MyReplicationSlot->data.restart_lsn = moveto;
 		SpinLockRelease(&MyReplicationSlot->mutex);
 		retlsn = moveto;
+
+		/*
+		 * Dirty the slot so as it is written out at the next checkpoint.
+		 * Note that the LSN position advanced may still be lost in the
+		 * event of a crash, but this makes the data consistent after a
+		 * clean shutdown.
+		 */
+		ReplicationSlotMarkDirty();
 	}
 
 	return retlsn;
@@ -379,8 +387,8 @@ pg_physical_replication_slot_advance(XLogRecPtr moveto)
 /*
  * Helper function for advancing our logical replication slot forward.
  *
- * The slot's restart_lsn is used as start point for reading records,
- * while confirmed_lsn is used as base point for the decoding context.
+ * The slot's restart_lsn is used as start point for reading records, while
+ * confirmed_flush is used as base point for the decoding context.
  *
  * We cannot just do LogicalConfirmReceivedLocation to update confirmed_flush,
  * because we need to digest WAL to advance restart_lsn allowing to recycle
@@ -475,9 +483,9 @@ pg_logical_replication_slot_advance(XLogRecPtr moveto)
 			 * keep track of their progress, so we should make more of an
 			 * effort to save it for them.
 			 *
-			 * Dirty the slot so it's written out at the next checkpoint.
-			 * We'll still lose its position on crash, as documented, but it's
-			 * better than always losing the position even on clean restart.
+			 * Dirty the slot so it is written out at the next checkpoint.
+			 * The LSN position advanced to may still be lost on a crash
+			 * but this makes the data consistent after a clean shutdown.
 			 */
 			ReplicationSlotMarkDirty();
 		}
@@ -550,8 +558,8 @@ pg_replication_slot_advance(PG_FUNCTION_ARGS)
 	/*
 	 * Check if the slot is not moving backwards.  Physical slots rely simply
 	 * on restart_lsn as a minimum point, while logical slots have confirmed
-	 * consumption up to confirmed_lsn, meaning that in both cases data older
-	 * than that is not available anymore.
+	 * consumption up to confirmed_flush, meaning that in both cases data
+	 * older than that is not available anymore.
 	 */
 	if (OidIsValid(MyReplicationSlot->data.database))
 		minlsn = MyReplicationSlot->data.confirmed_flush;
@@ -573,15 +581,6 @@ pg_replication_slot_advance(PG_FUNCTION_ARGS)
 
 	values[0] = NameGetDatum(&MyReplicationSlot->data.name);
 	nulls[0] = false;
-
-	/* Update the on disk state when lsn was updated. */
-	if (XLogRecPtrIsInvalid(endlsn))
-	{
-		ReplicationSlotMarkDirty();
-		ReplicationSlotsComputeRequiredXmin(false);
-		ReplicationSlotsComputeRequiredLSN();
-		ReplicationSlotSave();
-	}
 
 	ReplicationSlotRelease();
 

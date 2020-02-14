@@ -179,7 +179,8 @@ static void AssertTXNLsnOrder(ReorderBuffer *rb);
  * subtransactions
  * ---------------------------------------
  */
-static ReorderBufferIterTXNState *ReorderBufferIterTXNInit(ReorderBuffer *rb, ReorderBufferTXN *txn);
+static void ReorderBufferIterTXNInit(ReorderBuffer *rb, ReorderBufferTXN *txn,
+									 ReorderBufferIterTXNState *volatile *iter_state);
 static ReorderBufferChange *ReorderBufferIterTXNNext(ReorderBuffer *rb, ReorderBufferIterTXNState *state);
 static void ReorderBufferIterTXNFinish(ReorderBuffer *rb,
 									   ReorderBufferIterTXNState *state);
@@ -951,14 +952,22 @@ ReorderBufferIterCompare(Datum a, Datum b, void *arg)
 /*
  * Allocate & initialize an iterator which iterates in lsn order over a
  * transaction and all its subtransactions.
+ *
+ * Note: The iterator state is returned through iter_state parameter rather
+ * than the function's return value.  This is because the state gets cleaned up
+ * in a PG_CATCH block in the caller, so we want to make sure the caller gets
+ * back the state even if this function throws an exception.
  */
-static ReorderBufferIterTXNState *
-ReorderBufferIterTXNInit(ReorderBuffer *rb, ReorderBufferTXN *txn)
+static void
+ReorderBufferIterTXNInit(ReorderBuffer *rb, ReorderBufferTXN *txn,
+						 ReorderBufferIterTXNState *volatile *iter_state)
 {
 	Size		nr_txns = 0;
 	ReorderBufferIterTXNState *state;
 	dlist_iter	cur_txn_i;
 	int32		off;
+
+	*iter_state = NULL;
 
 	/*
 	 * Calculate the size of our heap: one element for every transaction that
@@ -1002,6 +1011,9 @@ ReorderBufferIterTXNInit(ReorderBuffer *rb, ReorderBufferTXN *txn)
 	state->heap = binaryheap_allocate(state->nr_txns,
 									  ReorderBufferIterCompare,
 									  state);
+
+	/* Now that the state fields are initialized, it is safe to return it. */
+	*iter_state = state;
 
 	/*
 	 * Now insert items into the binary heap, in an unordered fashion.  (We
@@ -1065,8 +1077,6 @@ ReorderBufferIterTXNInit(ReorderBuffer *rb, ReorderBufferTXN *txn)
 
 	/* assemble a valid binary heap */
 	binaryheap_build(state->heap);
-
-	return state;
 }
 
 /*
@@ -1506,7 +1516,7 @@ ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid,
 
 		rb->begin(rb, txn);
 
-		iterstate = ReorderBufferIterTXNInit(rb, txn);
+		ReorderBufferIterTXNInit(rb, txn, &iterstate);
 		while ((change = ReorderBufferIterTXNNext(rb, iterstate)) != NULL)
 		{
 			Relation	relation = NULL;
@@ -1904,21 +1914,6 @@ ReorderBufferAbortOld(ReorderBuffer *rb, TransactionId oldestRunningXid)
 
 		if (TransactionIdPrecedes(txn->xid, oldestRunningXid))
 		{
-			/*
-			 * We set final_lsn on a transaction when we decode its commit or
-			 * abort record, but we never see those records for crashed
-			 * transactions.  To ensure cleanup of these transactions, set
-			 * final_lsn to that of their last change; this causes
-			 * ReorderBufferRestoreCleanup to do the right thing.
-			 */
-			if (txn->serialized && txn->final_lsn == 0)
-			{
-				ReorderBufferChange *last =
-				dlist_tail_element(ReorderBufferChange, node, &txn->changes);
-
-				txn->final_lsn = last->lsn;
-			}
-
 			elog(DEBUG2, "aborting old transaction %u", txn->xid);
 
 			/* remove potential on-disk data, and deallocate this tx */
@@ -2444,8 +2439,7 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 
 				sz += sizeof(SnapshotData) +
 					sizeof(TransactionId) * snap->xcnt +
-					sizeof(TransactionId) * snap->subxcnt
-					;
+					sizeof(TransactionId) * snap->subxcnt;
 
 				hdr.size = sz;
 				ReorderBufferWriteData(file, &hdr,
@@ -2486,6 +2480,17 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 			/* ReorderBufferChange contains everything important */
 			break;
 	}
+
+	/*
+	 * Keep the transaction's final_lsn up to date with each change we send to
+	 * disk, so that ReorderBufferRestoreCleanup works correctly.  (We used to
+	 * only do this on commit and abort records, but that doesn't work if a
+	 * system crash leaves a transaction without its abort record).
+	 *
+	 * Make sure not to move it backwards.
+	 */
+	if (txn->final_lsn < change->lsn)
+		txn->final_lsn = change->lsn;
 }
 
 /*

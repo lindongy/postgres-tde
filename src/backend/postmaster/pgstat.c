@@ -4968,8 +4968,16 @@ pgstat_write_statsfiles(bool permanent, bool allDbs)
 						tmpfile)));
 		BufFileCloseTransient(fpout);
 		unlink(tmpfile);
+		return;
 	}
-	else if (BufFileCloseTransient(fpout) != 0)
+
+	/*
+	 * XXX This might PANIC, see FileClose(). Don't we need special behaviour
+	 * for statistics?
+	 */
+	BufFileCloseTransient(fpout);
+
+	if (BufFileTransientIsClosed(fpout) != 0)
 	{
 		ereport(LOG,
 				(errcode_for_file_access(),
@@ -5118,8 +5126,16 @@ pgstat_write_db_statsfile(PgStat_StatDBEntry *dbentry, bool permanent)
 						tmpfile)));
 		BufFileCloseTransient(fpout);
 		unlink(tmpfile);
+		return;
 	}
-	else if (BufFileCloseTransient(fpout) != 0)
+
+	/*
+	 * XXX This might PANIC, see FileClose(). Don't we need special behaviour
+	 * for statistics?
+	 */
+	BufFileCloseTransient(fpout);
+
+	if (BufFileTransientIsClosed(fpout) != 0)
 	{
 		ereport(LOG,
 				(errcode_for_file_access(),

@@ -152,6 +152,12 @@ struct BufFile
  * Buffered variant of a transient file. Unlike BufFile this is simpler in
  * several ways: 1) it's not split into segments, 2) there's no need of seek,
  * 3) there's no need to combine read and write access.
+ *
+ * XXX "Transient" refers to the fact that this kind of file was initially
+ * used to encrypt files that PG core accessed via OpenTransientFile /
+ * CloseTransientFile. However, since commit d2070380, PG core uses
+ * PathNameOpenFile in reorderbuffer.c., so it was changed here too. Should
+ * this structure and related functions be renamed?
  */
 struct TransientBufFile
 {
@@ -159,7 +165,7 @@ struct TransientBufFile
 	BufFileCommon common;
 
 	/* The underlying file. */
-	int			fd;
+	File		vfd;
 	char		*path;
 
 	/* Path-dependent part of the encryption tweak. */
@@ -1424,7 +1430,7 @@ BufFileOpenTransient(const char *path, int fileFlags,
 	bool		append = false;
 	TransientBufFile *file;
 	BufFileCommon *fcommon;
-	int			fd;
+	File		vfd;
 	off_t		size;
 
 	/* Either read or write mode, but not both. */
@@ -1462,8 +1468,8 @@ BufFileOpenTransient(const char *path, int fileFlags,
 	Assert(!(readOnly && append));
 
 	errno = 0;
-	fd = OpenTransientFile(path, fileFlags);
-	if (fd < 0)
+	vfd = PathNameOpenFile(path, fileFlags);
+	if (vfd < 0)
 	{
 		/*
 		 * If the file is not there, caller should be able to handle the
@@ -1487,14 +1493,14 @@ BufFileOpenTransient(const char *path, int fileFlags,
 	fcommon->curFile = 0;
 	fcommon->useful = (off_t *) palloc0(sizeof(off_t));
 	fcommon->nuseful = 1;
-	file->fd = fd;
+	file->vfd = vfd;
 	file->path = pstrdup(path);
 
 	if (data_encrypted)
 		memcpy(file->tweakBase, tweak_base, TWEAK_BASE_SIZE);
 
 	errno = 0;
-	size = lseek(file->fd, 0, SEEK_END);
+	size = lseek(file->vfd, 0, SEEK_END);
 	if (errno > 0)
 		ereport(ERROR,
 				(errcode_for_file_access(),
@@ -1534,10 +1540,11 @@ BufFileOpenTransient(const char *path, int fileFlags,
 							path)));
 
 		errno = 0;
-		nbytes = pg_pread(file->fd,
+		nbytes = FileRead(file->vfd,
 						  (char *) &fcommon->useful[0],
 						  sizeof(off_t),
-						  pos);
+						  pos,
+						  WAIT_EVENT_BUFFILE_READ);
 		if (nbytes != sizeof(off_t))
 			ereport(ERROR,
 					(errcode_for_file_access(),
@@ -1564,14 +1571,10 @@ BufFileOpenTransient(const char *path, int fileFlags,
 
 /*
  * Close a TransientBufFile.
- *
- * Return the return value of the underlying call of CloseTransientFile().
  */
-int
+void
 BufFileCloseTransient(TransientBufFile *file)
 {
-	int	result = 0;
-
 	/* Flush any unwritten data. */
 	if (!file->common.readOnly &&
 		file->common.dirty && file->common.nbytes > 0)
@@ -1586,19 +1589,21 @@ BufFileCloseTransient(TransientBufFile *file)
 		}
 	}
 
-	if ((result = CloseTransientFile(file->fd)) != 0)
-	{
-		ereport(WARNING,
-				(errcode_for_file_access(),
-				 errmsg("could not close file \"%s\": %m", file->path)));
-	}
+	FileClose(file->vfd);
 
 	if (data_encrypted)
 		pfree(file->common.useful);
 	pfree(file->path);
 	pfree(file);
+}
 
-	return result;
+/*
+ * Return true iff the underlying file has been closed.
+ */
+bool
+BufFileTransientIsClosed(TransientBufFile *file)
+{
+	return FileIsClosed(file->vfd);
 }
 
 /*
@@ -1622,12 +1627,11 @@ retry:
 	 * Read whatever we can get, up to a full bufferload.
 	 */
 	errno = 0;
-	pgstat_report_wait_start(WAIT_EVENT_BUFFILE_READ);
-	file->common.nbytes = pg_pread(file->fd,
+	file->common.nbytes = FileRead(file->vfd,
 								   file->common.buffer.data,
 								   sizeof(file->common.buffer),
-								   file->common.curOffset);
-	pgstat_report_wait_end();
+								   file->common.curOffset,
+								   WAIT_EVENT_BUFFILE_READ);
 
 	if (file->common.nbytes < 0)
 	{
@@ -1749,12 +1753,11 @@ BufFileDumpBufferTransient(TransientBufFile *file)
 	}
 retry:
 	errno = 0;
-	pgstat_report_wait_start(WAIT_EVENT_BUFFILE_WRITE);
-	nwritten = pg_pwrite(file->fd,
+	nwritten = FileWrite(file->vfd,
 						 write_ptr,
 						 bytestowrite,
-						 file->common.curOffset);
-	pgstat_report_wait_end();
+						 file->common.curOffset,
+						 WAIT_EVENT_BUFFILE_WRITE);
 
 	/* if write didn't set errno, assume problem is no disk space */
 	if (nwritten != file->common.nbytes && errno == 0)
@@ -1813,12 +1816,11 @@ retry:
 			 * next buffer appended will overwrite the "useful" value just
 			 * written, instead of being appended to it.
 			 */
-			pgstat_report_wait_start(WAIT_EVENT_BUFFILE_WRITE);
-			bytes_extra = pg_pwrite(file->fd,
+			bytes_extra = FileWrite(file->vfd,
 									(char *) &useful,
 									sizeof(useful),
-									file->common.curOffset);
-			pgstat_report_wait_end();
+									file->common.curOffset,
+									WAIT_EVENT_BUFFILE_WRITE);
 			if (bytes_extra != sizeof(useful))
 				return;			/* failed to write */
 		}
