@@ -4455,6 +4455,9 @@ PgstatCollectorMain(int argc, char *argv[])
 	 */
 	init_ps_display("stats collector", "", "", "");
 
+	/* BufFileOpenTransient() and friends do use VFD. */
+	InitFileAccess();
+
 	/*
 	 * Read in existing stats files or initialize the stats to zero.
 	 */
@@ -4879,6 +4882,7 @@ pgstat_write_statsfiles(bool permanent, bool allDbs)
 	HASH_SEQ_STATUS hstat;
 	PgStat_StatDBEntry *dbentry;
 	TransientBufFile	   *fpout;
+	File	vfd;
 	int32		format_id;
 	const char *tmpfile = permanent ? PGSTAT_STAT_PERMANENT_TMPFILE : pgstat_stat_tmpname;
 	const char *statfile = permanent ? PGSTAT_STAT_PERMANENT_FILENAME : pgstat_stat_filename;
@@ -4975,9 +4979,9 @@ pgstat_write_statsfiles(bool permanent, bool allDbs)
 	 * XXX This might PANIC, see FileClose(). Don't we need special behaviour
 	 * for statistics?
 	 */
+	vfd = BufFileTransientGetVfd(fpout);
 	BufFileCloseTransient(fpout);
-
-	if (BufFileTransientIsClosed(fpout) != 0)
+	if (!FileIsClosed(vfd))
 	{
 		ereport(LOG,
 				(errcode_for_file_access(),
@@ -5043,6 +5047,7 @@ pgstat_write_db_statsfile(PgStat_StatDBEntry *dbentry, bool permanent)
 	PgStat_StatTabEntry *tabentry;
 	PgStat_StatFuncEntry *funcentry;
 	TransientBufFile	   *fpout;
+	File	vfd;
 	int32		format_id;
 	Oid			dbid = dbentry->databaseid;
 	char		tmpfile[MAXPGPATH];
@@ -5133,9 +5138,9 @@ pgstat_write_db_statsfile(PgStat_StatDBEntry *dbentry, bool permanent)
 	 * XXX This might PANIC, see FileClose(). Don't we need special behaviour
 	 * for statistics?
 	 */
+	vfd = BufFileTransientGetVfd(fpout);
 	BufFileCloseTransient(fpout);
-
-	if (BufFileTransientIsClosed(fpout) != 0)
+	if (!FileIsClosed(vfd))
 	{
 		ereport(LOG,
 				(errcode_for_file_access(),
