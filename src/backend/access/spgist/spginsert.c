@@ -169,7 +169,7 @@ spgbuildempty(Relation index)
 	 * of their existing content when the corresponding create records are
 	 * replayed.
 	 */
-	PageSetChecksumInplace(page, SPGIST_METAPAGE_BLKNO, NULL);
+	PageSetChecksumInplace(page, SPGIST_METAPAGE_BLKNO);
 	/*
 	 * On encryption: LSN is used as the encryption IV, but all the three
 	 * pages created here have initially invalid LSN. Since no user data will
@@ -186,7 +186,7 @@ spgbuildempty(Relation index)
 	/* Likewise for the root page. */
 	SpGistInitPage(page, SPGIST_LEAF);
 
-	PageSetChecksumInplace(page, SPGIST_ROOT_BLKNO, NULL);
+	PageSetChecksumInplace(page, SPGIST_ROOT_BLKNO);
 	smgrwrite(index->rd_smgr, INIT_FORKNUM, SPGIST_ROOT_BLKNO,
 			  (char *) page, true);
 	log_newpage(&index->rd_smgr->smgr_rnode.node, INIT_FORKNUM,
@@ -195,7 +195,7 @@ spgbuildempty(Relation index)
 	/* Likewise for the null-tuples root page. */
 	SpGistInitPage(page, SPGIST_LEAF | SPGIST_NULLS);
 
-	PageSetChecksumInplace(page, SPGIST_NULL_BLKNO, NULL);
+	PageSetChecksumInplace(page, SPGIST_NULL_BLKNO);
 	smgrwrite(index->rd_smgr, INIT_FORKNUM, SPGIST_NULL_BLKNO,
 			  (char *) page, true);
 	log_newpage(&index->rd_smgr->smgr_rnode.node, INIT_FORKNUM,

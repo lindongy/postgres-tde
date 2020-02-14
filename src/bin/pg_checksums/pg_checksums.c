@@ -197,7 +197,6 @@ scan_file(const char *fn, BlockNumber segmentno)
 	{
 		uint16		csum;
 		int			r = read(f, buf.data, BLCKSZ);
-		uint16	checksum_expected;
 
 		if (r == 0)
 			break;
@@ -213,22 +212,18 @@ scan_file(const char *fn, BlockNumber segmentno)
 		}
 		blocks++;
 
-		checksum_expected = header->pd_checksum;
-
 		/*
-		 * PageIsNew() cannot be used here because the page is encrypted, and
-		 * thus the tested field might contain zeroes just due to the
-		 * encryption. And decryption is hard to perform here because we can't
-		 * easily provide decrypt_page() with "relpersistence".
+		 * New pages have no checksum yet, unless it's encrypted - see
+		 * PageSetChecksumCopy() for explanation.
 		 */
-		if (checksum_expected == InvalidChecksum)
+		if (ControlFile->data_cipher == PG_CIPHER_NONE && PageIsNew(header))
 			continue;
 
 		csum = pg_checksum_page(buf.data, blockno + segmentno * RELSEG_SIZE);
 		current_size += r;
 		if (mode == PG_MODE_CHECK)
 		{
-			if (csum != checksum_expected)
+			if (csum != header->pd_checksum)
 			{
 				if (ControlFile->data_checksum_version == PG_DATA_CHECKSUM_VERSION)
 					pg_log_error("checksum verification failed in file \"%s\", block %u: calculated checksum %X but block contains %X",

@@ -993,7 +993,6 @@ _hash_alloc_buckets(Relation rel, BlockNumber firstblock, uint32 nblocks)
 	BlockNumber lastblock;
 	PGAlignedBlock zerobuf;
 	Page		page;
-	Page	page_plain = NULL;
 	HashPageOpaque ovflopaque;
 	XLogRecPtr	lsn;
 
@@ -1048,12 +1047,11 @@ _hash_alloc_buckets(Relation rel, BlockNumber firstblock, uint32 nblocks)
 					 lastblock,
 					 rel->rd_rel->relpersistence);
 
-		page_plain = zerobuf.data;
 		page = encrypt_buf.data;
 	}
 
 	RelationOpenSmgr(rel);
-	PageSetChecksumInplace(page, lastblock, page_plain);
+	PageSetChecksumInplace(page, lastblock);
 	smgrextend(rel->rd_smgr, MAIN_FORKNUM, lastblock, page, false);
 
 	return true;

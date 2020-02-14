@@ -2697,7 +2697,6 @@ FlushBuffer(BufferDesc *buf, SMgrRelation reln)
 	instr_time	io_start,
 				io_time;
 	Block		bufBlock;
-	Block	bufBlockPlain = NULL;
 	char	   *bufToWrite;
 	uint32		buf_state;
 
@@ -2785,7 +2784,6 @@ FlushBuffer(BufferDesc *buf, SMgrRelation reln)
 		encrypt_page(bufBlock, encrypt_buf.data, recptr,
 					 buf->tag.blockNum, relpersistence);
 
-		bufBlockPlain = bufBlock;
 		bufBlock = encrypt_buf.data;
 	}
 
@@ -2794,8 +2792,7 @@ FlushBuffer(BufferDesc *buf, SMgrRelation reln)
 	 * buffer, other processes might be updating hint bits in it, so we must
 	 * copy the page to private storage if we do checksumming.
 	 */
-	bufToWrite = PageSetChecksumCopy((Page) bufBlock, buf->tag.blockNum,
-									 (Page) bufBlockPlain);
+	bufToWrite = PageSetChecksumCopy((Page) bufBlock, buf->tag.blockNum);
 
 	if (track_io_timing)
 		INSTR_TIME_SET_CURRENT(io_start);
@@ -3257,7 +3254,6 @@ FlushRelationBuffers(Relation rel)
 			{
 				ErrorContextCallback errcallback;
 				Page		localpage;
-				Page	localpage_plain = NULL;
 
 				localpage = (char *) LocalBufHdrGetBlock(bufHdr);
 
@@ -3281,12 +3277,10 @@ FlushRelationBuffers(Relation rel)
 								 bufHdr->tag.blockNum,
 								 rel->rd_rel->relpersistence);
 
-					localpage_plain = localpage;
 					localpage = encrypt_buf.data;
 				}
 
-				PageSetChecksumInplace(localpage, bufHdr->tag.blockNum,
-									   localpage_plain);
+				PageSetChecksumInplace(localpage, bufHdr->tag.blockNum);
 				smgrwrite(rel->rd_smgr,
 						  bufHdr->tag.forkNum,
 						  bufHdr->tag.blockNum,

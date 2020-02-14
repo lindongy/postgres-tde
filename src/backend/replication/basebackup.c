@@ -1705,7 +1705,7 @@ sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf
 					 * Compute new checksum for the decrypted page.
 					 */
 					if (DataChecksumsEnabled())
-						PageSetChecksumInplace(page, blkno_global, NULL);
+						PageSetChecksumInplace(page, blkno_global);
 				}
 
 				block_retry = false;
