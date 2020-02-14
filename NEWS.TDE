@@ -1,0 +1,19 @@
+12.2_TDE_1.0beta2
+=================
+
+Bug fixes - TDE
+---------------
+
+* Fixed omission in page checksum computation.
+
+Page checksum should not be computed for an empty page, however the emptiness
+cannot be checked reliably after encryption. Doing so resulted in missed
+update of the checksum in rare cases.
+
+
+Bug fixes - PG core
+-------------------
+
+* All the fixes implemented in the 12.2 release, see
+
+https://www.postgresql.org/docs/12/release-12-2.html
