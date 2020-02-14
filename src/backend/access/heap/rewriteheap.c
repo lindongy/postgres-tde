@@ -332,7 +332,6 @@ end_heap_rewrite(RewriteState state)
 	if (state->rs_buffer_valid)
 	{
 		char	*buf = (char *) state->rs_buffer;
-		char	*buf_plain = NULL;
 		XLogRecPtr	lsn;
 
 		if (state->rs_use_wal)
@@ -360,13 +359,12 @@ end_heap_rewrite(RewriteState state)
 						 state->rs_blockno,
 						 state->rs_new_rel->rd_rel->relpersistence);
 
-			buf_plain = buf;
 			buf = encrypt_buf.data;
 		}
 
 		RelationOpenSmgr(state->rs_new_rel);
 
-		PageSetChecksumInplace(buf, state->rs_blockno, buf_plain);
+		PageSetChecksumInplace(buf, state->rs_blockno);
 		smgrextend(state->rs_new_rel->rd_smgr, MAIN_FORKNUM, state->rs_blockno,
 				   buf, true);
 	}
@@ -720,7 +718,6 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 		if (len + saveFreeSpace > pageFreeSpace)
 		{
 			char	*buf = (char *) page;
-			char	*buf_plain = NULL;
 			XLogRecPtr	lsn;
 
 			/* Doesn't fit, so write out the existing page */
@@ -759,11 +756,10 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 							 state->rs_blockno,
 							 state->rs_new_rel->rd_rel->relpersistence);
 
-				buf_plain = buf;
 				buf = encrypt_buf.data;
 			}
 
-			PageSetChecksumInplace(buf, state->rs_blockno, buf_plain);
+			PageSetChecksumInplace(buf, state->rs_blockno);
 			smgrextend(state->rs_new_rel->rd_smgr, MAIN_FORKNUM,
 					   state->rs_blockno, buf, true);
 

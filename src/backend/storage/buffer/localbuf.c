@@ -210,7 +210,6 @@ LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber blockNum,
 	{
 		SMgrRelation oreln;
 		Page		localpage = (char *) LocalBufHdrGetBlock(bufHdr);
-		Page	localpage_plain = NULL;
 
 		/* Find smgr relation for buffer */
 		oreln = smgropen(bufHdr->tag.rnode, MyBackendId);
@@ -230,11 +229,9 @@ LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber blockNum,
 						 bufHdr->tag.blockNum,
 						 RELPERSISTENCE_TEMP);
 
-			localpage_plain = localpage;
 			localpage = encrypt_buf.data;
 		}
-		PageSetChecksumInplace(localpage, bufHdr->tag.blockNum,
-							   localpage_plain);
+		PageSetChecksumInplace(localpage, bufHdr->tag.blockNum);
 		smgrwrite(oreln,
 				  bufHdr->tag.forkNum,
 				  bufHdr->tag.blockNum,
