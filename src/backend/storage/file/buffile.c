@@ -1499,9 +1499,8 @@ BufFileOpenTransient(const char *path, int fileFlags,
 	if (data_encrypted)
 		memcpy(file->tweakBase, tweak_base, TWEAK_BASE_SIZE);
 
-	errno = 0;
-	size = lseek(file->vfd, 0, SEEK_END);
-	if (errno > 0)
+	size = FileSize(file->vfd);
+	if (size < 0)
 		ereport(ERROR,
 				(errcode_for_file_access(),
 				 errmsg("could not initialize TransientBufFile for file \"%s\": %m",
@@ -1597,13 +1596,10 @@ BufFileCloseTransient(TransientBufFile *file)
 	pfree(file);
 }
 
-/*
- * Return true iff the underlying file has been closed.
- */
-bool
-BufFileTransientIsClosed(TransientBufFile *file)
+File
+BufFileTransientGetVfd(TransientBufFile *file)
 {
-	return FileIsClosed(file->vfd);
+	return file->vfd;
 }
 
 /*
