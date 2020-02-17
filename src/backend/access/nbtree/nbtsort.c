@@ -653,7 +653,7 @@ static void
 _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 {
 	char	*buf;
-	XLogRecPtr	lsn;
+	XLogRecPtr	lsn = InvalidXLogRecPtr;
 
 	/* Ensure rd_smgr is open (could have been closed by relcache flush!) */
 	RelationOpenSmgr(wstate->index);

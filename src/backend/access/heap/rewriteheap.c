@@ -718,7 +718,7 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 		if (len + saveFreeSpace > pageFreeSpace)
 		{
 			char	*buf = (char *) page;
-			XLogRecPtr	lsn;
+			XLogRecPtr	lsn = InvalidXLogRecPtr;
 
 			/* Doesn't fit, so write out the existing page */
 
