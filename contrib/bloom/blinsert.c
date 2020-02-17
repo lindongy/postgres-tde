@@ -181,7 +181,7 @@ blbuildempty(Relation index)
 	 * Encryption: nothing to do, LSN (the encryption IV) is not set and there
 	 * is no user data yet.
 	 */
-	PageSetChecksumInplace(metapage, BLOOM_METAPAGE_BLKNO, NULL);
+	PageSetChecksumInplace(metapage, BLOOM_METAPAGE_BLKNO);
 	smgrwrite(index->rd_smgr, INIT_FORKNUM, BLOOM_METAPAGE_BLKNO,
 			  (char *) metapage, true);
 	log_newpage(&index->rd_smgr->smgr_rnode.node, INIT_FORKNUM,
