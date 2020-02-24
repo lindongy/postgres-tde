@@ -691,7 +691,7 @@ SysLogger_Start(void)
 	{
 		stream = &log_streams[i];
 		if (stream->directory == NULL || stream->filename == NULL ||
-			stream->rotation_age == 0 || stream->rotation_size == 0)
+			stream->rotation_age == 0)
 			ereport(FATAL,
 					(errmsg("Log stream %d is not properly initialized", i)));
 	}
