@@ -102,6 +102,7 @@
 #include <math.h>
 
 #include "access/brin.h"
+#include "access/brin_page.h"
 #include "access/gin.h"
 #include "access/htup_details.h"
 #include "access/sysattr.h"
@@ -3757,14 +3758,19 @@ estimate_multivariate_ndistinct(PlannerInfo *root, RelOptInfo *rel,
 	foreach(lc, *varinfos)
 	{
 		GroupVarInfo *varinfo = (GroupVarInfo *) lfirst(lc);
+		AttrNumber	attnum;
 
 		Assert(varinfo->rel == rel);
 
-		if (IsA(varinfo->var, Var))
-		{
-			attnums = bms_add_member(attnums,
-									 ((Var *) varinfo->var)->varattno);
-		}
+		if (!IsA(varinfo->var, Var))
+			continue;
+
+		attnum = ((Var *) varinfo->var)->varattno;
+
+		if (!AttrNumberIsForUserDefinedAttr(attnum))
+			continue;
+
+		attnums = bms_add_member(attnums, attnum);
 	}
 
 	/* look for the ndistinct statistics matching the most vars */
@@ -3844,6 +3850,10 @@ estimate_multivariate_ndistinct(PlannerInfo *root, RelOptInfo *rel,
 			}
 
 			attnum = ((Var *) varinfo->var)->varattno;
+
+			if (!AttrNumberIsForUserDefinedAttr(attnum))
+				continue;
+
 			if (!bms_is_member(attnum, matched))
 				newlist = lappend(newlist, varinfo);
 		}
@@ -5564,9 +5574,10 @@ find_join_input_rel(PlannerInfo *root, Relids relids)
 /*
  * Check whether char is a letter (and, hence, subject to case-folding)
  *
- * In multibyte character sets or with ICU, we can't use isalpha, and it does not seem
- * worth trying to convert to wchar_t to use iswalpha.  Instead, just assume
- * any multibyte char is potentially case-varying.
+ * In multibyte character sets or with ICU, we can't use isalpha, and it does
+ * not seem worth trying to convert to wchar_t to use iswalpha or u_isalpha.
+ * Instead, just assume any non-ASCII char is potentially case-varying, and
+ * hard-wire knowledge of which ASCII chars are letters.
  */
 static int
 pattern_char_isalpha(char c, bool is_multibyte,
@@ -5577,7 +5588,8 @@ pattern_char_isalpha(char c, bool is_multibyte,
 	else if (is_multibyte && IS_HIGHBIT_SET(c))
 		return true;
 	else if (locale && locale->provider == COLLPROVIDER_ICU)
-		return IS_HIGHBIT_SET(c) ? true : false;
+		return IS_HIGHBIT_SET(c) ||
+			(c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
 #ifdef HAVE_LOCALE_T
 	else if (locale && locale->provider == COLLPROVIDER_LIBC)
 		return isalpha_l((unsigned char) c, locale->info.lt);
@@ -7868,11 +7880,31 @@ brincostestimate(PlannerInfo *root, IndexPath *path, double loop_count,
 							  &spc_seq_page_cost);
 
 	/*
-	 * Obtain some data from the index itself.
+	 * Obtain some data from the index itself, if possible.  Otherwise invent
+	 * some plausible internal statistics based on the relation page count.
 	 */
-	indexRel = index_open(index->indexoid, AccessShareLock);
-	brinGetStats(indexRel, &statsData);
-	index_close(indexRel, AccessShareLock);
+	if (!index->hypothetical)
+	{
+		indexRel = index_open(index->indexoid, AccessShareLock);
+		brinGetStats(indexRel, &statsData);
+		index_close(indexRel, AccessShareLock);
+
+		/* work out the actual number of ranges in the index */
+		indexRanges = Max(ceil((double) baserel->pages /
+							   statsData.pagesPerRange), 1.0);
+	}
+	else
+	{
+		/*
+		 * Assume default number of pages per range, and estimate the number
+		 * of ranges based on that.
+		 */
+		indexRanges = Max(ceil((double) baserel->pages /
+							   BRIN_DEFAULT_PAGES_PER_RANGE), 1.0);
+
+		statsData.pagesPerRange = BRIN_DEFAULT_PAGES_PER_RANGE;
+		statsData.revmapNumPages = (indexRanges / REVMAP_PAGE_MAXITEMS) + 1;
+	}
 
 	/*
 	 * Compute index correlation
@@ -7972,10 +8004,6 @@ brincostestimate(PlannerInfo *root, IndexPath *path, double loop_count,
 	qualSelectivity = clauselist_selectivity(root, indexQuals,
 											 baserel->relid,
 											 JOIN_INNER, NULL);
-
-	/* work out the actual number of ranges in the index */
-	indexRanges = Max(ceil((double) baserel->pages / statsData.pagesPerRange),
-					  1.0);
 
 	/*
 	 * Now calculate the minimum possible ranges we could match with if all of

@@ -260,6 +260,11 @@ struct sqlda_struct *ecpg_build_native_sqlda(int, PGresult *, int, enum COMPAT_M
 void		ecpg_set_native_sqlda(int, struct sqlda_struct **, const PGresult *, int, enum COMPAT_MODE);
 
 void		ecpg_commit_cursors(int lineno, struct connection *conn, bool rollback, int level);
+#ifdef ENABLE_NLS
+extern char *ecpg_gettext(const char *msgid) pg_attribute_format_arg(1);
+#else
+#define ecpg_gettext(x) (x)
+#endif
 
 /* SQLSTATE values generated or processed by ecpglib (intentionally
  * not exported -- users should refer to the codes directly) */

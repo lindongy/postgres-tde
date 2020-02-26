@@ -1236,10 +1236,11 @@ coerceToInt(PgBenchValue *pval, int64 *ival)
 	}
 	else
 	{
-		double		dval = pval->u.dval;
+		double		dval;
 
 		Assert(pval->type == PGBT_DOUBLE);
-		if (dval < PG_INT64_MIN || PG_INT64_MAX < dval)
+		dval = rint(pval->u.dval);
+		if (isnan(dval) || !FLOAT8_FITS_IN_INT64(dval))
 		{
 			fprintf(stderr, "double to int overflow for %f\n", dval);
 			return false;
@@ -2857,7 +2858,7 @@ parseQuery(Command *cmd)
 	p = sql;
 	while ((p = strchr(p, ':')) != NULL)
 	{
-		char		var[12];
+		char		var[13];
 		char	   *name;
 		int			eaten;
 

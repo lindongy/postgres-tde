@@ -353,7 +353,8 @@ FROM ( { <replaceable class="PARAMETER">numeric_literal</replaceable> | <replace
       additional <literal>CHECK</> constraints; additional constraints with
       the same name and condition as in the parent will be merged with the
       parent constraint.  Defaults may be specified separately for each
-      partition.
+      partition. But note that a partition's default value is not applied
+      when inserting a tuple through a partitioned table.
      </para>
 
      <para>
@@ -639,7 +640,8 @@ FROM ( { <replaceable class="PARAMETER">numeric_literal</replaceable> | <replace
      <para>
       Currently, <literal>CHECK</literal> expressions cannot contain
       subqueries nor refer to variables other than columns of the
-      current row.  The system column <literal>tableoid</literal>
+      current row (see <xref linkend="ddl-constraints-check-constraints">).
+      The system column <literal>tableoid</literal>
       may be referenced, but not any other system column.
      </para>
 

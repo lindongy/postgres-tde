@@ -508,7 +508,7 @@ RelationBuildPartitionDesc(Relation rel)
 						boundinfo->null_index = mapping[null_index];
 					}
 
-					/* All partition must now have a valid mapping */
+					/* All partitions must now have a valid mapping */
 					Assert(next_index == nparts);
 					break;
 				}
@@ -1520,7 +1520,7 @@ get_range_key_properties(PartitionKey key, int keynum,
  *		AND
  *	(b > bl OR (b = bl AND c >= cl))
  *		AND
- *	(b < bu) OR (b = bu AND c < cu))
+ *	(b < bu OR (b = bu AND c < cu))
  *
  * If a bound datum is either MINVALUE or MAXVALUE, these expressions are
  * simplified using the fact that any value is greater than MINVALUE and less
