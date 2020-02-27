@@ -2767,22 +2767,36 @@ FlushBuffer(BufferDesc *buf, SMgrRelation reln)
 	{
 		char	relpersistence;
 
-		/* Make sure we have valid encryption IV. */
 		if (buf_state & BM_PERMANENT)
-		{
-			if (XLogRecPtrIsInvalid(recptr))
-				recptr = get_regular_lsn_for_encryption();
-
 			relpersistence = RELPERSISTENCE_PERMANENT;
-		}
 		else
 		{
 			recptr = GetFakeLSNForUnloggedRel();
 			relpersistence = RELPERSISTENCE_UNLOGGED;
 		}
 
-		encrypt_page(bufBlock, encrypt_buf.data, recptr,
-					 buf->tag.blockNum, relpersistence);
+		/*
+		 * If permanent relation happens not to have valid LSN, it's probably
+		 * a new page and so it's o.k. not to encrypt that. We cannot assign
+		 * regular LSN (by inserting a new XLOG_NOOP record) at this stage
+		 * anyway.
+		 */
+		if (!XLogRecPtrIsInvalid(recptr))
+		{
+			encrypt_page(bufBlock, encrypt_buf.data, recptr,
+						 buf->tag.blockNum, relpersistence);
+		}
+		else
+		{
+			/*
+			 * Make sure that the invalid LSN is written to disk. If we simply
+			 * wrote bufBlock, MarkBufferDirtyHint() could change the LSN
+			 * concurrently and thus decrypt_page() would eventually think
+			 * that the page is encrypted.
+			 */
+			memcpy(encrypt_buf.data, bufBlock, BLCKSZ);
+			PageSetLSN(encrypt_buf.data, recptr);
+		}
 
 		bufBlock = encrypt_buf.data;
 	}
