@@ -205,6 +205,8 @@ start_postmaster(ClusterInfo *cluster, bool report_and_exit_on_error)
 
 	static bool exit_hook_registered = false;
 
+	encryption_key_port_opt[0] = '\0';
+
 	if (!exit_hook_registered)
 	{
 		atexit(stop_postmaster_atexit);
@@ -245,7 +247,6 @@ start_postmaster(ClusterInfo *cluster, bool report_and_exit_on_error)
 	 */
 #ifndef HAVE_UNIX_SOCKETS
 	/* Make sure pg_ctl sends the encryption key to the correct port. */
-	encryption_key_port_opt[0] = '\0';
 	sprintf(encryption_key_port_opt, " --encryption-key-port \"%d\"",
 			cluster->port);
 #endif
