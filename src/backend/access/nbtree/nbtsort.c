@@ -666,7 +666,7 @@ _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 		lsn = PageGetLSN(page);
 	}
 	else if (data_encrypted)
-		lsn = get_lsn_for_encryption(wstate->index->rd_rel->relpersistence);
+		lsn = get_lsn_for_encryption();
 
 	/*
 	 * If we have to write pages nonsequentially, fill in the space with

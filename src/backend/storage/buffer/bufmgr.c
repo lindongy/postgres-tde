@@ -2770,10 +2770,7 @@ FlushBuffer(BufferDesc *buf, SMgrRelation reln)
 		if (buf_state & BM_PERMANENT)
 			relpersistence = RELPERSISTENCE_PERMANENT;
 		else
-		{
-			recptr = GetFakeLSNForUnloggedRel();
 			relpersistence = RELPERSISTENCE_UNLOGGED;
-		}
 
 		/*
 		 * If permanent relation happens not to have valid LSN, it's probably
@@ -2940,8 +2937,12 @@ BufferGetLSNAtomic(Buffer buffer)
 
 	/*
 	 * If we don't need locking for correctness, fastpath out.
+	 *
+	 * If data_encrypted, then MarkBufferDirtyHint() can change the LSN while
+	 * the caller has only share lock on the buffer, so the fastpath is not
+	 * usable.
 	 */
-	if (!XLogHintBitIsNeeded() || BufferIsLocal(buffer))
+	if (!(XLogHintBitIsNeeded() || data_encrypted) || BufferIsLocal(buffer))
 		return PageGetLSN(page);
 
 	/* Make sure we've got a real buffer, and that we hold a pin on it. */
@@ -3279,19 +3280,18 @@ FlushRelationBuffers(Relation rel)
 
 				if (data_encrypted)
 				{
-					XLogRecPtr	lsn;
+					XLogRecPtr	lsn = PageGetLSN(localpage);
 
-					/* Generate fake LSN to become the encryption IV. */
-					Assert(XLogRecPtrIsInvalid(PageGetLSN(localpage)));
-					lsn = GetFakeLSNForUnloggedRel();
+					if (!XLogRecPtrIsInvalid(lsn))
+					{
+						encrypt_page((char *) localpage,
+									 encrypt_buf.data,
+									 lsn,
+									 bufHdr->tag.blockNum,
+									 rel->rd_rel->relpersistence);
 
-					encrypt_page((char *) localpage,
-								 encrypt_buf.data,
-								 lsn,
-								 bufHdr->tag.blockNum,
-								 rel->rd_rel->relpersistence);
-
-					localpage = encrypt_buf.data;
+						localpage = encrypt_buf.data;
+					}
 				}
 
 				PageSetChecksumInplace(localpage, bufHdr->tag.blockNum);
@@ -3492,6 +3492,17 @@ IncrBufferRefCount(Buffer buffer)
  *	  buffer's content lock.
  * 3. This function does not guarantee that the buffer is always marked dirty
  *	  (due to a race condition), so it cannot be used for important changes.
+ *
+ * The function also handles generation of LSN when it's needed as the
+ * encryption IV. The problem is that the buffer can be written to disk
+ * anytime after this function has finished, so the function needs to
+ * guarantee an unique LSN to be set. Alternatively, caller can be required to
+ * set the LSN before he ever calls the function, but in such a case he'd have
+ * to predict whether the function will set the LSN too or not.
+ *
+ * Note that the encryption-specific LSN is not generated during
+ * recovery. Caller should set the LSN in such a case, *before* the actual
+ * call.
  */
 void
 MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
@@ -3542,8 +3553,9 @@ MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
 		 * We don't check full_page_writes here because that logic is included
 		 * when we call XLogInsert() since the value changes dynamically.
 		 */
-		if (XLogHintBitIsNeeded() &&
-			(pg_atomic_read_u32(&bufHdr->state) & BM_PERMANENT))
+		if ((XLogHintBitIsNeeded() &&
+			 (pg_atomic_read_u32(&bufHdr->state) & BM_PERMANENT))
+			|| data_encrypted)
 		{
 			/*
 			 * If we're in recovery we cannot dirty a page because of a hint.
@@ -3577,9 +3589,21 @@ MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
 			 * It's possible we may enter here without an xid, so it is
 			 * essential that CreateCheckpoint waits for virtual transactions
 			 * rather than full transactionids.
+			 *
+			 * Encryption alone should be the reason for FPI.
 			 */
-			MyPgXact->delayChkpt = delayChkpt = true;
-			lsn = XLogSaveBufferForHint(buffer, buffer_std);
+			if (!data_encrypted)
+			{
+				MyPgXact->delayChkpt = delayChkpt = true;
+				lsn = XLogSaveBufferForHint(buffer, buffer_std);
+			}
+
+			/*
+			 * Callers rely on us to generate LSN for the sake of encryption
+			 * IV.
+			 */
+			if (XLogRecPtrIsInvalid(lsn) && data_encrypted)
+				lsn = get_lsn_for_encryption();
 		}
 
 		buf_state = LockBufHdr(bufHdr);

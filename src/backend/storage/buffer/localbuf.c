@@ -220,8 +220,7 @@ LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber blockNum,
 			XLogRecPtr	lsn;
 
 			/* Generate fake LSN to become the encryption IV. */
-			Assert(XLogRecPtrIsInvalid(PageGetLSN(localpage)));
-			lsn = GetFakeLSNForUnloggedRel();
+			lsn = get_lsn_for_encryption();
 
 			encrypt_page((char *) localpage,
 						 encrypt_buf.data,

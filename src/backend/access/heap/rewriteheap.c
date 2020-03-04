@@ -344,7 +344,7 @@ end_heap_rewrite(RewriteState state)
 			lsn = PageGetLSN(buf);
 		}
 		else if (data_encrypted)
-			lsn = get_lsn_for_encryption(state->rs_new_rel->rd_rel->relpersistence);
+			lsn = get_lsn_for_encryption();
 
 		/*
 		 * Encrypt only if we have valid IV. It should be always except when
@@ -733,7 +733,7 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 				lsn = PageGetLSN(buf);
 			}
 			else if (data_encrypted)
-				lsn = get_lsn_for_encryption(state->rs_new_rel->rd_rel->relpersistence);
+				lsn = get_lsn_for_encryption();
 
 			/*
 			 * Now write the page. We say isTemp = true even if it's not a

@@ -300,6 +300,19 @@ visibilitymap_set(Relation rel, BlockNumber heapBlk, Buffer heapBuf,
 			}
 			PageSetLSN(page, recptr);
 		}
+		else if (data_encrypted)
+		{
+			if (XLogRecPtrIsInvalid(recptr))
+				set_page_lsn_for_encryption(page);
+			else
+			{
+				/*
+				 * The LSN must be set even during recovery because it's used
+				 * as the encryption IV.
+				 */
+				PageSetLSN(page, recptr);
+			}
+		}
 
 		END_CRIT_SECTION();
 	}
@@ -438,9 +451,13 @@ visibilitymap_count(Relation rel, BlockNumber *all_visible, BlockNumber *all_fro
  * before they access the VM again.
  *
  * nheapblocks is the new size of the heap.
+ *
+ * Valid recptr is passed iff called during WAL replay, see
+ * visibilitymap_set() for details.
  */
 void
-visibilitymap_truncate(Relation rel, BlockNumber nheapblocks)
+visibilitymap_truncate(Relation rel, BlockNumber nheapblocks,
+					   XLogRecPtr recptr)
 {
 	BlockNumber newnblocks;
 
@@ -452,6 +469,8 @@ visibilitymap_truncate(Relation rel, BlockNumber nheapblocks)
 #ifdef TRACE_VISIBILITYMAP
 	elog(DEBUG1, "vm_truncate %s %d", RelationGetRelationName(rel), nheapblocks);
 #endif
+
+	Assert(InRecovery || XLogRecPtrIsInvalid(recptr));
 
 	RelationOpenSmgr(rel);
 
@@ -518,6 +537,19 @@ visibilitymap_truncate(Relation rel, BlockNumber nheapblocks)
 		MarkBufferDirty(mapBuffer);
 		if (!InRecovery && RelationNeedsWAL(rel) && XLogHintBitIsNeeded())
 			log_newpage_buffer(mapBuffer, false);
+		else if (data_encrypted)
+		{
+			if (XLogRecPtrIsInvalid(recptr))
+				set_page_lsn_for_encryption(BufferGetPage(mapBuffer));
+			else
+			{
+				/*
+				 * The LSN must be set even during recovery because it's
+				 * used as the encryption IV.
+				 */
+				PageSetLSN(BufferGetPage(mapBuffer), recptr);
+			}
+		}
 
 		END_CRIT_SECTION();
 

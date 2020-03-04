@@ -142,6 +142,8 @@ spgbuild(Relation heap, Relation index, IndexInfo *indexInfo)
 						  0, RelationGetNumberOfBlocks(index),
 						  true);
 	}
+	else if (data_encrypted)
+		newpage_range_set_lsn(index, 0, RelationGetNumberOfBlocks(index));
 
 	result = (IndexBuildResult *) palloc0(sizeof(IndexBuildResult));
 	result->heap_tuples = reltuples;

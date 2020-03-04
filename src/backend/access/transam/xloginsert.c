@@ -952,8 +952,6 @@ XLogSaveBufferForHint(Buffer buffer, bool buffer_std)
 
 		recptr = XLogInsert(RM_XLOG_ID, XLOG_FPI_FOR_HINT);
 	}
-	else if (data_encrypted)
-		recptr = get_regular_lsn_for_encryption();
 
 	return recptr;
 }
@@ -1102,6 +1100,56 @@ log_newpage_range(Relation rel, ForkNumber forkNum,
 			UnlockReleaseBuffer(bufpack[i]);
 		}
 		END_CRIT_SECTION();
+	}
+}
+
+/*
+ * Set fake LSN to pages which log_newpage_range would WAL-log if the relation
+ * was persistent and if encryption was disabled.
+ *
+ * This is for encryption because we uses LSN to construct the encryption IV.
+ */
+void
+newpage_range_set_lsn(Relation rel, BlockNumber startblk, BlockNumber endblk)
+{
+	BlockNumber blkno;
+	XLogRecPtr	recptr;
+
+	if (!data_encrypted)
+		return;
+
+	recptr = get_lsn_for_encryption();
+	blkno = startblk;
+	while (blkno < endblk)
+	{
+		Buffer		buf = ReadBuffer(rel, blkno);
+
+		CHECK_FOR_INTERRUPTS();
+
+		START_CRIT_SECTION();
+
+		LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+
+		/*
+		 * Completely empty pages are not encrypted.
+		 */
+		if (!PageIsNew(BufferGetPage(buf)))
+		{
+			MarkBufferDirty(buf);
+			PageSetLSN(BufferGetPage(buf), recptr);
+		}
+#ifdef USE_ASSERT_CHECKING
+		else
+		{
+			Assert(XLogRecPtrIsInvalid(PageGetLSN(BufferGetPage(buf))));
+
+		}
+#endif	/* USE_ASSERT_CHECKING */
+		UnlockReleaseBuffer(buf);
+
+		END_CRIT_SECTION();
+
+		blkno++;
 	}
 }
 

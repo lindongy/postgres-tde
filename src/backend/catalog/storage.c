@@ -246,12 +246,12 @@ RelationTruncate(Relation rel, BlockNumber nblocks)
 	/* Truncate the FSM first if it exists */
 	fsm = smgrexists(rel->rd_smgr, FSM_FORKNUM);
 	if (fsm)
-		FreeSpaceMapTruncateRel(rel, nblocks);
+		FreeSpaceMapTruncateRel(rel, nblocks, InvalidXLogRecPtr);
 
 	/* Truncate the visibility map too if it exists. */
 	vm = smgrexists(rel->rd_smgr, VISIBILITYMAP_FORKNUM);
 	if (vm)
-		visibilitymap_truncate(rel, nblocks);
+		visibilitymap_truncate(rel, nblocks, InvalidXLogRecPtr);
 
 	/*
 	 * We WAL-log the truncation before actually truncating, which means
@@ -374,7 +374,7 @@ RelationCopyStorage(SMgrRelation src, SMgrRelation dst,
 			lsn = PageGetLSN(page);
 		}
 		else if (data_encrypted)
-			lsn = get_lsn_for_encryption(relpersistence);
+			lsn = get_lsn_for_encryption();
 
 		buf_dst = (char *) page;
 
@@ -668,10 +668,10 @@ smgr_redo(XLogReaderState *record)
 
 		if ((xlrec->flags & SMGR_TRUNCATE_FSM) != 0 &&
 			smgrexists(reln, FSM_FORKNUM))
-			FreeSpaceMapTruncateRel(rel, xlrec->blkno);
+			FreeSpaceMapTruncateRel(rel, xlrec->blkno, lsn);
 		if ((xlrec->flags & SMGR_TRUNCATE_VM) != 0 &&
 			smgrexists(reln, VISIBILITYMAP_FORKNUM))
-			visibilitymap_truncate(rel, xlrec->blkno);
+			visibilitymap_truncate(rel, xlrec->blkno, lsn);
 
 		FreeFakeRelcacheEntry(rel);
 	}

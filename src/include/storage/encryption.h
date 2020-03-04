@@ -19,6 +19,7 @@
 #include "common/encryption.h"
 #include "miscadmin.h"
 #include "storage/block.h"
+#include "storage/bufpage.h"
 #include "storage/relfilenode.h"
 #include "port/pg_crc32c.h"
 
@@ -47,15 +48,10 @@ extern void setup_encryption(void);
 /* Copy of the same field of ControlFileData. */
 extern char encryption_verification[];
 
-/*
- * Generate LSN to in case we only need it for the sake of encryption IV.
- */
-#define get_lsn_for_encryption(relpersistence)	\
-	(((relpersistence) == RELPERSISTENCE_PERMANENT) ?	\
-	 get_regular_lsn_for_encryption() :					\
-	 GetFakeLSNForUnloggedRel());
-
-extern XLogRecPtr get_regular_lsn_for_encryption(void);
+extern XLogRecPtr get_lsn_for_encryption(void);
+extern void set_page_lsn_for_encryption(Page page);
+extern void set_page_lsn_for_encryption2(Page page1, Page page2);
+extern void set_page_lsn_for_encryption3(Page page1, Page page2, Page page3);
 #endif	/* FRONTEND */
 
 #define TWEAK_SIZE 16

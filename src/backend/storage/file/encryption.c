@@ -583,7 +583,7 @@ mdtweak(char *tweak, RelFileNode *relnode, ForkNumber forknum, BlockNumber block
  * terrible.
  */
 XLogRecPtr
-get_regular_lsn_for_encryption(void)
+get_lsn_for_encryption(void)
 {
 	char	xlr_data = '\0';
 	XLogRecPtr	lsn;
@@ -593,5 +593,53 @@ get_regular_lsn_for_encryption(void)
 	XLogRegisterData(&xlr_data, 1);
 	lsn = XLogInsert(RM_XLOG_ID, XLOG_NOOP);
 	return lsn;
+}
+
+/*
+ * Assign fake LSN to a page.
+ */
+void
+set_page_lsn_for_encryption(Page page)
+{
+	XLogRecPtr	lsn;
+
+	if (!data_encrypted)
+		return;
+
+	lsn = get_lsn_for_encryption();
+	PageSetLSN(page, lsn);
+}
+
+/*
+ * Assign the same fake LSN to two different pages.
+ */
+void
+set_page_lsn_for_encryption2(Page page1, Page page2)
+{
+	XLogRecPtr	lsn;
+
+	if (!data_encrypted)
+		return;
+
+	lsn = get_lsn_for_encryption();
+	PageSetLSN(page1, lsn);
+	PageSetLSN(page2, lsn);
+}
+
+/*
+ * Assign the same fake LSN to three different pages.
+ */
+void
+set_page_lsn_for_encryption3(Page page1, Page page2, Page page3)
+{
+	XLogRecPtr	lsn;
+
+	if (!data_encrypted)
+		return;
+
+	lsn = get_lsn_for_encryption();
+	PageSetLSN(page1, lsn);
+	PageSetLSN(page2, lsn);
+	PageSetLSN(page3, lsn);
 }
 #endif	/* !FRONTEND */

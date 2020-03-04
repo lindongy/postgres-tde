@@ -190,15 +190,9 @@ extern PGDLLIMPORT int wal_level;
  * individual bits on a page, it's still consistent no matter what combination
  * of the bits make it to disk, but the checksum wouldn't match.
  *
- * Regardless checksums, if encryption is enabled, hint bit change is always
- * WAL-logged because this is the simplest way to enforce LSN update. The
- * point is that LSN is used as encryption IV and we must not use the same IV
- * for different data.
- *
  * Also WAL-log the hint bits if forced by wal_log_hints=on.
  */
-#define XLogHintBitIsNeeded() (DataChecksumsEnabled() || data_encrypted || \
-							   wal_log_hints)
+#define XLogHintBitIsNeeded() (DataChecksumsEnabled() || wal_log_hints)
 
 /* Do we need to WAL-log information required only for Hot Standby and logical replication? */
 #define XLogStandbyInfoActive() (wal_level >= WAL_LEVEL_REPLICA)

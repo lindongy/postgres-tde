@@ -401,6 +401,8 @@ _hash_init(Relation rel, double num_tuples, ForkNumber forkNum)
 
 		PageSetLSN(BufferGetPage(metabuf), recptr);
 	}
+	else if (data_encrypted)
+		set_page_lsn_for_encryption(BufferGetPage(metabuf));
 
 	num_buckets = metap->hashm_maxbucket + 1;
 
@@ -433,6 +435,9 @@ _hash_init(Relation rel, double num_tuples, ForkNumber forkNum)
 						blkno,
 						BufferGetPage(buf),
 						true);
+		else if (data_encrypted)
+			set_page_lsn_for_encryption(BufferGetPage(buf));
+
 		_hash_relbuf(rel, buf);
 	}
 
@@ -937,6 +942,10 @@ restart_expand:
 		PageSetLSN(BufferGetPage(buf_nblkno), recptr);
 		PageSetLSN(BufferGetPage(metabuf), recptr);
 	}
+	else if (data_encrypted)
+		set_page_lsn_for_encryption3(BufferGetPage(buf_oblkno),
+									 BufferGetPage(buf_nblkno),
+									 BufferGetPage(metabuf));
 
 	END_CRIT_SECTION();
 
@@ -1032,7 +1041,7 @@ _hash_alloc_buckets(Relation rel, BlockNumber firstblock, uint32 nblocks)
 		lsn = PageGetLSN(zerobuf.data);
 	}
 	else if (data_encrypted)
-		lsn = get_lsn_for_encryption(rel->rd_rel->relpersistence);
+		lsn = get_lsn_for_encryption();
 
 	/*
 	 * Encrypt only if we have valid IV. It should be always except when
@@ -1335,6 +1344,9 @@ _hash_splitbucket(Relation rel,
 		PageSetLSN(BufferGetPage(bucket_obuf), recptr);
 		PageSetLSN(BufferGetPage(bucket_nbuf), recptr);
 	}
+	else if (data_encrypted)
+		set_page_lsn_for_encryption2(BufferGetPage(bucket_obuf),
+									 BufferGetPage(bucket_nbuf));
 
 	END_CRIT_SECTION();
 
@@ -1507,6 +1519,8 @@ log_split_page(Relation rel, Buffer buf)
 
 		PageSetLSN(BufferGetPage(buf), recptr);
 	}
+	else if (data_encrypted)
+		set_page_lsn_for_encryption(BufferGetPage(buf));
 }
 
 /*
