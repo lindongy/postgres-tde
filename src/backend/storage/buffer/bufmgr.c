@@ -1486,7 +1486,7 @@ MarkBufferDirty(Buffer buffer)
 
 	if (BufferIsLocal(buffer))
 	{
-		MarkLocalBufferDirty(buffer);
+		MarkLocalBufferDirty(buffer, false);
 		return;
 	}
 
@@ -3515,7 +3515,26 @@ MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
 
 	if (BufferIsLocal(buffer))
 	{
-		MarkLocalBufferDirty(buffer);
+		bool	set_lsn = false;
+
+		/* LSN is used as the encryption IV. */
+		if (data_encrypted)
+		{
+			/*
+			 * It's safer to return without marking the buffer dirty than to
+			 * go ahead without setting the LSN (a new LSN cannot be generated
+			 * during recovery anyway). The point is that the recovery can end
+			 * anytime after RecoveryInProgress() has returned true, so if we
+			 * only skip setting the LSN, then the buffer can be written to
+			 * disk w/o LSN, and therefore unencrypted.
+			 */
+			if (RecoveryInProgress())
+				return;
+
+			set_lsn = true;
+		}
+
+		MarkLocalBufferDirty(buffer, set_lsn);
 		return;
 	}
 

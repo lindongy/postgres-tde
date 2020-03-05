@@ -294,7 +294,7 @@ LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber blockNum,
  *	  mark a local buffer dirty
  */
 void
-MarkLocalBufferDirty(Buffer buffer)
+MarkLocalBufferDirty(Buffer buffer, bool set_lsn)
 {
 	int			bufid;
 	BufferDesc *bufHdr;
@@ -311,6 +311,14 @@ MarkLocalBufferDirty(Buffer buffer)
 	Assert(LocalRefCount[bufid] > 0);
 
 	bufHdr = GetLocalBufferDescriptor(bufid);
+
+	if (set_lsn)
+	{
+		Block	bufBlock = LocalBufHdrGetBlock(bufHdr);
+		XLogRecPtr	lsn = get_lsn_for_encryption();
+
+		PageSetLSN(bufBlock, lsn);
+	}
 
 	buf_state = pg_atomic_read_u32(&bufHdr->state);
 
