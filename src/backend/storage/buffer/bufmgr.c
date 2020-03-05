@@ -3543,6 +3543,7 @@ MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
 		bool		dirtied = false;
 		bool		delayChkpt = false;
 		uint32		buf_state;
+		bool	need_fpi;
 
 		/*
 		 * If we need to protect hint bit updates from torn writes, WAL-log a
@@ -3553,9 +3554,9 @@ MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
 		 * We don't check full_page_writes here because that logic is included
 		 * when we call XLogInsert() since the value changes dynamically.
 		 */
-		if ((XLogHintBitIsNeeded() &&
-			 (pg_atomic_read_u32(&bufHdr->state) & BM_PERMANENT))
-			|| data_encrypted)
+		need_fpi = XLogHintBitIsNeeded() &&
+			(pg_atomic_read_u32(&bufHdr->state) & BM_PERMANENT);
+		if (need_fpi || data_encrypted)
 		{
 			/*
 			 * If we're in recovery we cannot dirty a page because of a hint.
@@ -3590,9 +3591,9 @@ MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
 			 * essential that CreateCheckpoint waits for virtual transactions
 			 * rather than full transactionids.
 			 *
-			 * Encryption alone should be the reason for FPI.
+			 * Encryption alone should not be the reason for FPI.
 			 */
-			if (!data_encrypted)
+			if (need_fpi)
 			{
 				MyPgXact->delayChkpt = delayChkpt = true;
 				lsn = XLogSaveBufferForHint(buffer, buffer_std);
