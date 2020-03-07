@@ -1614,7 +1614,6 @@ static void
 BufFileLoadBufferTransient(TransientBufFile *file)
 {
 	Assert(!file->common.dirty);
-	Assert(file->common.pos == 0 && file->common.nbytes == 0);
 
 	/* See comments in BufFileLoadBuffer(). */
 	if (data_encrypted)
