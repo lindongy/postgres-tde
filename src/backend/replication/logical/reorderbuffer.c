@@ -2477,6 +2477,9 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 		case REORDER_BUFFER_CHANGE_INTERNAL_SPEC_CONFIRM:
 		case REORDER_BUFFER_CHANGE_INTERNAL_COMMAND_ID:
 		case REORDER_BUFFER_CHANGE_INTERNAL_TUPLECID:
+			hdr.size = sz;
+			ReorderBufferWriteData(file, &hdr, sizeof(ReorderBufferDiskChange),
+								   txn);
 			/* ReorderBufferChange contains everything important */
 			break;
 	}
