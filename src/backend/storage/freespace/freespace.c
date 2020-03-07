@@ -227,7 +227,7 @@ XLogRecordPageWithFreeSpace(RelFileNode rnode, BlockNumber heapBlk,
 		 */
 		if (data_encrypted)
 		{
-			Assert(!XLogRecPtrInvalid(recptr));
+			Assert(!XLogRecPtrIsInvalid(recptr));
 			PageSetLSN(page, recptr);
 		}
 

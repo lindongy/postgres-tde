@@ -22,6 +22,7 @@
  */
 #include "postgres.h"
 
+#include "access/xlog.h"
 #include "storage/bufmgr.h"
 #include "storage/fsm_internals.h"
 
