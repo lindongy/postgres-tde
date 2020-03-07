@@ -1562,6 +1562,9 @@ BufFileOpenTransient(const char *path, int fileFlags,
 			 */
 			fcommon->pos = useful % BLCKSZ;
 			fcommon->curOffset = useful - fcommon->pos;
+
+			/* Load the existing contents of the buffer. */
+			BufFileLoadBufferTransient(file);
 		}
 	}
 
@@ -1610,7 +1613,6 @@ BufFileTransientGetVfd(TransientBufFile *file)
 static void
 BufFileLoadBufferTransient(TransientBufFile *file)
 {
-	Assert(file->common.readOnly);
 	Assert(!file->common.dirty);
 	Assert(file->common.pos == 0 && file->common.nbytes == 0);
 
