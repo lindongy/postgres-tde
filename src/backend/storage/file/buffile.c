@@ -1757,7 +1757,7 @@ retry:
 						 WAIT_EVENT_BUFFILE_WRITE);
 
 	/* if write didn't set errno, assume problem is no disk space */
-	if (nwritten != file->common.nbytes && errno == 0)
+	if (nwritten != bytestowrite && errno == 0)
 		errno = ENOSPC;
 
 	if (nwritten < 0)
