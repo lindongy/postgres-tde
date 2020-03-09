@@ -1486,6 +1486,10 @@ MarkBufferDirty(Buffer buffer)
 
 	if (BufferIsLocal(buffer))
 	{
+		/*
+		 * The caller of MarkBufferDirty () is responsible for setting the
+		 * LSN.
+		 */
 		MarkLocalBufferDirty(buffer, false);
 		return;
 	}
