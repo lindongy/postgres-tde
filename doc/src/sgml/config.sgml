@@ -6722,6 +6722,110 @@ COPY postgres_log FROM '/full/path/to/logfile.csv' WITH csv;
       </para>
     </sect2>
 
+   <sect2 id="runtime-config-logging-extension">
+    <title>Separate Log File for Extension</title>
+    <para>
+      An extension can write its messages into a separate file. In order to do
+      so, it needs to call the <function>get_log_stream</function> function
+      from the <function>_PG_init</function> function of the extension
+      library. The function signature is as follows:
+<programlisting>
+extern int get_log_stream(char *id, LogStream **stream_p);
+</programlisting>
+    </para>
+
+    <para>
+      Here <varname>id</varname> points to a string that uniquely identifies
+      the extension and <varname>stream_p</varname> is an output argument that
+      receives a pointer to the <structname>LogStream</structname> structure
+      (see below). The extension can use this structure to control various
+      properties of the stream, including log file path. The function returns
+      a stream identifier that the extension should use in its calls of
+      the <function>ereport</function> function.
+    </para>
+
+    <para>
+      The structure definition looks like:
+
+<programlisting>
+        typedef struct LogStream
+        {
+                /*
+                 * The following variables can take their value from the related GUCs.
+                 */
+                int                     verbosity;
+                int                     destination;
+                char       *directory;
+                char       *filename;
+                int                     file_mode;
+                int                     rotation_age;
+                int                     rotation_size;
+                bool            truncate_on_rotation;
+                char       *line_prefix;
+
+                /* More fields for internal use only ... */
+        } LogStream;
+</programlisting>
+
+The extension can assign specific values to these fields. For example,
+if <varname>log_stream</varname> variable is defined like this
+
+<programlisting>
+        static LogStream *log_stream;
+</programlisting>
+
+and if the stream was initialized this way
+
+<programlisting>
+        log_stream_id = get_log_stream("pgaudit", &amp;log_stream);
+</programlisting>
+
+then the extension can adjust log filename by calling the
+appropriate <function>DefineCustom...Variable</function> function from
+the <function>_PG_init</function> function of the extension library:
+
+<programlisting>
+        DefineCustomStringVariable(
+                "pgaudit.log_filename",
+
+                "Sets the file name pattern for log files.",
+                NULL,
+
+                &amp;log_stream->filename,
+                "pgaudit-%Y-%m-%d_%H%M%S.log",
+                PGC_SIGHUP,
+                GUC_NOT_IN_SAMPLE,
+                NULL, NULL, NULL);
+</programlisting>
+
+In this case, to make sure that particular error message gets written to the
+file specified by the <varname>pgaudit.log_filename</varname> variable, the
+extension needs to specify its stream using the <function>errstream</function>
+expression:
+
+<programlisting>
+        ereport(auditLogClient ? auditLogLevel : LOG_SERVER_ONLY,
+                (errmsg("%s," INT64_FORMAT "," INT64_FORMAT ",%s,%s",
+                        stackItem->auditEvent.granted ?
+                        AUDIT_TYPE_OBJECT : AUDIT_TYPE_SESSION,
+                        stackItem->auditEvent.statementId,
+                        stackItem->auditEvent.substatementId,
+                        className,
+                        auditStr.data),
+                        errhidestmt(true),
+                        errhidecontext(true),
+                        errstream(log_stream_id)));
+</programlisting>
+
+    </para>
+
+    <para>
+      Pleas see the Cybertec fork of
+      the <ulink url="https://github.com/cybertec-postgresql/pgaudit/tree/REL_12_EXTENSION_LOG">pgaudit</ulink>
+      extension for details how to use the log streams.
+    </para>
+   </sect2>
+
    <sect2>
     <title>Process Title</title>
 
