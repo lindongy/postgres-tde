@@ -39,7 +39,6 @@ SUBDIRS = \
 		pgrowlocks	\
 		pgstattuple	\
 		pg_visibility	\
-		plpgsql_sec	\
 		postgres_fdw	\
 		seg		\
 		spi		\
