@@ -13,8 +13,7 @@ OBJS = pl_comp.o pl_handler.o
 
 EXTENSION = plpgsql_sec
 DATA = plpgsql_sec.control plpgsql_sec--1.0.sql plpgsql_sec--unpackaged--1.0.sql
-DOCS = README.plpgsql_sec
-EXTRA_CLEAN = *~ nls.mk plerrcodes.h generate-plerrcodes.pl
+EXTRA_CLEAN = *~ plerrcodes.h generate-plerrcodes.pl
 
 ifdef USE_PGXS
 PG_CONFIG = pg_config
@@ -39,12 +38,9 @@ endif
 
 rpath :=
 
-$(srcdir)/nls.mk:
-	cp $(top_builddir)/src/pl/plpgsql/src/nls.mk $(srcdir)
-
 # Force these dependencies to be known even without dependency info built:
 pl_handler.o pl_comp.o pl_exec.o pl_funcs.o pl_scanner.o: plpgsql_sec.h \
-plerrcodes.h $(srcdir)/nls.mk
+plerrcodes.h
 
 $(srcdir)/generate-plerrcodes.pl:
 	cp $(top_builddir)/src/pl/plpgsql/src/generate-plerrcodes.pl $(srcdir)
