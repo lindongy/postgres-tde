@@ -347,9 +347,21 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
 						  &out_size, (unsigned char *) input, size) != 1)
 		evp_error();
 
-	/* TODO ereport() instead of Assert()? */
-	Assert(out_size == size);
+	/*
+	 * The EVP documentation seems to allow that not all data is encrypted
+	 * at the same time, but the low level code does encrypt everything.
+	 */
+	if (out_size != size)
+	{
+#ifndef FRONTEND
+		ereport(ERROR, (errmsg("Some data left unencrypted")));
 #else
+		/* Front-end shouldn't actually get here, but be careful. */
+		fprintf(stderr, "Some data left unencrypted\n");
+		exit(EXIT_FAILURE);
+#endif	/* FRONTEND */
+	}
+#else  /* !USE_ENCRYPTION */
 	/* data_encrypted should not be set */
 	Assert(false);
 #endif							/* USE_ENCRYPTION */
@@ -437,9 +449,17 @@ decrypt_block(const char *input, char *output, Size size, char *tweak,
 						  &out_size, (unsigned char *) input, size) != 1)
 		evp_error();
 
-	/* TODO ereport() instead of Assert()? */
-	Assert(out_size == size);
+	if (out_size != size)
+	{
+#ifndef FRONTEND
+		ereport(ERROR, (errmsg("Some data left undecrypted")));
 #else
+		/* Front-end shouldn't actually get here, but be careful. */
+		fprintf(stderr, "Some data left undecrypted\n");
+		exit(EXIT_FAILURE);
+#endif	/* FRONTEND */
+	}
+#else  /* !USE_ENCRYPTION */
 	/* data_encrypted should not be set */
 	Assert(false);
 #endif							/* USE_ENCRYPTION */
