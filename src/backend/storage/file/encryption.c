@@ -127,7 +127,7 @@ read_encryption_key(read_encryption_key_cb read_char)
 		ereport(FATAL, (errmsg("Encryption key is too short")));
 
 	/* Turn the hexadecimal representation into an array of bytes. */
-	encryption_key_from_string(buf);
+	encryption_key_from_string(buf, encryption_key, ENCRYPTION_KEY_LENGTH);
 
 #else  /* !USE_ENCRYPTION */
 	/*

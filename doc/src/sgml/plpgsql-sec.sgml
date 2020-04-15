@@ -1,0 +1,82 @@
+<!-- doc/src/sgml/plpgsql-sec.sgml -->
+
+<sect1 id="plpgsql-sec" xreflabel="plpgsql_sec">
+ <title>plpgsql_sec</title>
+
+ <indexterm zone="plpgsql-sec">
+  <primary>plpgsql_sec</primary>
+ </indexterm>
+
+ <para>
+  The <filename>plpgsql_sec</filename> module implements encryption and
+  decryption of functions written in
+  the <link linkend="plpgsql">PL/pgSQL</link> procedural language. If the
+  function text is encrypted, the <productname>PostgreSQL</productname> server
+  decrypts it in memory right before execution, but leaves it encrypted in the
+  system catalog. The body also stays encrypted if the function is exported
+  using
+  the <link linkend="app-pgdump"><application>pg_dump</application></link>
+  or <link linkend="app-pg-dumpall"><application>pg_dumpall</application></link>
+  application.
+ </para>
+
+  <para>
+   To use this module, you must include <literal>plpgsql</literal>
+   in the <xref linkend="guc-shared-preload-libraries"/> parameter in
+   <filename>postgresql.conf</filename>.  The module will not function
+   correctly if loaded in any other manner.
+  </para>
+
+  <para>
+   Also make sure that the user <literal>plpgsql_sec</literal> exists and that
+   it has the password set. For example:
+
+<programlisting>
+CREATE ROLE plpgsql_sec PASSWORD 'securepassword';
+</programlisting>
+  </para>
+
+  <para>
+   This role's password will be used to derive the encryption key that will
+   eventually be used to encrypt the functions. By default, the key is derived
+   by computing <literal>md5</literal> sum of the password, but if you prefer
+   the <literal>sha-256</literal> digest, please adjust the
+   <varname>password_encryption</varname> configuration variable before you
+   run the <command>CREATE ROLE</command> command:
+
+<programlisting>
+SET password_encryption TO 'scram-sha-256';
+</programlisting>
+  </para>
+
+  <para>
+   Then run the following command as the superuser:
+
+<programlisting>
+CREATE EXTENSION plpgsql_sec;
+</programlisting>
+  </para>
+
+  <para>
+    Now you can ensure that the function body will be encrypted by
+    specifying <literal>plpgsql_sec</literal> as the language, for example:
+
+<programlisting>
+CREATE OR REPLACE FUNCTION increment(i integer) RETURNS integer AS $$
+        BEGIN
+                RETURN i + 1;
+        END;
+$$ LANGUAGE plpgsql_sec;
+</programlisting>
+  </para>
+
+  <caution>
+   <para>
+    If you change the encryption password, you need to create all the
+    encrypted functions from plain text again. Otherwise the PostgreSQL server
+    will no longer be able to decrypt and run the existing functions. Also,
+    you need to restart the server to make sure that all backends
+    (connections) use the new password.
+   </para>
+  </caution>
+</sect1>

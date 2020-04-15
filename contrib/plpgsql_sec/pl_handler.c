@@ -21,7 +21,12 @@
 #include "catalog/indexing.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
+#include "common/encryption.h"
+#include "common/md5.h"
+#include "common/scram-common.h"
 #include "funcapi.h"
+#include "libpq/crypt.h"
+#include "libpq/scram.h"
 #include "miscadmin.h"
 #include "utils/builtins.h"
 #include "utils/rel.h"
@@ -30,7 +35,17 @@
 #include "utils/syscache.h"
 #include "utils/varlena.h"
 
-static bool plpgsql_extra_checks_check_hook(char **newvalue, void **extra, GucSource source);
+#ifdef USE_ENCRYPTION
+#include <openssl/conf.h>
+#include <openssl/evp.h>
+#include <openssl/err.h>
+#include <openssl/opensslv.h>
+#endif
+
+#ifdef USE_ENCRYPTION
+static void set_encryption_tweak(char *tweak, Oid proc_oid);
+static void evp_error(void);
+#endif	/* USE_ENCRYPTION */
 static void plpgsql_extra_warnings_assign_hook(const char *newvalue, void *extra);
 static void plpgsql_extra_errors_assign_hook(const char *newvalue, void *extra);
 
@@ -57,59 +72,150 @@ char	   *plpgsql_extra_errors_string = NULL;
 int			plpgsql_extra_warnings;
 int			plpgsql_extra_errors;
 
-/* Hook for plugins */
-PLpgSQL_plugin **plugin_ptr = NULL;
+#ifdef USE_ENCRYPTION
+/*
+ * Role whose password will be use to derive the encryption key.
+ *
+ * TODO Consider this role configurable. If so, stress in the documentation
+ * that new role assigned to such a GUC must have the same password like the
+ * original one, otherwise the existing functions cannot be decrypted.
+ */
+#define	ENCRYPTION_ROLE	"plpgsql_sec"
 
-static PGFunction my_encrypt = NULL;
-static PGFunction my_decrypt = NULL;
+/* Length of the encryption key in bytes. */
+#define	ENCR_KEY_LEN	32
 
-#include "passwd.h"
+static EVP_CIPHER_CTX *encr_ctx = NULL;
 
-static void load_pgcrypto(void)
+static	bool	local_encryption_setup_done = false;
+
+static void
+initialize_encryption(void)
 {
-	void *pgcrypto_dynlib = NULL;
+	char	*password;
+	char	*msg = NULL;
+	PasswordType	ptype;
+	const EVP_CIPHER *cipher = NULL;
+	unsigned char	key[SCRAM_KEY_LEN];
 
-	if (my_encrypt && my_decrypt)
-		return;
+	/*
+	 * SCRAM_KEY_LEN should provide us with enough space, regardless the
+	 * authentication type.
+	 *
+	 * Note that MD5_PASSWD_LEN is expressed in hexadecimal characters, and
+	 * that two hexadecimal characters of the hash represent a single byte of
+	 * the key.
+	 */
+	StaticAssertStmt(SCRAM_KEY_LEN * 2 >= (MD5_PASSWD_LEN - 3),
+						 "Incorrect key length");
 
-	my_encrypt = load_external_function("$libdir/pgcrypto", "pgp_sym_encrypt_text", true, &pgcrypto_dynlib);
-	if (!my_encrypt) {
-		ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR), errmsg("cannot load pgcrypto module")));
-		return;
+	/*
+	 * The plpgsql_sec specific setup is what we'll do here.
+	 */
+	Assert(!local_encryption_setup_done);
+
+	password = get_role_password(ENCRYPTION_ROLE, &msg);
+	if (password == NULL || strlen(password) == 0)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PASSWORD),
+				 errmsg("%s", msg)));
+
+	/*
+	 * TODO
+	 *
+	 * Do some more checks, e.g. one that the role has no permissions,
+	 * especially LOGIN?
+	 */
+
+	ptype = get_password_type(password);
+	if (ptype == PASSWORD_TYPE_MD5)
+	{
+		/* Store the key into the encryption_key variable */
+		encryption_key_from_string(password + 3, key,
+								   ENCRYPTION_KEY_LENGTH);
+
+		cipher = EVP_aes_128_ctr();
 	}
-	my_decrypt = lookup_external_function(pgcrypto_dynlib, "pgp_sym_decrypt_text");
-	if (!my_decrypt)
-		ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR), errmsg("cannot load pgcrypto module")));
+	else if (ptype == PASSWORD_TYPE_SCRAM_SHA_256)
+	{
+		int	iterations;
+		char	*salt = NULL;
+		uint8		stored_key[SCRAM_KEY_LEN];
+
+		/* Retrieve the server key. */
+		if (!parse_scram_verifier(password, &iterations, &salt, stored_key,
+								  key))
+			ereport(ERROR,
+					(errmsg("invalid SCRAM verifier for user \"%s\"",
+						ENCRYPTION_ROLE)));
+		if (salt)
+			pfree(salt);
+
+		/*
+		 * 128-bit key should be enough, but now that we have a 256-bit key,
+		 * let's use the corresponding cipher.
+		 */
+		cipher = EVP_aes_256_ctr();
+	}
+	else
+	{
+		Assert(ptype == PASSWORD_TYPE_PLAINTEXT);
+
+		/* XXX Actually we can run hash it ourselves. */
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PASSWORD),
+				 errmsg("password in 'plaintext' cannot be used for encryption")));
+	}
+	pfree(password);
+
+	if ((encr_ctx = EVP_CIPHER_CTX_new()) == NULL)
+		evp_error();
+
+	if (EVP_EncryptInit_ex(encr_ctx, cipher, NULL, key, NULL) != 1)
+		evp_error();
+	if (EVP_DecryptInit_ex(encr_ctx, cipher, NULL, key, NULL) != 1)
+		evp_error();
+
+	/* Padding is not needed because block size is 1 for the CTR mode. */
+	EVP_CIPHER_CTX_set_padding(encr_ctx, 0);
+
+	Assert(EVP_CIPHER_CTX_iv_length(encr_ctx) == TWEAK_SIZE);
+
+	local_encryption_setup_done = true;
 }
+#endif	/* USE_ENCRYPTION */
 
 /*
  * plpgsql_encrypt()
- * It's called at function validation. At this point the function is
- * already stored in pg_proc. We return it from there, encrypt it and
- * update it in pg_proc. When a dumped function is restored, we are called
- * with an already encrypted function in which case we just quit.
+ *
+ * It's called at function validation. At this point the function is already
+ * stored in pg_proc. We return it from there, encrypt it and update it in
+ * pg_proc. When a dumped function is restored, we are called with an already
+ * encrypted function in which case we just quit.
  */
-static void plpgsql_encrypt(Oid function_oid) {
+static void
+plpgsql_encrypt(Oid function_oid) {
+#ifdef USE_ENCRYPTION
 	Relation	procRelation;
 	TupleDesc	tupDesc;
 	HeapTuple	proctuple;
 	HeapTuple	newproctuple;
 	Datum		prosrcdatum;
 	char		*sourcecode;
-	Datum		encr_src;
-	bytea		*encr_bytea;
+	text		*src_encrypted;
 	Datum		encr_hex;
-	text		*hex_text;
 	text		*prosrc;
-	char		*prosrc_data;
-	int32		prosrc_pos;
 	bool		isnull;
 	Datum		values[Natts_pg_proc];
 	bool		nulls[Natts_pg_proc];
 	bool		replace[Natts_pg_proc];
+	char		tweak[TWEAK_SIZE];
+	size_t		encr_size_total;
+	int		in_size, out_size;
+	char	*c;
 
-	load_pgcrypto();
-//elog(NOTICE, "%s: mypassword: '%s'", __FUNCTION__, mypassword);
+	if (!local_encryption_setup_done)
+		initialize_encryption();
 
 	procRelation = heap_open(ProcedureRelationId, RowExclusiveLock);
 
@@ -128,8 +234,8 @@ static void plpgsql_encrypt(Oid function_oid) {
 										prosrcdatum)));
 
 	/*
-	 * Check whether it's already encrypted.
-	 * When a dumped function is reloaded, it's in encrypted form.
+	 * Check whether it's already encrypted. When a dumped function is
+	 * reloaded, it's in encrypted form.
 	 */
 	if (sourcecode[0] == ' ' && !strncmp(&sourcecode[1], ENCRHEADER, strlen(ENCRHEADER)))
 	{
@@ -139,36 +245,70 @@ static void plpgsql_encrypt(Oid function_oid) {
 		return;
 	}
 
-	/* Now encrypt the source */
+	/*
+	 * Now encrypt the source.
+	 */
+	set_encryption_tweak(tweak, function_oid);
 
-	encr_src = DirectFunctionCall2(my_encrypt,
-						prosrcdatum,
-						DirectFunctionCall1(textin, CStringGetDatum(mypassword)));
-	encr_bytea = (bytea *)DatumGetPointer(encr_src);
-	encr_bytea = pg_detoast_datum(encr_bytea);
+	/*
+	 * The encryption key has been set in initialize_encryption().
+	 */
+	if (EVP_EncryptInit_ex(encr_ctx, NULL, NULL, NULL,
+						   (unsigned char *) tweak) != 1)
+		evp_error();
 
-	/* Now encode the bytea result with HEX */
+	in_size = strlen(sourcecode);
+
+	/*
+	 * The encryption tweak will be stored along with the actual encrypted
+	 * text.
+	 */
+	encr_size_total = VARHDRSZ + TWEAK_SIZE + in_size;
+	c = (char *) palloc(encr_size_total);
+	src_encrypted = (text *) c;
+	/* Skip the header so far. */
+	c += VARHDRSZ;
+	memcpy(c, tweak, TWEAK_SIZE);
+	c += TWEAK_SIZE;
+
+	if (EVP_EncryptUpdate(encr_ctx,
+						  (unsigned char *) c,
+						  &out_size,
+						  (unsigned char *) sourcecode,
+						  in_size) != 1)
+		evp_error();
+
+	SET_VARSIZE(src_encrypted, encr_size_total);
+
+	/*
+	 * The EVP documentation seems to allow that not all data is encrypted
+	 * at the same time, but the low level code does encrypt everything.
+	 *
+	 * Also note that block size is 1 for the CTR mode so there's no need to
+	 * call EVP_EncryptFinal_ex().
+	 */
+	if (out_size != in_size)
+		ereport(ERROR, (errmsg("Some data left unencrypted")));
+
+	/* Now encode the result with HEX */
 	encr_hex = DirectFunctionCall2(binary_encode,
-						PointerGetDatum(encr_bytea),
-						DirectFunctionCall1(textin, CStringGetDatum("hex")));
-	hex_text = (text *)DatumGetPointer(encr_hex);
-	hex_text = pg_detoast_datum(hex_text);
+								   PointerGetDatum(src_encrypted),
+								   DirectFunctionCall1(textin, CStringGetDatum("hex")));
 
-	prosrc = palloc(1 + strlen(ENCRHEADER) + VARSIZE_4B(hex_text) + 1);
-	prosrc_data = VARDATA_4B(prosrc);
+	prosrc = palloc(1 + strlen(ENCRHEADER) + VARSIZE(encr_hex) + 1);
+	c = VARDATA(prosrc);
 
-	prosrc_pos = 0;
-	prosrc_data[prosrc_pos++] = ' ';
+	*(c++) = ' ';
 
-	memcpy(&prosrc_data[prosrc_pos], ENCRHEADER, strlen(ENCRHEADER));
-	prosrc_pos += strlen(ENCRHEADER);
+	memcpy(c, ENCRHEADER, strlen(ENCRHEADER));
+	c += strlen(ENCRHEADER);
 
-	memcpy(&prosrc_data[prosrc_pos], VARDATA_4B(hex_text), VARSIZE_4B(hex_text) - VARHDRSZ);
-	prosrc_pos += VARSIZE_4B(hex_text) - VARHDRSZ;
+	memcpy(c, VARDATA(encr_hex), VARSIZE(encr_hex) - VARHDRSZ);
+	c += VARSIZE(encr_hex) - VARHDRSZ;
 
-	prosrc_data[prosrc_pos++] = ' ';
+	*(c++) = ' ';
 
-	SET_VARSIZE(prosrc, prosrc_pos + VARHDRSZ);
+	SET_VARSIZE(prosrc, c - (char *) prosrc);
 
 	memset(values, 0, sizeof(values));
 	memset(nulls, 0, sizeof(nulls));
@@ -183,64 +323,84 @@ static void plpgsql_encrypt(Oid function_oid) {
 	heap_freetuple(newproctuple);
 
 	pfree(sourcecode);
+	pfree(src_encrypted);
+	pfree(prosrc);
 
 	heap_close(procRelation, RowExclusiveLock);
 
 	CommandCounterIncrement();
+#else
+	ereport(ERROR, (errmsg(ENCRYPTION_NOT_SUPPORTED_MSG)));
+#endif	/* USE_ENCRYPTION */
 }
 
 /*
  * plpgsql_decrypt()
- * It's called when the function is compiled.
- * Decryption is done only when we find the correct frame.
+ *
+ * It's called when the function is compiled.  Decryption is done only when we
+ * find the correct frame.
  */
-char *plpgsql_decrypt(char *encrypted_src) {
+char *
+plpgsql_decrypt(char *encrypted_src) {
+#ifdef USE_ENCRYPTION
 	int32	src_len;
 	int32	hex_len;
 	text	*hex_text;
-	Datum	encr_hex;
-	bytea	*encr_bytea;
-	Datum	prosrcdatum;
-	text	*prosrc_text;
-	char	*prosrc;
+	Datum	encr;
+	char	*result;
+	char		tweak[TWEAK_SIZE];
+	char	*c;
+	int	in_size, out_size;
 
 	if (encrypted_src == NULL)
 		return NULL;
+
+	if (!local_encryption_setup_done)
+		initialize_encryption();
+
 	src_len = strlen(encrypted_src);
-//elog(NOTICE, "%s: src_len: %d", __FUNCTION__, src_len);
-	if (!	(encrypted_src[0] == ' ' &&
-		 encrypted_src[src_len - 1] == ' ' &&
-		 !strncmp(&encrypted_src[1], ENCRHEADER, strlen(ENCRHEADER)))	)
+	if (!(encrypted_src[0] == ' ' &&
+		  encrypted_src[src_len - 1] == ' ' &&
+		  !strncmp(&encrypted_src[1], ENCRHEADER, strlen(ENCRHEADER)))	)
 		return encrypted_src;
 
-	load_pgcrypto();
-
 	hex_len = src_len - strlen(ENCRHEADER) - 2;
-//elog(NOTICE, "%s: hex_len: %d", __FUNCTION__, hex_len);
 	hex_text = palloc(VARHDRSZ + hex_len);
 	memcpy(VARDATA_4B(hex_text), &encrypted_src[1 + strlen(ENCRHEADER)], hex_len);
 	SET_VARSIZE_4B(hex_text, hex_len + VARHDRSZ);
 
-	encr_hex = DirectFunctionCall2(binary_decode,
-							PointerGetDatum(hex_text),
-							DirectFunctionCall1(textin, CStringGetDatum("hex")));
-	encr_bytea = (bytea *)DatumGetPointer(encr_hex);
-	encr_bytea = pg_detoast_datum(encr_bytea);
+	encr = DirectFunctionCall2(binary_decode,
+							   PointerGetDatum(hex_text),
+							   DirectFunctionCall1(textin, CStringGetDatum("hex")));
 
-//elog(NOTICE, "%s: encr_hex len: %d", __FUNCTION__, VARSIZE_4B(encr_bytea) - VARHDRSZ);
+	c = VARDATA(encr);
+	memcpy(tweak, c, TWEAK_SIZE);
+	c += TWEAK_SIZE;
 
-	prosrcdatum = DirectFunctionCall2(my_decrypt,
-						PointerGetDatum(encr_bytea),
-						DirectFunctionCall1(textin, CStringGetDatum(mypassword)));
-	prosrc_text = (bytea *)DatumGetPointer(prosrcdatum);
-	prosrc_text = pg_detoast_datum(prosrc_text);
-//elog(NOTICE, "%s: prosrc_text len: %d", __FUNCTION__, VARSIZE_4B(prosrc_text) - VARHDRSZ);
+	in_size = VARSIZE(encr) - VARHDRSZ - TWEAK_SIZE;
+	result = (char *) palloc(in_size + 1);
 
-	prosrc = palloc(VARSIZE_4B(prosrc_text) - VARHDRSZ + 1);
-	memcpy(prosrc, VARDATA_4B(prosrc_text), VARSIZE_4B(prosrc_text) - VARHDRSZ);
-	prosrc[VARSIZE_4B(prosrc_text) - VARHDRSZ] = '\0';
-//elog(NOTICE, "%s: function: '%s'", __FUNCTION__, prosrc);
-	return prosrc;
+	/*
+	 * The encryption key has been set in initialize_encryption().
+	 */
+	if (EVP_DecryptInit_ex(encr_ctx, NULL, NULL, NULL,
+						   (unsigned char *) tweak) != 1)
+		evp_error();
+
+	/* Do the actual encryption. */
+	if (EVP_DecryptUpdate(encr_ctx, (unsigned char *) result, &out_size,
+						  (unsigned char *) c, in_size) != 1)
+		evp_error();
+
+	if (out_size != in_size)
+		ereport(ERROR, (errmsg("Some data left undecrypted")));
+
+	result[out_size] = '\0';
+	return result;
+#else
+	ereport(ERROR, (errmsg(ENCRYPTION_NOT_SUPPORTED_MSG)));
+	return NULL;
+#endif	/* USE_ENCRYPTION */
 }
 
 static bool
@@ -309,6 +469,37 @@ plpgsql_extra_checks_check_hook(char **newvalue, void **extra, GucSource source)
 
 	return true;
 }
+
+#ifdef USE_ENCRYPTION
+/*
+ * Construct the encryption tweak out of the next LSN and the procedure
+ * OID. This should be unique enough.
+ */
+static void
+set_encryption_tweak(char *tweak, Oid proc_oid)
+{
+	XLogRecPtr	lsn;
+	char	*c = tweak;
+
+	StaticAssertStmt(sizeof(XLogRecPtr) + sizeof(Oid) <= TWEAK_SIZE,
+					 "The encryption tweak is too long");
+
+	memset(c, 0, TWEAK_SIZE);
+	lsn = GetXLogInsertRecPtr();
+	memcpy(c, &lsn, sizeof(XLogRecPtr));
+	c += sizeof(XLogRecPtr);
+	memcpy(c, &proc_oid, sizeof(Oid));
+}
+
+static void
+evp_error(void)
+{
+	ERR_print_errors_fp(stderr);
+
+	ereport(ERROR,
+			(errmsg("OpenSSL encountered error during encryption or decryption.")));
+}
+#endif	/* USE_ENCRYPTION */
 
 static void
 plpgsql_extra_warnings_assign_hook(const char *newvalue, void *extra)
@@ -389,9 +580,6 @@ _PG_init(void)
 	plpgsql_sec_HashTableInit();
 	RegisterXactCallback(plpgsql_xact_cb, NULL);
 	RegisterSubXactCallback(plpgsql_subxact_cb, NULL);
-
-	/* Set up a rendezvous point with optional instrumentation plugin */
-	plugin_ptr = (PLpgSQL_plugin **) find_rendezvous_variable("PLpgSQLSec_plugin");
 
 	inited = true;
 }

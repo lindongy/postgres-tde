@@ -14,8 +14,6 @@ OBJS = pl_comp.o pl_handler.o
 EXTENSION = plpgsql_sec
 DATA = plpgsql_sec.control plpgsql_sec--1.0.sql plpgsql_sec--unpackaged--1.0.sql
 DOCS = README.plpgsql_sec
-# passwd.h not included deliberately (if deleted unintentionaly, data becomes
-# inaccessible)
 EXTRA_CLEAN = *~ nls.mk plerrcodes.h generate-plerrcodes.pl
 
 ifdef USE_PGXS
@@ -45,13 +43,8 @@ $(srcdir)/nls.mk:
 	cp $(top_builddir)/src/pl/plpgsql/src/nls.mk $(srcdir)
 
 # Force these dependencies to be known even without dependency info built:
-pl_handler.o pl_comp.o pl_exec.o pl_funcs.o pl_scanner.o: passwd.h \
- plpgsql_sec.h plerrcodes.h $(srcdir)/nls.mk
-
-$(srcdir)/passwd.h:
-	$(CC) -Wall -o pwdgen$(X) pwdgen.c -lcrypt
-	./pwdgen$(X)
-	$(RM) pwdgen$(X)
+pl_handler.o pl_comp.o pl_exec.o pl_funcs.o pl_scanner.o: plpgsql_sec.h \
+plerrcodes.h $(srcdir)/nls.mk
 
 $(srcdir)/generate-plerrcodes.pl:
 	cp $(top_builddir)/src/pl/plpgsql/src/generate-plerrcodes.pl $(srcdir)

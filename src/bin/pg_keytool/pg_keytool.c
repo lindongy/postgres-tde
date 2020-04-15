@@ -222,7 +222,8 @@ main(int argc, char **argv)
 			exit(EXIT_FAILURE);
 		}
 
-		encryption_key_from_string(key_chars);
+		encryption_key_from_string(key_chars, encryption_key,
+								   ENCRYPTION_KEY_LENGTH);
 	}
 	else
 	{

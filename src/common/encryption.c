@@ -179,26 +179,28 @@ read_encryption_key_f(FILE *f, char *command)
 	}
 
 	/* Turn the hexadecimal representation into an array of bytes. */
-	encryption_key_from_string(buf);
+	encryption_key_from_string(buf, encryption_key, ENCRYPTION_KEY_LENGTH);
 }
 
 /*
- * Use the input hexadecimal string to initialize the encryption_key variable.
+ * Use the input hexadecimal string to initialize the key bin argument.
  */
 void
-encryption_key_from_string(char key_str[ENCRYPTION_KEY_CHARS])
+encryption_key_from_string(char key_str[], unsigned char key_bin[],
+						   int key_length)
 {
-	int	encr_key_int[ENCRYPTION_KEY_LENGTH];
 	int	i;
 
-	for (i = 0; i < ENCRYPTION_KEY_LENGTH; i++)
+	for (i = 0; i < key_length; i++)
 	{
+		int	key_byte;
+
 		/*
 		 * The code would be simpler with %2hhx conversion, but it does not
 		 * seem to be well portable. At least mingw build on Windows
 		 * complains about it.
 		 */
-		if (sscanf(key_str + 2 * i, "%2x", encr_key_int + i) == 0)
+		if (sscanf(key_str + 2 * i, "%2x", &key_byte) == 0)
 		{
 #ifdef FRONTEND
 			pg_log_fatal("invalid character in encryption key at position %d",
@@ -210,7 +212,7 @@ encryption_key_from_string(char key_str[ENCRYPTION_KEY_CHARS])
 							2 * i)));
 #endif	/* FRONTEND */
 		}
+
+		key_bin[i] = (char) key_byte;
 	}
-	for (i = 0; i < ENCRYPTION_KEY_LENGTH; i++)
-		encryption_key[i] = (char) encr_key_int[i];
 }
