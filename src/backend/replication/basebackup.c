@@ -130,6 +130,18 @@ static int64 total_checksum_failures;
 /* Do not verify checksums. */
 static bool noverify_checksums = false;
 
+/*
+ * Definition of one element part of an exclusion list, used for paths part
+ * of checksum validation or base backups.  "name" is the name of the file
+ * or path to check for exclusion.  If "match_prefix" is true, any items
+ * matching the name as prefix are excluded.
+ */
+struct exclude_list_item
+{
+	const char *name;
+	bool		match_prefix;
+};
+
 /* Decrypt relation files and WAL. */
 static bool decrypt = false;
 
@@ -182,16 +194,19 @@ static const char *excludeDirContents[] =
 /*
  * List of files excluded from backups.
  */
-static const char *excludeFiles[] =
+static const struct exclude_list_item excludeFiles[] =
 {
 	/* Skip auto conf temporary file. */
-	PG_AUTOCONF_FILENAME ".tmp",
+	{PG_AUTOCONF_FILENAME ".tmp", false},
 
 	/* Skip current log file temporary file */
-	LOG_METAINFO_DATAFILE_TMP,
+	{LOG_METAINFO_DATAFILE_TMP, false},
 
-	/* Skip relation cache because it is rebuilt on startup */
-	RELCACHE_INIT_FILENAME,
+	/*
+	 * Skip relation cache because it is rebuilt on startup.  This includes
+	 * temporary files.
+	 */
+	{RELCACHE_INIT_FILENAME, true},
 
 	/*
 	 * If there's a backup_label or tablespace_map file, it belongs to a
@@ -199,14 +214,14 @@ static const char *excludeFiles[] =
 	 * for this backup.  Our backup_label/tablespace_map is injected into the
 	 * tar separately.
 	 */
-	BACKUP_LABEL_FILE,
-	TABLESPACE_MAP,
+	{BACKUP_LABEL_FILE, false},
+	{TABLESPACE_MAP, false},
 
-	"postmaster.pid",
-	"postmaster.opts",
+	{"postmaster.pid", false},
+	{"postmaster.opts", false},
 
 	/* end of list */
-	NULL
+	{NULL, false}
 };
 
 /*
@@ -215,17 +230,16 @@ static const char *excludeFiles[] =
  * Note: this list should be kept in sync with what pg_checksums.c
  * includes.
  */
-static const char *const noChecksumFiles[] = {
-	"pg_control",
-	"pg_filenode.map",
-	"pg_internal.init",
-	"PG_VERSION",
-	"kdf_params",
+static const struct exclude_list_item noChecksumFiles[] = {
+	{"pg_control", false},
+	{"pg_filenode.map", false},
+	{"pg_internal.init", true},
+	{"PG_VERSION", false},
+	{"kdf_params", false},
 #ifdef EXEC_BACKEND
-	"config_exec_params",
-	"config_exec_params.new",
+	{"config_exec_params", true},
 #endif
-	NULL,
+	{NULL, false}
 };
 
 
@@ -1202,9 +1216,13 @@ sendDir(const char *path, int basepathlen, bool sizeonly, List *tablespaces,
 
 		/* Scan for files that should be excluded */
 		excludeFound = false;
-		for (excludeIdx = 0; excludeFiles[excludeIdx] != NULL; excludeIdx++)
+		for (excludeIdx = 0; excludeFiles[excludeIdx].name != NULL; excludeIdx++)
 		{
-			if (strcmp(de->d_name, excludeFiles[excludeIdx]) == 0)
+			int			cmplen = strlen(excludeFiles[excludeIdx].name);
+
+			if (!excludeFiles[excludeIdx].match_prefix)
+				cmplen++;
+			if (strncmp(de->d_name, excludeFiles[excludeIdx].name, cmplen) == 0)
 			{
 				elog(DEBUG1, "file \"%s\" excluded from backup", de->d_name);
 				excludeFound = true;
@@ -1456,17 +1474,24 @@ sendDir(const char *path, int basepathlen, bool sizeonly, List *tablespaces,
 static bool
 is_checksummed_file(const char *fullpath, const char *filename)
 {
-	const char *const *f;
-
 	/* Check that the file is in a tablespace */
 	if (strncmp(fullpath, "./global/", 9) == 0 ||
 		strncmp(fullpath, "./base/", 7) == 0 ||
 		strncmp(fullpath, "/", 1) == 0)
 	{
-		/* Compare file against noChecksumFiles skiplist */
-		for (f = noChecksumFiles; *f; f++)
-			if (strcmp(*f, filename) == 0)
+		int			excludeIdx;
+
+		/* Compare file against noChecksumFiles skip list */
+		for (excludeIdx = 0; noChecksumFiles[excludeIdx].name != NULL; excludeIdx++)
+		{
+			int			cmplen = strlen(noChecksumFiles[excludeIdx].name);
+
+			if (!noChecksumFiles[excludeIdx].match_prefix)
+				cmplen++;
+			if (strncmp(filename, noChecksumFiles[excludeIdx].name,
+						cmplen) == 0)
 				return false;
+		}
 
 		return true;
 	}

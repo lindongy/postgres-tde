@@ -399,7 +399,9 @@ WITH ( MODULUS <replaceable class="parameter">numeric_literal</replaceable>, REM
       Creates the table as a <firstterm>partition</firstterm> of the specified
       parent table. The table can be created either as a partition for specific
       values using <literal>FOR VALUES</literal> or as a default partition
-      using <literal>DEFAULT</literal>.
+      using <literal>DEFAULT</literal>.  Any indexes, constraints and
+      user-defined row-level triggers that exist in the parent table are cloned
+      on the new partition.
      </para>
 
      <para>
@@ -1461,7 +1463,7 @@ WITH ( MODULUS <replaceable class="parameter">numeric_literal</replaceable>, REM
    </varlistentry>
 
    <varlistentry id="reloption-autovacuum-vauum-scale-factor" xreflabel="autovacuum_vacuum_scale_factor">
-    <term><literal>autovacuum_vacuum_scale_factor</literal>, <literal>toast.autovacuum_vacuum_scale_factor</literal> (<type>float4</type>)
+    <term><literal>autovacuum_vacuum_scale_factor</literal>, <literal>toast.autovacuum_vacuum_scale_factor</literal> (<type>floating point</type>)
     <indexterm>
      <primary><varname>autovacuum_vacuum_scale_factor</varname> </primary>
      <secondary>storage parameter</secondary>
@@ -1491,7 +1493,7 @@ WITH ( MODULUS <replaceable class="parameter">numeric_literal</replaceable>, REM
    </varlistentry>
 
    <varlistentry id="reloption-autovacuum-analyze-scale-factor" xreflabel="autovacuum_analyze_scale_factor">
-    <term><literal>autovacuum_analyze_scale_factor</literal> (<type>float4</type>)
+    <term><literal>autovacuum_analyze_scale_factor</literal> (<type>floating point</type>)
     <indexterm>
      <primary><varname>autovacuum_analyze_scale_factor</varname></primary>
      <secondary>storage parameter</secondary>
