@@ -103,6 +103,7 @@ CREATE EXTENSION <replaceable>module_name</replaceable> FROM unpackaged;
  </para>
 
  &adminpack;
+ &aqo;
  &amcheck;
  &auth-delay;
  &auto-explain;

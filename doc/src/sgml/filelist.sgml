@@ -106,6 +106,7 @@
 
 <!-- contrib information -->
 <!ENTITY contrib         SYSTEM "contrib.sgml">
+<!ENTITY aqo             SYSTEM "aqo.sgml">
 <!ENTITY adminpack       SYSTEM "adminpack.sgml">
 <!ENTITY amcheck         SYSTEM "amcheck.sgml">
 <!ENTITY auth-delay      SYSTEM "auth-delay.sgml">
