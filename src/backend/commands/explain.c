@@ -24,6 +24,7 @@
 #include "nodes/extensible.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
+#include "optimizer/cost.h"
 #include "parser/parsetree.h"
 #include "rewrite/rewriteHandler.h"
 #include "storage/bufmgr.h"
@@ -45,6 +46,9 @@ ExplainOneQuery_hook_type ExplainOneQuery_hook = NULL;
 
 /* Hook for plugins to get control in explain_get_index_name() */
 explain_get_index_name_hook_type explain_get_index_name_hook = NULL;
+
+/* Hook for plugins to get control in ExplainOnePlan() */
+ExplainOnePlan_hook_type ExplainOnePlan_hook = NULL;
 
 
 /* OR-able flags for ExplainXMLTag() */
@@ -596,6 +600,10 @@ ExplainOnePlan(PlannedStmt *plannedstmt, IntoClause *into, ExplainState *es,
 	if (es->summary && es->analyze)
 		ExplainPropertyFloat("Execution Time", "ms", 1000.0 * totaltime, 3,
 							 es);
+
+	if (ExplainOnePlan_hook)
+		ExplainOnePlan_hook(plannedstmt, into, es,
+							queryString, params, planduration, queryEnv);
 
 	ExplainCloseGroup("Query", NULL, true, es);
 }
@@ -1520,6 +1528,38 @@ ExplainNode(PlanState *planstate, List *ancestors,
 				appendStringInfo(es->str,
 								 " (actual rows=%.0f loops=%.0f)",
 								 rows, nloops);
+
+#ifdef AQO_EXPLAIN
+			if (es->verbose && plan && planstate->instrument)
+			{
+				int wrkrs = 1;
+				double error = -1.;
+
+				if (planstate->worker_instrument && IsParallelTuplesProcessing(plan))
+				{
+					int i;
+					for (i = 0; i < planstate->worker_instrument->num_workers; i++)
+					{
+						Instrumentation *instrument = &planstate->worker_instrument->instrument[i];
+						if (instrument->nloops <= 0)
+							continue;
+						wrkrs++;
+					}
+				}
+
+				if (plan->predicted_cardinality > 0.)
+				{
+					error = 100. * (plan->predicted_cardinality - (rows*wrkrs))
+												/ plan->predicted_cardinality;
+					appendStringInfo(es->str,
+					" (AQO: cardinality=%.0lf, error=%.0lf%%, fsspace_hash=%d)",
+							plan->predicted_cardinality, error, plan->fss_hash);
+				}
+				else
+					appendStringInfo(es->str, " (AQO not used, fsspace_hash=%d)",
+																plan->fss_hash);
+			}
+#endif
 		}
 		else
 		{

@@ -96,6 +96,10 @@
 #include "utils/spccache.h"
 #include "utils/tuplesort.h"
 
+set_baserel_rows_estimate_hook_type set_baserel_rows_estimate_hook = NULL;
+get_parameterized_baserel_size_hook_type get_parameterized_baserel_size_hook = NULL;
+get_parameterized_joinrel_size_hook_type get_parameterized_joinrel_size_hook = NULL;
+set_joinrel_size_estimates_hook_type set_joinrel_size_estimates_hook = NULL;
 
 #define LOG2(x)  (log(x) / 0.693147180559945)
 
@@ -176,7 +180,6 @@ static Cost append_nonpartial_cost(List *subpaths, int numpaths,
 static void set_rel_width(PlannerInfo *root, RelOptInfo *rel);
 static double relation_byte_size(double tuples, int width);
 static double page_size(double tuples, int width);
-static double get_parallel_divisor(Path *path);
 
 
 /*
@@ -254,7 +257,7 @@ cost_seqscan(Path *path, PlannerInfo *root,
 	/* Adjust costing for parallelism, if used. */
 	if (path->parallel_workers > 0)
 	{
-		double		parallel_divisor = get_parallel_divisor(path);
+		double		parallel_divisor = get_parallel_divisor(path->parallel_workers);
 
 		/* The CPU cost is divided among all the workers. */
 		cpu_run_cost /= parallel_divisor;
@@ -733,7 +736,7 @@ cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
 	/* Adjust costing for parallelism, if used. */
 	if (path->path.parallel_workers > 0)
 	{
-		double		parallel_divisor = get_parallel_divisor(&path->path);
+		double		parallel_divisor = get_parallel_divisor(path->path.parallel_workers);
 
 		path->path.rows = clamp_row_est(path->path.rows / parallel_divisor);
 
@@ -1014,7 +1017,7 @@ cost_bitmap_heap_scan(Path *path, PlannerInfo *root, RelOptInfo *baserel,
 	/* Adjust costing for parallelism, if used. */
 	if (path->parallel_workers > 0)
 	{
-		double		parallel_divisor = get_parallel_divisor(path);
+		double		parallel_divisor = get_parallel_divisor(path->parallel_workers);
 
 		/* The CPU cost is divided among all the workers. */
 		cpu_run_cost /= parallel_divisor;
@@ -1960,7 +1963,7 @@ cost_append(AppendPath *apath)
 	else						/* parallel-aware */
 	{
 		int			i = 0;
-		double		parallel_divisor = get_parallel_divisor(&apath->path);
+		double		parallel_divisor = get_parallel_divisor(apath->path.parallel_workers);
 
 		/* Parallel-aware Append never produces ordered output. */
 		Assert(apath->path.pathkeys == NIL);
@@ -1994,7 +1997,7 @@ cost_append(AppendPath *apath)
 			{
 				double		subpath_parallel_divisor;
 
-				subpath_parallel_divisor = get_parallel_divisor(subpath);
+				subpath_parallel_divisor = get_parallel_divisor(subpath->parallel_workers);
 				apath->path.rows += subpath->rows * (subpath_parallel_divisor /
 													 parallel_divisor);
 				apath->path.total_cost += subpath->total_cost;
@@ -2517,7 +2520,7 @@ final_cost_nestloop(PlannerInfo *root, NestPath *path,
 	/* For partial paths, scale row estimate. */
 	if (path->path.parallel_workers > 0)
 	{
-		double		parallel_divisor = get_parallel_divisor(&path->path);
+		double		parallel_divisor = get_parallel_divisor(path->path.parallel_workers);
 
 		path->path.rows =
 			clamp_row_est(path->path.rows / parallel_divisor);
@@ -2963,7 +2966,7 @@ final_cost_mergejoin(PlannerInfo *root, MergePath *path,
 	/* For partial paths, scale row estimate. */
 	if (path->jpath.path.parallel_workers > 0)
 	{
-		double		parallel_divisor = get_parallel_divisor(&path->jpath.path);
+		double		parallel_divisor = get_parallel_divisor(path->jpath.path.parallel_workers);
 
 		path->jpath.path.rows =
 			clamp_row_est(path->jpath.path.rows / parallel_divisor);
@@ -3297,7 +3300,7 @@ initial_cost_hashjoin(PlannerInfo *root, JoinCostWorkspace *workspace,
 	 * number, so we need to undo the division.
 	 */
 	if (parallel_hash)
-		inner_path_rows_total *= get_parallel_divisor(inner_path);
+		inner_path_rows_total *= get_parallel_divisor(inner_path->parallel_workers);
 
 	/*
 	 * Get hash table size that executor would use for inner relation.
@@ -3393,7 +3396,7 @@ final_cost_hashjoin(PlannerInfo *root, HashPath *path,
 	/* For partial paths, scale row estimate. */
 	if (path->jpath.path.parallel_workers > 0)
 	{
-		double		parallel_divisor = get_parallel_divisor(&path->jpath.path);
+		double		parallel_divisor = get_parallel_divisor(path->jpath.path.parallel_workers);
 
 		path->jpath.path.rows =
 			clamp_row_est(path->jpath.path.rows / parallel_divisor);
@@ -4388,6 +4391,49 @@ approx_tuple_count(PlannerInfo *root, JoinPath *path, List *quals)
 
 
 /*
+ * set_baserel_rows_estimate
+ *		Set the rows estimate for the given base relation.
+ *
+ * Rows is the estimated number of output tuples after applying
+ * restriction clauses.
+ *
+ * To support loadable plugins that monitor or modify cardinality estimation,
+ * we provide a hook variable that lets a plugin get control before and
+ * after the cardinality estimation.
+ * The hook must set rel->rows.
+ */
+void
+set_baserel_rows_estimate(PlannerInfo *root, RelOptInfo *rel)
+{
+	if (set_baserel_rows_estimate_hook)
+		(*set_baserel_rows_estimate_hook) (root, rel);
+	else
+		set_baserel_rows_estimate_standard(root, rel);
+}
+
+/*
+ * set_baserel_rows_estimate
+ *		Set the rows estimate for the given base relation.
+ *
+ * Rows is the estimated number of output tuples after applying
+ * restriction clauses.
+ */
+void
+set_baserel_rows_estimate_standard(PlannerInfo *root, RelOptInfo *rel)
+{
+	double		nrows;
+
+	nrows = rel->tuples *
+		clauselist_selectivity(root,
+							   rel->baserestrictinfo,
+							   0,
+							   JOIN_INNER,
+							   NULL);
+
+	rel->rows = clamp_row_est(nrows);
+}
+
+/*
  * set_baserel_size_estimates
  *		Set the size estimates for the given base relation.
  *
@@ -4403,19 +4449,10 @@ approx_tuple_count(PlannerInfo *root, JoinPath *path, List *quals)
 void
 set_baserel_size_estimates(PlannerInfo *root, RelOptInfo *rel)
 {
-	double		nrows;
-
 	/* Should only be applied to base relations */
 	Assert(rel->relid > 0);
 
-	nrows = rel->tuples *
-		clauselist_selectivity(root,
-							   rel->baserestrictinfo,
-							   0,
-							   JOIN_INNER,
-							   NULL);
-
-	rel->rows = clamp_row_est(nrows);
+	set_baserel_rows_estimate(root, rel);
 
 	cost_qual_eval(&rel->baserestrictcost, rel->baserestrictinfo, root);
 
@@ -4426,13 +4463,33 @@ set_baserel_size_estimates(PlannerInfo *root, RelOptInfo *rel)
  * get_parameterized_baserel_size
  *		Make a size estimate for a parameterized scan of a base relation.
  *
+ * To support loadable plugins that monitor or modify cardinality estimation,
+ * we provide a hook variable that lets a plugin get control before and
+ * after the cardinality estimation.
+ */
+double
+get_parameterized_baserel_size(PlannerInfo *root, RelOptInfo *rel,
+							   List *param_clauses)
+{
+	if (get_parameterized_baserel_size_hook)
+		return (*get_parameterized_baserel_size_hook) (root, rel,
+													   param_clauses);
+	else
+		return get_parameterized_baserel_size_standard(root, rel,
+													   param_clauses);
+}
+
+/*
+ * get_parameterized_baserel_size_standard
+ *		Make a size estimate for a parameterized scan of a base relation.
+ *
  * 'param_clauses' lists the additional join clauses to be used.
  *
  * set_baserel_size_estimates must have been applied already.
  */
 double
-get_parameterized_baserel_size(PlannerInfo *root, RelOptInfo *rel,
-							   List *param_clauses)
+get_parameterized_baserel_size_standard(PlannerInfo *root, RelOptInfo *rel,
+										List *param_clauses)
 {
 	List	   *allclauses;
 	double		nrows;
@@ -4462,6 +4519,36 @@ get_parameterized_baserel_size(PlannerInfo *root, RelOptInfo *rel,
  * set_joinrel_size_estimates
  *		Set the size estimates for the given join relation.
  *
+ * To support loadable plugins that monitor or modify cardinality estimation,
+ * we provide a hook variable that lets a plugin get control before and
+ * after the cardinality estimation.
+ * The hook must set rel->rows value.
+ */
+void
+set_joinrel_size_estimates(PlannerInfo *root, RelOptInfo *rel,
+						   RelOptInfo *outer_rel,
+						   RelOptInfo *inner_rel,
+						   SpecialJoinInfo *sjinfo,
+						   List *restrictlist)
+{
+	if (set_joinrel_size_estimates_hook)
+		(*set_joinrel_size_estimates_hook) (root, rel,
+											outer_rel,
+											inner_rel,
+											sjinfo,
+											restrictlist);
+	else
+		set_joinrel_size_estimates_standard(root, rel,
+											outer_rel,
+											inner_rel,
+											sjinfo,
+											restrictlist);
+}
+
+/*
+ * set_joinrel_size_estimates_standard
+ *		Set the size estimates for the given join relation.
+ *
  * The rel's targetlist must have been constructed already, and a
  * restriction clause list that matches the given component rels must
  * be provided.
@@ -4481,11 +4568,11 @@ get_parameterized_baserel_size(PlannerInfo *root, RelOptInfo *rel,
  * build_joinrel_tlist, and baserestrictcost is not used for join rels.
  */
 void
-set_joinrel_size_estimates(PlannerInfo *root, RelOptInfo *rel,
-						   RelOptInfo *outer_rel,
-						   RelOptInfo *inner_rel,
-						   SpecialJoinInfo *sjinfo,
-						   List *restrictlist)
+set_joinrel_size_estimates_standard(PlannerInfo *root, RelOptInfo *rel,
+									RelOptInfo *outer_rel,
+									RelOptInfo *inner_rel,
+									SpecialJoinInfo *sjinfo,
+									List *restrictlist)
 {
 	rel->rows = calc_joinrel_size_estimate(root,
 										   rel,
@@ -4501,6 +4588,35 @@ set_joinrel_size_estimates(PlannerInfo *root, RelOptInfo *rel,
  * get_parameterized_joinrel_size
  *		Make a size estimate for a parameterized scan of a join relation.
  *
+ * To support loadable plugins that monitor or modify cardinality estimation,
+ * we provide a hook variable that lets a plugin get control before and
+ * after the cardinality estimation.
+ */
+double
+get_parameterized_joinrel_size(PlannerInfo *root, RelOptInfo *rel,
+							   Path *outer_path,
+							   Path *inner_path,
+							   SpecialJoinInfo *sjinfo,
+							   List *restrict_clauses)
+{
+	if (get_parameterized_joinrel_size_hook)
+		return (*get_parameterized_joinrel_size_hook) (root, rel,
+													   outer_path,
+													   inner_path,
+													   sjinfo,
+													   restrict_clauses);
+	else
+		return get_parameterized_joinrel_size_standard(root, rel,
+													   outer_path,
+													   inner_path,
+													   sjinfo,
+													   restrict_clauses);
+}
+
+/*
+ * get_parameterized_joinrel_size_standard
+ *		Make a size estimate for a parameterized scan of a join relation.
+ *
  * 'rel' is the joinrel under consideration.
  * 'outer_path', 'inner_path' are (probably also parameterized) Paths that
  *		produce the relations being joined.
@@ -4513,11 +4629,11 @@ set_joinrel_size_estimates(PlannerInfo *root, RelOptInfo *rel,
  * set_joinrel_size_estimates must have been applied already.
  */
 double
-get_parameterized_joinrel_size(PlannerInfo *root, RelOptInfo *rel,
-							   Path *outer_path,
-							   Path *inner_path,
-							   SpecialJoinInfo *sjinfo,
-							   List *restrict_clauses)
+get_parameterized_joinrel_size_standard(PlannerInfo *root, RelOptInfo *rel,
+										Path *outer_path,
+										Path *inner_path,
+										SpecialJoinInfo *sjinfo,
+										List *restrict_clauses)
 {
 	double		nrows;
 
@@ -5474,14 +5590,25 @@ page_size(double tuples, int width)
 	return ceil(relation_byte_size(tuples, width) / BLCKSZ);
 }
 
+bool
+IsParallelTuplesProcessing(const Plan *plan)
+{
+	if (plan->path_parallel_workers > 0 && (
+		plan->parallel_aware || nodeTag(plan) == T_HashJoin ||
+								nodeTag(plan) == T_MergeJoin ||
+								nodeTag(plan) == T_NestLoop))
+		return true;
+	return false;
+}
+
 /*
  * Estimate the fraction of the work that each worker will do given the
  * number of workers budgeted for the path.
  */
-static double
-get_parallel_divisor(Path *path)
+double
+get_parallel_divisor(int parallel_workers)
 {
-	double		parallel_divisor = path->parallel_workers;
+	double		parallel_divisor = parallel_workers;
 
 	/*
 	 * Early experience with parallel query suggests that when there is only
@@ -5498,7 +5625,7 @@ get_parallel_divisor(Path *path)
 	{
 		double		leader_contribution;
 
-		leader_contribution = 1.0 - (0.3 * path->parallel_workers);
+		leader_contribution = 1.0 - (0.3 * parallel_workers);
 		if (leader_contribution > 0)
 			parallel_divisor += leader_contribution;
 	}

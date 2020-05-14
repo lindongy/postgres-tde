@@ -39,6 +39,33 @@ typedef enum
 }			ConstraintExclusionType;
 
 
+/* Hook for plugins to get control of cardinality estimation */
+typedef void (*set_baserel_rows_estimate_hook_type) (PlannerInfo *root,
+															RelOptInfo *rel);
+extern PGDLLIMPORT set_baserel_rows_estimate_hook_type
+			set_baserel_rows_estimate_hook;
+typedef double (*get_parameterized_baserel_size_hook_type) (PlannerInfo *root,
+															 RelOptInfo *rel,
+														List *param_clauses);
+extern PGDLLIMPORT get_parameterized_baserel_size_hook_type
+			get_parameterized_baserel_size_hook;
+typedef double (*get_parameterized_joinrel_size_hook_type) (PlannerInfo *root,
+															 RelOptInfo *rel,
+															Path *outer_path,
+															Path *inner_path,
+													 SpecialJoinInfo *sjinfo,
+													 List *restrict_clauses);
+extern PGDLLIMPORT get_parameterized_joinrel_size_hook_type
+			get_parameterized_joinrel_size_hook;
+typedef void (*set_joinrel_size_estimates_hook_type) (PlannerInfo *root,
+															 RelOptInfo *rel,
+													   RelOptInfo *outer_rel,
+													   RelOptInfo *inner_rel,
+													 SpecialJoinInfo *sjinfo,
+														 List *restrictlist);
+extern PGDLLIMPORT set_joinrel_size_estimates_hook_type
+			set_joinrel_size_estimates_hook;
+
 /*
  * prototypes for costsize.c
  *	  routines to compute costs and sizes
@@ -169,10 +196,21 @@ extern void compute_semi_anti_join_factors(PlannerInfo *root,
 										   SpecialJoinInfo *sjinfo,
 										   List *restrictlist,
 										   SemiAntiJoinFactors *semifactors);
+extern void set_baserel_rows_estimate(PlannerInfo *root, RelOptInfo *rel);
+extern void set_baserel_rows_estimate_standard(PlannerInfo *root, RelOptInfo *rel);
 extern void set_baserel_size_estimates(PlannerInfo *root, RelOptInfo *rel);
 extern double get_parameterized_baserel_size(PlannerInfo *root,
 											 RelOptInfo *rel,
 											 List *param_clauses);
+extern double get_parameterized_baserel_size_standard(PlannerInfo *root,
+										RelOptInfo *rel,
+										List *param_clauses);
+extern double get_parameterized_joinrel_size_standard(PlannerInfo *root,
+										RelOptInfo *rel,
+										Path *outer_path,
+										Path *inner_path,
+										SpecialJoinInfo *sjinfo,
+										List *restrict_clauses);
 extern double get_parameterized_joinrel_size(PlannerInfo *root,
 											 RelOptInfo *rel,
 											 Path *outer_path,
@@ -184,6 +222,11 @@ extern void set_joinrel_size_estimates(PlannerInfo *root, RelOptInfo *rel,
 									   RelOptInfo *inner_rel,
 									   SpecialJoinInfo *sjinfo,
 									   List *restrictlist);
+extern void set_joinrel_size_estimates_standard(PlannerInfo *root, RelOptInfo *rel,
+									RelOptInfo *outer_rel,
+									RelOptInfo *inner_rel,
+									SpecialJoinInfo *sjinfo,
+									List *restrictlist);
 extern void set_subquery_size_estimates(PlannerInfo *root, RelOptInfo *rel);
 extern void set_function_size_estimates(PlannerInfo *root, RelOptInfo *rel);
 extern void set_values_size_estimates(PlannerInfo *root, RelOptInfo *rel);
@@ -196,5 +239,7 @@ extern void set_foreign_size_estimates(PlannerInfo *root, RelOptInfo *rel);
 extern PathTarget *set_pathtarget_cost_width(PlannerInfo *root, PathTarget *target);
 extern double compute_bitmap_pages(PlannerInfo *root, RelOptInfo *baserel,
 								   Path *bitmapqual, int loop_count, Cost *cost, double *tuple);
+extern bool IsParallelTuplesProcessing(const Plan *plan);
+extern double get_parallel_divisor(int parallel_workers);
 
 #endif							/* COST_H */

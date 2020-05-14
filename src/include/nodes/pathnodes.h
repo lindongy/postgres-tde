@@ -710,6 +710,10 @@ typedef struct RelOptInfo
 	Relids		top_parent_relids;	/* Relids of topmost parents (if "other"
 									 * rel) */
 
+	/* For Adaptive optimization DEBUG purposes */
+	double		predicted_cardinality;
+	int			fss_hash;
+
 	/* used for partitioned relations */
 	PartitionScheme part_scheme;	/* Partitioning scheme. */
 	int			nparts;			/* number of partitions */
@@ -1069,6 +1073,10 @@ typedef struct ParamPathInfo
 	Relids		ppi_req_outer;	/* rels supplying parameters used by path */
 	double		ppi_rows;		/* estimated number of result tuples */
 	List	   *ppi_clauses;	/* join clauses available from outer rels */
+
+	/* AQO DEBUG purposes */
+	double predicted_ppi_rows;
+	double fss_ppi_hash;
 } ParamPathInfo;
 
 
