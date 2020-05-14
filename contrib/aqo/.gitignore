@@ -8,4 +8,4 @@ regression.out
 *.gcov
 tags
 
-aqo--?.?.sql
+#aqo--?.?.sql
