@@ -87,11 +87,12 @@ run_encryption_key_command(char *data_dir)
 	}
 	*dp = '\0';
 
+	/* Do not print the command itself, in case it's just "echo <the key>" */
 #ifdef FRONTEND
-	pg_log_debug("executing encryption key command \"%s\"", cmd);
+	pg_log_debug("executing encryption key command");
 #else
 	ereport(DEBUG1,
-			(errmsg("executing encryption key command \"%s\"", cmd)));
+			(errmsg("executing encryption key command")));
 #endif	/* FRONTEND */
 
 	fp = popen(cmd, "r");
