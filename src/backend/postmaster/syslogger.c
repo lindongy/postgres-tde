@@ -891,7 +891,7 @@ syslogger_forkexec(void)
 		else
 			stream->syslog_fd = -1;
 #else							/* WIN32 */
-		if (syslog_file != NULL)
+		if (stream->syslog_file != NULL)
 			stream->syslog_fd = (long)
 				_get_osfhandle(_fileno(stream->syslog_file));
 		else
@@ -1348,21 +1348,22 @@ pipeThread(void *arg)
 		 * If we've filled the current logfile, nudge the main thread to do a
 		 * log rotation.
 		 */
-		if (Log_RotationSize > 0)
+		int	i;
+
+		for (i = 0; i < log_streams_active; i++)
 		{
-			int	i;
+			LogStream  *stream = &log_streams[i];
 
-			for (i = 0; i < log_streams_active; i++)
+			if (stream->rotation_size <= 0) {
+				continue;
+			}
+
+			if (ftell(stream->syslog_file) >= stream->rotation_size * 1024L ||
+				(stream->csvlog_file != NULL &&
+					ftell(stream->csvlog_file) >= stream->rotation_size * 1024L))
 			{
-				LogStream  *stream = &log_streams[i];
-
-				if (ftell(stream->syslog_file) >= Log_RotationSize * 1024L ||
-					(stream->csvlog_file != NULL &&
-					 ftell(stream->csvlog_file) >= Log_RotationSize * 1024L))
-				{
-					SetLatch(MyLatch);
-					break;
-				}
+				SetLatch(MyLatch);
+				break;
 			}
 		}
 		LeaveCriticalSection(&sysloggerSection);
