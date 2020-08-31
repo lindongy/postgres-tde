@@ -795,7 +795,7 @@ postgres   27093  0.0  0.0  30096  2752 ?        Ss   11:34   0:00 postgres: ser
       <structfield>state</> is <literal>active</> this field shows the
       currently executing query. In all other states, it shows the last query
       that was executed. By default the query text is truncated at 1024
-      characters; this value can be changed via the parameter
+      bytes; this value can be changed via the parameter
       <xref linkend="guc-track-activity-query-size">.
      </entry>
     </row>
@@ -1198,11 +1198,15 @@ postgres   27093  0.0  0.0  30096  2752 ?        Ss   11:34   0:00 postgres: ser
         </row>
         <row>
          <entry><literal>RecoveryWalAll</></entry>
-         <entry>Waiting for WAL from any kind of source (local, archive or stream) at recovery.</entry>
+         <entry>Waiting for WAL from a stream at recovery.</entry>
         </row>
         <row>
          <entry><literal>RecoveryWalStream</></entry>
-         <entry>Waiting for WAL from a stream at recovery.</entry>
+         <entry>
+          Waiting when WAL data is not available from any kind of sources
+          (local, archive or stream) before trying again to retrieve WAL data,
+          at recovery.
+         </entry>
         </row>
         <row>
          <entry><literal>SysLoggerMain</></entry>
@@ -1341,7 +1345,7 @@ postgres   27093  0.0  0.0  30096  2752 ?        Ss   11:34   0:00 postgres: ser
          <entry>Waiting to apply WAL at recovery because it is delayed.</entry>
         </row>
         <row>
-         <entry morerows="65"><literal>IO</></entry>
+         <entry morerows="66"><literal>IO</></entry>
          <entry><literal>BufFileRead</></entry>
          <entry>Waiting for a read from a buffered file.</entry>
         </row>
@@ -1456,6 +1460,10 @@ postgres   27093  0.0  0.0  30096  2752 ?        Ss   11:34   0:00 postgres: ser
         <row>
          <entry><literal>LogicalRewriteSync</></entry>
          <entry>Waiting for logical rewrite mappings to reach stable storage.</entry>
+        </row>
+        <row>
+         <entry><literal>LogicalRewriteTruncate</></entry>
+         <entry>Waiting for truncate of mapping data during a logical rewrite.</entry>
         </row>
         <row>
          <entry><literal>LogicalRewriteWrite</></entry>
@@ -3461,7 +3469,7 @@ SELECT pg_stat_get_backend_pid(s.backendid) AS pid,
    <ulink url="https://en.wikipedia.org/wiki/DTrace">DTrace</ulink>
    utility is supported, which, at the time of this writing, is available
    on Solaris, macOS, FreeBSD, NetBSD, and Oracle Linux.  The
-   <ulink url="http://sourceware.org/systemtap/">SystemTap</ulink> project
+   <ulink url="https://sourceware.org/systemtap/">SystemTap</ulink> project
    for Linux provides a DTrace equivalent and can also be used.  Supporting other dynamic
    tracing utilities is theoretically possible by changing the definitions for
    the macros in <filename>src/include/utils/probes.h</>.

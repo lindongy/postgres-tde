@@ -1,4 +1,7 @@
-<!-- doc/src/sgml/ref/pgupgrade.sgml -->
+<!--
+doc/src/sgml/ref/pgupgrade.sgml
+PostgreSQL documentation
+-->
 
 <refentry id="pgupgrade">
  <indexterm zone="pgupgrade">
@@ -113,8 +116,8 @@
      </varlistentry>
 
      <varlistentry>
-      <term><option>-j</option></term>
-      <term><option>--jobs</option></term>
+      <term><option>-j <replaceable class="parameter">njobs</replaceable></option></term>
+      <term><option>--jobs=<replaceable class="parameter">njobs</replaceable></option></term>
       <listitem><para>number of simultaneous processes or threads to use
       </para></listitem>
      </varlistentry>
@@ -327,8 +330,8 @@ NET STOP postgresql-&majorversion;
      <quote>Latest checkpoint location</> values match in all clusters.
      (There will be a mismatch if old standby servers were shut down
      before the old primary or if the old standby servers are still running.)
-     Also, change <varname>wal_level</varname> to
-     <literal>replica</> in the <filename>postgresql.conf</> file on the
+     Also, make sure <varname>wal_level</varname> is not set to 
+     <literal>minimal</literal> in the <filename>postgresql.conf</filename> file on the
      new primary cluster.
     </para>
    </step>
