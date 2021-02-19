@@ -1511,7 +1511,7 @@ ALTER TABLE products RENAME TO items;
 
   <para>
    An object can be assigned to a new owner with an <command>ALTER</command>
-   command of the appropriate kind for the object, e.g. <xref
+   command of the appropriate kind for the object, e.g., <xref
    linkend="sql-altertable">.  Superusers can always do
    this; ordinary roles can only do it if they are both the current owner
    of the object (or a member of the owning role) and a member of the new
@@ -3296,7 +3296,7 @@ CREATE INDEX ON measurement_y2008m01 (logdate);
 
     <para>
       Normally the set of partitions established when initially defining the
-      table are not intended to remain static.  It is common to want to
+      table is not intended to remain static.  It is common to want to
       remove old partitions of data and periodically add new partitions for
       new data. One of the most important advantages of partitioning is
       precisely that it allows this otherwise painful task to be executed

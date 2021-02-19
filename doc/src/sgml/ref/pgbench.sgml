@@ -269,14 +269,18 @@ pgbench <optional> <replaceable>options</> </optional> <replaceable>dbname</>
       <term><option>--builtin</>=<replaceable>scriptname[@weight]</></term>
       <listitem>
        <para>
-        Add the specified built-in script to the list of executed scripts.
-        An optional integer weight after <literal>@</> allows to adjust the
-        probability of drawing the script.  If not specified, it is set to 1.
-        Available built-in scripts are: <literal>tpcb-like</>,
-        <literal>simple-update</> and <literal>select-only</>.
+        Add the specified built-in script to the list of scripts to be executed.
+        Available built-in scripts are: <literal>tpcb-like</literal>,
+        <literal>simple-update</literal> and <literal>select-only</literal>.
         Unambiguous prefixes of built-in names are accepted.
-        With special name <literal>list</>, show the list of built-in scripts
+        With the special name <literal>list</literal>, show the list of built-in scripts
         and exit immediately.
+       </para>
+       <para>
+        Optionally, write an integer weight after <literal>@</literal> to
+        adjust the probability of selecting this script versus other ones.
+        The default weight is 1.
+        See below for details.
        </para>
       </listitem>
      </varlistentry>
@@ -331,10 +335,16 @@ pgbench <optional> <replaceable>options</> </optional> <replaceable>dbname</>
       <term><option>--file=</><replaceable>filename[@weight]</></term>
       <listitem>
        <para>
-        Add a transaction script read from <replaceable>filename</> to
-        the list of executed scripts.
-        An optional integer weight after <literal>@</> allows to adjust the
-        probability of drawing the test.
+        Add a transaction script read from <replaceable>filename</replaceable>
+        to the list of scripts to be executed.
+       </para>
+       <para>
+        Optionally, write an integer weight after <literal>@</literal> to
+        adjust the probability of selecting this script versus other ones.
+        The default weight is 1.
+        (To use a script file name that includes an <literal>@</literal>
+        character, append a weight so that there is no ambiguity, for
+        example <literal>filen@me@1</literal>.)
         See below for details.
        </para>
       </listitem>
@@ -484,7 +494,7 @@ pgbench <optional> <replaceable>options</> </optional> <replaceable>dbname</>
         transaction to finish. The wait time is called the schedule lag time,
         and its average and maximum are also reported separately. The
         transaction latency with respect to the actual transaction start time,
-        i.e. the time spent executing the transaction in the database, can be
+        i.e., the time spent executing the transaction in the database, can be
         computed by subtracting the schedule lag time from the reported
         latency.
        </para>
@@ -617,7 +627,7 @@ pgbench <optional> <replaceable>options</> </optional> <replaceable>dbname</>
        <para>
         Remember to take the sampling rate into account when processing the
         log file. For example, when computing tps values, you need to multiply
-        the numbers accordingly (e.g. with 0.01 sample rate, you'll only get
+        the numbers accordingly (e.g., with 0.01 sample rate, you'll only get
         1/100 of the actual tps).
        </para>
       </listitem>
@@ -700,14 +710,14 @@ pgbench <optional> <replaceable>options</> </optional> <replaceable>dbname</>
   <title>What is the <quote>Transaction</> Actually Performed in <application>pgbench</application>?</title>
 
   <para>
-   <application>pgbench</> executes test scripts chosen randomly
+   <application>pgbench</application> executes test scripts chosen randomly
    from a specified list.
-   They include built-in scripts with <option>-b</> and
-   user-provided custom scripts with <option>-f</>.
-   Each script may be given a relative weight specified after a
-   <literal>@</> so as to change its drawing probability.
-   The default weight is <literal>1</>.
-   Scripts with a weight of <literal>0</> are ignored.
+   The scripts may include built-in scripts specified with <option>-b</option>
+   and user-provided scripts specified with <option>-f</option>.
+   Each script may be given a relative weight specified after an
+   <literal>@</literal> so as to change its selection probability.
+   The default weight is <literal>1</literal>.
+   Scripts with a weight of <literal>0</literal> are ignored.
  </para>
 
   <para>
@@ -1090,7 +1100,7 @@ f(x) = PHI(2.0 * parameter * (x - mu) / (max - min + 1)) /
       <literal>2.0 / parameter</>, that is a relative
       <literal>1.0 / parameter</> around the mean; for instance, if
       <replaceable>parameter</> is 4.0, 67% of values are drawn from the
-      middle quarter (1.0 / 4.0) of the interval (i.e. from
+      middle quarter (1.0 / 4.0) of the interval (i.e., from
       <literal>3.0 / 8.0</> to <literal>5.0 / 8.0</>) and 95% from
       the middle half (<literal>2.0 / 4.0</>) of the interval (second and third
       quartiles). The minimum <replaceable>parameter</> is 2.0 for performance
@@ -1235,7 +1245,7 @@ END;
    and <replaceable>max_lag</>, are only present if the <option>--rate</>
    option is used.
    They provide statistics about the time each transaction had to wait for the
-   previous one to finish, i.e. the difference between each transaction's
+   previous one to finish, i.e., the difference between each transaction's
    scheduled start time and the time it actually started.
    The very last field, <replaceable>skipped</>,
    is only present if the <option>--latency-limit</> option is used, too.
