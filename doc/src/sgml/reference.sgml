@@ -281,6 +281,7 @@
    &pgChecksums;
    &pgControldata;
    &pgCtl;
+   &pgKeytool;
    &pgResetwal;
    &pgRewind;
    &pgtestfsync;

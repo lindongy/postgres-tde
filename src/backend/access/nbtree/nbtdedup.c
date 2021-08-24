@@ -258,6 +258,9 @@ _bt_dedup_pass(Relation rel, Buffer buf, Relation heapRel, IndexTuple newitem,
 
 		PageSetLSN(page, recptr);
 	}
+	else if (data_encrypted)
+		set_page_lsn_for_encryption(page);
+
 
 	END_CRIT_SECTION();
 

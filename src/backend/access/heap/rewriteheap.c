@@ -92,6 +92,7 @@
  * heap's TOAST table will go through the normal bufmgr.
  *
  *
+ * Portions Copyright (c) 2019-2021, CYBERTEC PostgreSQL International GmbH
  * Portions Copyright (c) 1996-2021, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994-5, Regents of the University of California
  *
@@ -317,18 +318,41 @@ end_heap_rewrite(RewriteState state)
 	/* Write the last page, if any */
 	if (state->rs_buffer_valid)
 	{
+		char	*buf = (char *) state->rs_buffer;
+		XLogRecPtr	lsn = InvalidXLogRecPtr;
+
 		if (RelationNeedsWAL(state->rs_new_rel))
+		{
 			log_newpage(&state->rs_new_rel->rd_node,
 						MAIN_FORKNUM,
 						state->rs_blockno,
-						state->rs_buffer,
+						buf,
 						true);
+			lsn = PageGetLSN(buf);
+		}
+		else if (data_encrypted)
+			lsn = get_lsn_for_encryption();
 
-		PageSetChecksumInplace(state->rs_buffer, state->rs_blockno);
+		/*
+		 * Encrypt only if we have valid IV. It should be always except when
+		 * log_newpage() encountered an empty page - it should be safe not to
+		 * encrypt such.
+		 */
+		if (data_encrypted && !XLogRecPtrIsInvalid(lsn))
+		{
+			encrypt_page(buf,
+						 encrypt_buf.data,
+						 lsn,
+						 state->rs_blockno);
+
+			buf = encrypt_buf.data;
+		}
+
+		PageSetChecksumInplace(buf, state->rs_blockno);
 
 		RelationOpenSmgr(state->rs_new_rel);
 		smgrextend(state->rs_new_rel->rd_smgr, MAIN_FORKNUM, state->rs_blockno,
-				   (char *) state->rs_buffer, true);
+				   buf, true);
 	}
 
 	/*
@@ -676,6 +700,9 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 
 		if (len + saveFreeSpace > pageFreeSpace)
 		{
+			char	*buf = (char *) page;
+			XLogRecPtr	lsn = InvalidXLogRecPtr;
+
 			/*
 			 * Doesn't fit, so write out the existing page.  It always
 			 * contains a tuple.  Hence, unlike RelationGetBufferForTuple(),
@@ -684,11 +711,16 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 
 			/* XLOG stuff */
 			if (RelationNeedsWAL(state->rs_new_rel))
+			{
 				log_newpage(&state->rs_new_rel->rd_node,
 							MAIN_FORKNUM,
 							state->rs_blockno,
-							page,
+							buf,
 							true);
+				lsn = PageGetLSN(buf);
+			}
+			else if (data_encrypted)
+				lsn = get_lsn_for_encryption();
 
 			/*
 			 * Now write the page. We say skipFsync = true because there's no
@@ -697,10 +729,24 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 			 */
 			RelationOpenSmgr(state->rs_new_rel);
 
-			PageSetChecksumInplace(page, state->rs_blockno);
+			/*
+			 * Encrypt only if we have valid IV. It should be always except
+			 * when log_newpage() encountered an empty page - it should be
+			 * safe not to encrypt such.
+			 */
+			if (data_encrypted && !XLogRecPtrIsInvalid(lsn))
+			{
+				encrypt_page(buf,
+							 encrypt_buf.data,
+							 lsn,
+							 state->rs_blockno);
 
+				buf = encrypt_buf.data;
+			}
+
+			PageSetChecksumInplace(buf, state->rs_blockno);
 			smgrextend(state->rs_new_rel->rd_smgr, MAIN_FORKNUM,
-					   state->rs_blockno, (char *) page, true);
+					   state->rs_blockno, buf, true);
 
 			state->rs_blockno++;
 			state->rs_buffer_valid = false;

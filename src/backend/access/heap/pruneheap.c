@@ -351,6 +351,8 @@ heap_page_prune(Relation relation, Buffer buffer,
 
 			PageSetLSN(BufferGetPage(buffer), recptr);
 		}
+		else if (data_encrypted)
+			set_page_lsn_for_encryption(BufferGetPage(buffer));
 	}
 	else
 	{

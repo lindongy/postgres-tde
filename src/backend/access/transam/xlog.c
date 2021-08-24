@@ -4,6 +4,7 @@
  *		PostgreSQL write-ahead log manager
  *
  *
+ * Portions Copyright (c) 2019-2021, CYBERTEC PostgreSQL International GmbH
  * Portions Copyright (c) 1996-2021, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -60,6 +61,7 @@
 #include "replication/walreceiver.h"
 #include "replication/walsender.h"
 #include "storage/bufmgr.h"
+#include "storage/encryption.h"
 #include "storage/fd.h"
 #include "storage/ipc.h"
 #include "storage/large_object.h"
@@ -82,6 +84,7 @@
 #include "utils/timestamp.h"
 
 extern uint32 bootstrap_data_checksum_version;
+extern char *bootstrap_encryption_sample;
 
 /* Unsupported old recovery command file names (relative to $PGDATA) */
 #define RECOVERY_COMMAND_FILE	"recovery.conf"
@@ -909,6 +912,7 @@ static void LocalSetXLogInsertAllowed(void);
 static void CreateEndOfRecoveryRecord(void);
 static void CheckPointGuts(XLogRecPtr checkPointRedo, int flags);
 static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo);
+static Size XLogWritePages(char *from, int npages, uint32 startoffset);
 static XLogRecPtr XLogGetReplicationSlotMinimumLSN(void);
 
 static void AdvanceXLInsertBuffer(XLogRecPtr upto, bool opportunistic);
@@ -2533,64 +2537,70 @@ XLogWrite(XLogwrtRqst WriteRqst, bool flexible)
 			finishing_seg)
 		{
 			char	   *from;
-			Size		nbytes;
-			Size		nleft;
-			int			written;
-			instr_time	start;
 
 			/* OK to write the page(s) */
 			from = XLogCtl->pages + startidx * (Size) XLOG_BLCKSZ;
-			nbytes = npages * (Size) XLOG_BLCKSZ;
-			nleft = nbytes;
-			do
+			if (data_encrypted)
 			{
-				errno = 0;
-
-				/* Measure I/O timing to write WAL data */
-				if (track_wal_io_timing)
-					INSTR_TIME_SET_CURRENT(start);
-
-				pgstat_report_wait_start(WAIT_EVENT_WAL_WRITE);
-				written = pg_pwrite(openLogFile, from, nleft, startoffset);
-				pgstat_report_wait_end();
+				int			i,
+							nencrypted;
+				char	   *to;
+				uint32		encr_offset;
 
 				/*
-				 * Increment the I/O timing and the number of times WAL data
-				 * were written out to disk.
+				 * Encrypt and write multiple pages at a time, in order to
+				 * reduce the number of syscalls.
 				 */
-				if (track_wal_io_timing)
+				nencrypted = 0;
+				to = encrypt_buf_xlog;
+				encr_offset = startoffset;
+				for (i = 1; i <= npages; i++)
 				{
-					instr_time	duration;
+					char		tweak[TWEAK_SIZE];
+					Size		nbytes;
 
-					INSTR_TIME_SET_CURRENT(duration);
-					INSTR_TIME_SUBTRACT(duration, start);
-					WalStats.m_wal_write_time += INSTR_TIME_GET_MICROSEC(duration);
+					XLogEncryptionTweak(tweak, ThisTimeLineID, openLogSegNo, encr_offset);
+
+					/*
+					 * We should not encrypt the unused space, in order to
+					 * avoid "reused key attack".
+					 */
+					if (i == npages && ispartialpage)
+						nbytes = WriteRqst.Write % XLOG_BLCKSZ;
+					else
+						nbytes = XLOG_BLCKSZ;
+
+					encrypt_block(from,
+								  to,
+								  nbytes,
+								  tweak,
+								  InvalidXLogRecPtr,
+								  InvalidBlockNumber,
+								  EDK_REL_WAL);
+					nencrypted++;
+					from += XLOG_BLCKSZ;
+					to += XLOG_BLCKSZ;
+					encr_offset += XLOG_BLCKSZ;
+
+					/*
+					 * Write the encrypted data if the encryption buffer is
+					 * full or if the last page has been encrypted.
+					 */
+					if (nencrypted >= XLOG_ENCRYPT_BUF_PAGES || i >= npages)
+					{
+						startoffset += XLogWritePages(encrypt_buf_xlog,
+													  nencrypted,
+													  startoffset);
+
+						/* Prepare for the next round of page encryptions. */
+						nencrypted = 0;
+						to = encrypt_buf_xlog;
+						encr_offset = startoffset;
+					}
 				}
-
-				WalStats.m_wal_write++;
-
-				if (written <= 0)
-				{
-					char		xlogfname[MAXFNAMELEN];
-					int			save_errno;
-
-					if (errno == EINTR)
-						continue;
-
-					save_errno = errno;
-					XLogFileName(xlogfname, ThisTimeLineID, openLogSegNo,
-								 wal_segment_size);
-					errno = save_errno;
-					ereport(PANIC,
-							(errcode_for_file_access(),
-							 errmsg("could not write to log file %s "
-									"at offset %u, length %zu: %m",
-									xlogfname, startoffset, nleft)));
-				}
-				nleft -= written;
-				from += written;
-				startoffset += written;
-			} while (nleft > 0);
+			}
+			else
+				startoffset += XLogWritePages(from, npages, startoffset);
 
 			npages = 0;
 
@@ -2705,6 +2715,75 @@ XLogWrite(XLogwrtRqst WriteRqst, bool flexible)
 			XLogCtl->LogwrtRqst.Flush = LogwrtResult.Flush;
 		SpinLockRelease(&XLogCtl->info_lck);
 	}
+}
+
+/*
+ * Write page(s) to the XLOG file.
+ *
+ * Returns the number of bytes written.
+ */
+static Size
+XLogWritePages(char *from, int npages, uint32 startoffset)
+{
+	Size		nbytes,
+				nleft;
+	Size		written;
+	instr_time	start;
+
+	nbytes = npages * (Size) XLOG_BLCKSZ;
+	nleft = nbytes;
+	do
+	{
+		errno = 0;
+
+		/* Measure I/O timing to write WAL data */
+		if (track_wal_io_timing)
+			INSTR_TIME_SET_CURRENT(start);
+
+		pgstat_report_wait_start(WAIT_EVENT_WAL_WRITE);
+		written = pg_pwrite(openLogFile, from, nleft, startoffset);
+		pgstat_report_wait_end();
+
+		/*
+		 * Increment the I/O timing and the number of times WAL data
+		 * were written out to disk.
+		 */
+		if (track_wal_io_timing)
+		{
+			instr_time	duration;
+
+			INSTR_TIME_SET_CURRENT(duration);
+			INSTR_TIME_SUBTRACT(duration, start);
+			WalStats.m_wal_write_time += INSTR_TIME_GET_MICROSEC(duration);
+		}
+
+		WalStats.m_wal_write++;
+
+		if (written <= 0)
+		{
+			char	xlogfname[MAXFNAMELEN];
+			int		save_errno;
+
+			if (errno == EINTR)
+				continue;
+
+			save_errno = errno;
+			XLogFileName(xlogfname, ThisTimeLineID, openLogSegNo,
+						 wal_segment_size);
+			errno = save_errno;
+			ereport(PANIC,
+					(errcode_for_file_access(),
+					 errmsg("could not write to log file %s "
+							"at offset %u, length %zu: %m",
+							xlogfname,
+							startoffset, nbytes)));
+		}
+		nleft -= written;
+		from += written;
+		startoffset += written;
+	} while (nleft > 0);
+
+	return written;
 }
 
 /*
@@ -3554,6 +3633,35 @@ XLogFileCopy(XLogSegNo destsegno, TimeLineID srcTLI, XLogSegNo srcsegno,
 			}
 			pgstat_report_wait_end();
 		}
+
+		/*
+		 * Since timeline is being changed and since encryption tweak contains
+		 * the timeline, we need to decrypt the buffer and encrypt it with the
+		 * new tweak. Do not encrypt the unused space, in order to avoid
+		 * "reused key attack".
+		 */
+		if (data_encrypted && nread > 0)
+		{
+			char		tweak[TWEAK_SIZE];
+
+			XLogEncryptionTweak(tweak, srcTLI, srcsegno, nbytes);
+			decrypt_block(buffer.data,
+						  buffer.data,
+						  nread,
+						  tweak,
+						  InvalidBlockNumber,
+						  EDK_REL_WAL);
+
+			XLogEncryptionTweak(tweak, ThisTimeLineID, destsegno, nbytes);
+			encrypt_block(buffer.data,
+						  buffer.data,
+						  nread,
+						  tweak,
+						  InvalidXLogRecPtr,
+						  InvalidBlockNumber,
+						  EDK_REL_WAL);
+		}
+
 		errno = 0;
 		pgstat_report_wait_start(WAIT_EVENT_WAL_COPY_WRITE);
 		if ((int) write(fd, buffer.data, sizeof(buffer)) != (int) sizeof(buffer))
@@ -4928,6 +5036,28 @@ ReadControlFile(void)
 		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 						errmsg("\"max_wal_size\" must be at least twice \"wal_segment_size\"")));
 
+	/*
+	 * Initialize encryption, but not if the current backend has already done
+	 * that.
+	 */
+	if (ControlFile->data_cipher > PG_CIPHER_NONE && !data_encrypted)
+	{
+		/*
+		 * Set data_encryption for caller to know that he needs to retrieve
+		 * the key and initialize the encryption context.
+		 */
+		SetConfigOption("data_encryption", "true", PGC_INTERNAL,
+						PGC_S_OVERRIDE);
+
+		/*
+		 * Save the verification string. We'll perform the actual verification
+		 * as soon as the encryption setup is done.
+		 */
+		memcpy(encryption_verification,
+			   ControlFile->encryption_verification,
+			   ENCRYPTION_SAMPLE_SIZE);
+	}
+
 	UsableBytesInSegment =
 		(wal_segment_size / XLOG_BLCKSZ * UsableBytesInPage) -
 		(SizeOfXLogLongPHD - SizeOfXLogShortPHD);
@@ -5345,6 +5475,20 @@ BootStrapXLOG(void)
 	use_existent = false;
 	openLogFile = XLogFileInit(1, &use_existent, false);
 
+	if (data_encrypted)
+	{
+		char		tweak[TWEAK_SIZE];
+
+		XLogEncryptionTweak(tweak, ThisTimeLineID, 1, 0);
+		encrypt_block((char *) page,
+					  (char *) page,
+					  XLOG_BLCKSZ,
+					  tweak,
+					  InvalidXLogRecPtr,
+					  InvalidBlockNumber,
+					  EDK_REL_WAL);
+	}
+
 	/*
 	 * We needn't bother with Reserve/ReleaseExternalFD here, since we'll
 	 * close the file again in a moment.
@@ -5383,6 +5527,24 @@ BootStrapXLOG(void)
 	ControlFile->time = checkPoint.time;
 	ControlFile->checkPoint = checkPoint.redo;
 	ControlFile->checkPointCopy = checkPoint;
+
+	if (data_encrypted)
+	{
+		char	sample[ENCRYPTION_SAMPLE_SIZE];
+
+		ControlFile->data_cipher = PG_CIPHER_AES_CTR_128;
+
+		sample_encryption(sample);
+
+		memcpy(ControlFile->encryption_verification, sample,
+			   ENCRYPTION_SAMPLE_SIZE);
+	}
+	else
+	{
+		ControlFile->data_cipher = PG_CIPHER_NONE;
+		memset(ControlFile->encryption_verification, 0,
+			   ENCRYPTION_SAMPLE_SIZE);
+	}
 
 	/* some additional ControlFile fields are set in WriteControlFile() */
 	WriteControlFile();
@@ -12229,6 +12391,19 @@ retry:
 	Assert(reqLen <= readLen);
 
 	xlogreader->seg.ws_tli = curFileTLI;
+
+	if (data_encrypted)
+	{
+		char		tweak[TWEAK_SIZE];
+
+		XLogEncryptionTweak(tweak, curFileTLI, readSegNo, readOff);
+		decrypt_block(readBuf,
+					  readBuf,
+					  XLOG_BLCKSZ,
+					  tweak,
+					  InvalidBlockNumber,
+					  EDK_REL_WAL);
+	}
 
 	/*
 	 * Check the page header immediately, so that we can retry immediately if

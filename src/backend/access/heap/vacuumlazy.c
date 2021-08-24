@@ -1160,7 +1160,7 @@ lazy_scan_heap(LVRelState *vacrel, VacuumParams *params, bool aggressive)
 			 * upper-level FSM pages.  Note we have not yet processed blkno.
 			 */
 			FreeSpaceMapVacuumRange(vacrel->rel, next_fsm_block_to_vacuum,
-									blkno);
+									blkno, InvalidXLogRecPtr);
 			next_fsm_block_to_vacuum = blkno;
 
 			/* Report that we are once again scanning the heap */
@@ -1322,6 +1322,9 @@ lazy_scan_heap(LVRelState *vacrel, VacuumParams *params, bool aggressive)
 				if (RelationNeedsWAL(vacrel->rel) &&
 					PageGetLSN(page) == InvalidXLogRecPtr)
 					log_newpage_buffer(buf, true);
+				else if (data_encrypted &&
+						 PageGetLSN(page) == InvalidXLogRecPtr)
+					set_page_lsn_for_encryption(page);
 
 				PageSetAllVisible(page);
 				visibilitymap_set(vacrel->rel, blkno, buf, InvalidXLogRecPtr,
@@ -1383,7 +1386,7 @@ lazy_scan_heap(LVRelState *vacrel, VacuumParams *params, bool aggressive)
 				if (blkno - next_fsm_block_to_vacuum >= VACUUM_FSM_EVERY_PAGES)
 				{
 					FreeSpaceMapVacuumRange(vacrel->rel, next_fsm_block_to_vacuum,
-											blkno);
+											blkno, InvalidXLogRecPtr);
 					next_fsm_block_to_vacuum = blkno;
 					lazy_check_wraparound_failsafe(vacrel);
 				}
@@ -1577,7 +1580,8 @@ lazy_scan_heap(LVRelState *vacrel, VacuumParams *params, bool aggressive)
 	 * not there were indexes, and whether or not we bypassed index vacuuming.
 	 */
 	if (blkno > next_fsm_block_to_vacuum)
-		FreeSpaceMapVacuumRange(vacrel->rel, next_fsm_block_to_vacuum, blkno);
+		FreeSpaceMapVacuumRange(vacrel->rel, next_fsm_block_to_vacuum, blkno,
+								InvalidXLogRecPtr);
 
 	/* report all blocks vacuumed */
 	pgstat_progress_update_param(PROGRESS_VACUUM_HEAP_BLKS_VACUUMED, blkno);
@@ -1965,6 +1969,8 @@ retry:
 									 frozen, nfrozen);
 			PageSetLSN(page, recptr);
 		}
+		else if (data_encrypted)
+			set_page_lsn_for_encryption(page);
 
 		END_CRIT_SECTION();
 	}
@@ -2447,6 +2453,8 @@ lazy_vacuum_heap_page(LVRelState *vacrel, BlockNumber blkno, Buffer buffer,
 
 		PageSetLSN(page, recptr);
 	}
+	else if (data_encrypted)
+		set_page_lsn_for_encryption(page);
 
 	/*
 	 * End critical section, so we safely can do visibility tests (which
