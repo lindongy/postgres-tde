@@ -233,20 +233,20 @@ check_for_data_types_usage(ClusterInfo *cluster,
  *
  * If so, write a report to the given file name, and return true.
  *
- * typename should be a fully qualified type name.  This is just a
+ * type_name should be a fully qualified type name.  This is just a
  * trivial wrapper around check_for_data_types_usage() to convert a
  * type name into a base query.
  */
 bool
 check_for_data_type_usage(ClusterInfo *cluster,
-						  const char *typename,
+						  const char *type_name,
 						  const char *output_path)
 {
 	bool		found;
 	char	   *base_query;
 
 	base_query = psprintf("SELECT '%s'::pg_catalog.regtype AS oid",
-						  typename);
+						  type_name);
 
 	found = check_for_data_types_usage(cluster, base_query, output_path);
 
@@ -464,6 +464,84 @@ old_11_check_for_sql_identifier_data_type_usage(ClusterInfo *cluster)
 				 "drop the problem columns and restart the upgrade.\n"
 				 "A list of the problem columns is in the file:\n"
 				 "    %s\n\n", output_path);
+	}
+	else
+		check_ok();
+}
+
+
+/*
+ * report_extension_updates()
+ *	Report extensions that should be updated.
+ */
+void
+report_extension_updates(ClusterInfo *cluster)
+{
+	int			dbnum;
+	FILE	   *script = NULL;
+	bool		found = false;
+	char	   *output_path = "update_extensions.sql";
+
+	prep_status("Checking for extension updates");
+
+	for (dbnum = 0; dbnum < cluster->dbarr.ndbs; dbnum++)
+	{
+		PGresult   *res;
+		bool		db_used = false;
+		int			ntups;
+		int			rowno;
+		int			i_name;
+		DbInfo	   *active_db = &cluster->dbarr.dbs[dbnum];
+		PGconn	   *conn = connectToServer(cluster, active_db->db_name);
+
+		/* find extensions needing updates */
+		res = executeQueryOrDie(conn,
+								"SELECT name "
+								"FROM pg_available_extensions "
+								"WHERE installed_version != default_version"
+			);
+
+		ntups = PQntuples(res);
+		i_name = PQfnumber(res, "name");
+		for (rowno = 0; rowno < ntups; rowno++)
+		{
+			found = true;
+
+			if (script == NULL && (script = fopen_priv(output_path, "w")) == NULL)
+				pg_fatal("could not open file \"%s\": %s\n", output_path,
+						 strerror(errno));
+			if (!db_used)
+			{
+				PQExpBufferData connectbuf;
+
+				initPQExpBuffer(&connectbuf);
+				appendPsqlMetaConnect(&connectbuf, active_db->db_name);
+				fputs(connectbuf.data, script);
+				termPQExpBuffer(&connectbuf);
+				db_used = true;
+			}
+			fprintf(script, "ALTER EXTENSION %s UPDATE;\n",
+					quote_identifier(PQgetvalue(res, rowno, i_name)));
+		}
+
+		PQclear(res);
+
+		PQfinish(conn);
+	}
+
+	if (script)
+		fclose(script);
+
+	if (found)
+	{
+		report_status(PG_REPORT, "notice");
+		pg_log(PG_REPORT, "\n"
+			   "Your installation contains extensions that should be updated\n"
+			   "with the ALTER EXTENSION command.  The file\n"
+			   "    %s\n"
+			   "when executed by psql by the database superuser will update\n"
+			   "these extensions.\n\n",
+			   output_path);
 	}
 	else
 		check_ok();

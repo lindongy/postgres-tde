@@ -104,17 +104,39 @@ BEGIN
 	delete $ENV{LC_ALL};
 	$ENV{LC_MESSAGES} = 'C';
 
-	delete $ENV{PGCONNECT_TIMEOUT};
-	delete $ENV{PGDATA};
-	delete $ENV{PGDATABASE};
-	delete $ENV{PGHOSTADDR};
-	delete $ENV{PGREQUIRESSL};
-	delete $ENV{PGSERVICE};
-	delete $ENV{PGSSLMODE};
-	delete $ENV{PGUSER};
-	delete $ENV{PGPORT};
-	delete $ENV{PGHOST};
-	delete $ENV{PG_COLOR};
+	# This list should be kept in sync with pg_regress.c.
+	my @envkeys = qw (
+	  PGCHANNELBINDING
+	  PGCLIENTENCODING
+	  PGCONNECT_TIMEOUT
+	  PGDATA
+	  PGDATABASE
+	  PGGSSENCMODE
+	  PGGSSLIB
+	  PGHOSTADDR
+	  PGKRBSRVNAME
+	  PGPASSFILE
+	  PGPASSWORD
+	  PGREQUIREPEER
+	  PGREQUIRESSL
+	  PGSERVICE
+	  PGSERVICEFILE
+	  PGSSLCERT
+	  PGSSLCRL
+	  PGSSLCRLDIR
+	  PGSSLKEY
+	  PGSSLMAXPROTOCOLVERSION
+	  PGSSLMINPROTOCOLVERSION
+	  PGSSLMODE
+	  PGSSLROOTCERT
+	  PGSSLSNI
+	  PGTARGETSESSIONATTRS
+	  PGUSER
+	  PGPORT
+	  PGHOST
+	  PG_COLOR
+	);
+	delete @ENV{@envkeys};
 
 	$ENV{PGAPPNAME} = basename($0);
 
@@ -282,6 +304,8 @@ except for the case of Perl=msys and host=mingw32.  The subject need not
 exist, but its parent or grandparent directory must exist unless cygpath is
 available.
 
+The returned path uses forward slashes but has no trailing slash.
+
 =cut
 
 sub perl2host
@@ -291,10 +315,11 @@ sub perl2host
 	if ($is_msys2)
 	{
 		# get absolute, windows type path
-		my $path = qx{cygpath -a -w "$subject"};
+		my $path = qx{cygpath -a -m "$subject"};
 		if (!$?)
 		{
 			chomp $path;
+			$path =~ s!/$!!;
 			return $path if $path;
 		}
 		# fall through if this didn't work.
@@ -320,6 +345,7 @@ sub perl2host
 	# this odd way of calling 'pwd -W' is the only way that seems to work.
 	my $dir = qx{sh -c "pwd -W"};
 	chomp $dir;
+	$dir =~ s!/$!!;
 	chdir $here;
 	return $dir . $leaf;
 }

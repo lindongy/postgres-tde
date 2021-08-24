@@ -1051,12 +1051,12 @@ static struct config_bool ConfigureNamesBool[] =
 		NULL, NULL, NULL
 	},
 	{
-		{"enable_resultcache", PGC_USERSET, QUERY_TUNING_METHOD,
-			gettext_noop("Enables the planner's use of result caching."),
+		{"enable_memoize", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("Enables the planner's use of memoization."),
 			NULL,
 			GUC_EXPLAIN
 		},
-		&enable_resultcache,
+		&enable_memoize,
 		true,
 		NULL, NULL, NULL
 	},
@@ -1413,9 +1413,10 @@ static struct config_bool ConfigureNamesBool[] =
 		NULL, NULL, NULL
 	},
 	{
-		{"remove_temp_files_after_crash", PGC_SIGHUP, ERROR_HANDLING_OPTIONS,
+		{"remove_temp_files_after_crash", PGC_SIGHUP, DEVELOPER_OPTIONS,
 			gettext_noop("Remove temporary files after backend crash."),
-			NULL
+			NULL,
+			GUC_NOT_IN_SAMPLE
 		},
 		&remove_temp_files_after_crash,
 		true,
@@ -3526,13 +3527,13 @@ static struct config_int ConfigureNamesInt[] =
 	},
 
 	{
-		{"debug_invalidate_system_caches_always", PGC_SUSET, DEVELOPER_OPTIONS,
-			gettext_noop("Aggressively invalidate system caches for debugging purposes."),
+		{"debug_discard_caches", PGC_SUSET, DEVELOPER_OPTIONS,
+			gettext_noop("Aggressively flush system caches for debugging purposes."),
 			NULL,
 			GUC_NOT_IN_SAMPLE
 		},
-		&debug_invalidate_system_caches_always,
-#ifdef CLOBBER_CACHE_ENABLED
+		&debug_discard_caches,
+#ifdef DISCARD_CACHES_ENABLED
 		/* Set default based on older compile-time-only cache clobber macros */
 #if defined(CLOBBER_CACHE_RECURSIVELY)
 		3,
@@ -3542,9 +3543,9 @@ static struct config_int ConfigureNamesInt[] =
 		0,
 #endif
 		0, 5,
-#else							/* not CLOBBER_CACHE_ENABLED */
+#else							/* not DISCARD_CACHES_ENABLED */
 		0, 0, 0,
-#endif							/* not CLOBBER_CACHE_ENABLED */
+#endif							/* not DISCARD_CACHES_ENABLED */
 		NULL, NULL, NULL
 	},
 
@@ -4696,13 +4697,13 @@ static struct config_enum ConfigureNamesEnum[] =
 
 	{
 		{"default_toast_compression", PGC_USERSET, CLIENT_CONN_STATEMENT,
-			gettext_noop("Sets the default compression for new columns."),
-			NULL,
-			GUC_IS_NAME
+			gettext_noop("Sets the default compression method for compressible values."),
+			NULL
 		},
 		&default_toast_compression,
 		TOAST_PGLZ_COMPRESSION,
-		default_toast_compression_options, NULL, NULL
+		default_toast_compression_options,
+		NULL, NULL, NULL
 	},
 
 	{
@@ -4990,7 +4991,7 @@ static struct config_enum ConfigureNamesEnum[] =
 	},
 
 	{
-		{"recovery_init_sync_method", PGC_POSTMASTER, ERROR_HANDLING_OPTIONS,
+		{"recovery_init_sync_method", PGC_SIGHUP, ERROR_HANDLING_OPTIONS,
 			gettext_noop("Sets the method for synchronizing the data directory before crash recovery."),
 		},
 		&recovery_init_sync_method,
@@ -5413,13 +5414,14 @@ add_guc_variable(struct config_generic *var, int elevel)
 /*
  * Decide whether a proposed custom variable name is allowed.
  *
- * It must be "identifier.identifier", where the rules for what is an
- * identifier agree with scan.l.
+ * It must be two or more identifiers separated by dots, where the rules
+ * for what is an identifier agree with scan.l.  (If you change this rule,
+ * adjust the errdetail in find_option().)
  */
 static bool
 valid_custom_variable_name(const char *name)
 {
-	int			num_sep = 0;
+	bool		saw_sep = false;
 	bool		name_start = true;
 
 	for (const char *p = name; *p; p++)
@@ -5428,7 +5430,7 @@ valid_custom_variable_name(const char *name)
 		{
 			if (name_start)
 				return false;	/* empty name component */
-			num_sep++;
+			saw_sep = true;
 			name_start = true;
 		}
 		else if (strchr("ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -5445,8 +5447,8 @@ valid_custom_variable_name(const char *name)
 	}
 	if (name_start)
 		return false;			/* empty name component */
-	/* OK if we had exactly one separator */
-	return (num_sep == 1);
+	/* OK if we found at least one separator */
+	return saw_sep;
 }
 
 /*
@@ -5561,7 +5563,7 @@ find_option(const char *name, bool create_placeholders, bool skip_errors,
 						(errcode(ERRCODE_INVALID_NAME),
 						 errmsg("invalid configuration parameter name \"%s\"",
 								name),
-						 errdetail("Custom parameter names must be of the form \"identifier.identifier\".")));
+						 errdetail("Custom parameter names must be two or more simple identifiers separated by dots.")));
 			return NULL;
 		}
 	}

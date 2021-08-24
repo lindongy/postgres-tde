@@ -207,6 +207,9 @@ static bool authwarning = false;
 static const char *boot_options = "-F";
 static const char *backend_options = "--single -F -O -j -c search_path=pg_catalog -c exit_on_error=true";
 
+/* Additional switches to pass to backend (either boot or standalone) */
+static char *extra_options = "";
+
 static const char *const subdirs[] = {
 	"global",
 	"pg_wal/archive_status",
@@ -967,12 +970,12 @@ test_config_settings(void)
 		test_buffs = MIN_BUFS_FOR_CONNS(test_conns);
 
 		snprintf(cmd, sizeof(cmd),
-				 "\"%s\" --boot -x0 %s "
+				 "\"%s\" --boot -x0 %s %s "
 				 "-c max_connections=%d "
 				 "-c shared_buffers=%d "
 				 "-c dynamic_shared_memory_type=%s "
 				 "< \"%s\" > \"%s\" 2>&1",
-				 backend_exec, boot_options,
+				 backend_exec, boot_options, extra_options,
 				 test_conns, test_buffs,
 				 dynamic_shared_memory_type,
 				 DEVNULL, DEVNULL);
@@ -1003,12 +1006,12 @@ test_config_settings(void)
 		}
 
 		snprintf(cmd, sizeof(cmd),
-				 "\"%s\" --boot -x0 %s "
+				 "\"%s\" --boot -x0 %s %s "
 				 "-c max_connections=%d "
 				 "-c shared_buffers=%d "
 				 "-c dynamic_shared_memory_type=%s "
 				 "< \"%s\" > \"%s\" 2>&1",
-				 backend_exec, boot_options,
+				 backend_exec, boot_options, extra_options,
 				 n_connections, test_buffs,
 				 dynamic_shared_memory_type,
 				 DEVNULL, DEVNULL);
@@ -1437,12 +1440,12 @@ bootstrap_template1(void)
 	}
 
 	snprintf(cmd, sizeof(cmd),
-			 "\"%s\" --boot -x1 -X %u %s %s %s %s",
+			 "\"%s\" --boot -x1 -X %u %s %s %s %s %s",
 			 backend_exec,
 			 wal_segment_size_mb * (1024 * 1024),
 			 data_checksums ? "-k" : "",
 			 encr_opt_str,
-			 boot_options,
+			 boot_options, extra_options,
 			 debug ? "-d 5" : "");
 
 
@@ -2303,6 +2306,7 @@ usage(const char *progname)
 	printf(_("      --wal-segsize=SIZE    size of WAL segments, in megabytes\n"));
 	printf(_("\nLess commonly used options:\n"));
 	printf(_("  -d, --debug               generate lots of debugging output\n"));
+	printf(_("      --discard-caches      set debug_discard_caches=1\n"));
 	printf(_("  -L DIRECTORY              where to find the input files\n"));
 	printf(_("  -n, --no-clean            do not clean up after errors\n"));
 	printf(_("  -N, --no-sync             do not wait for changes to be written safely to disk\n"));
@@ -2936,8 +2940,8 @@ initialize_data_directory(void)
 	fflush(stdout);
 
 	snprintf(cmd, sizeof(cmd),
-			 "\"%s\" %s template1 >%s",
-			 backend_exec, backend_options,
+			 "\"%s\" %s %s template1 >%s",
+			 backend_exec, backend_options, extra_options,
 			 DEVNULL);
 
 	PG_CMD_OPEN;
@@ -3019,6 +3023,7 @@ main(int argc, char *argv[])
 		{"encryption-key-command", required_argument, NULL, 'K'},
 #endif							/* USE_ENCRYPTION */
 		{"allow-group-access", no_argument, NULL, 'g'},
+		{"discard-caches", no_argument, NULL, 14},
 		{NULL, 0, NULL, 0}
 	};
 
@@ -3164,6 +3169,11 @@ main(int argc, char *argv[])
 				break;
 			case 'g':
 				SetDataDirectoryCreatePerm(PG_DIR_MODE_GROUP);
+				break;
+			case 14:
+				extra_options = psprintf("%s %s",
+										 extra_options,
+										 "-c debug_discard_caches=1");
 				break;
 			default:
 				/* getopt_long already emitted a complaint */

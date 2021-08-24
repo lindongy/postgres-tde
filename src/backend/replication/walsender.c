@@ -605,7 +605,7 @@ StartReplication(StartReplicationCmd *cmd)
 
 	if (cmd->slotname)
 	{
-		(void) ReplicationSlotAcquire(cmd->slotname, SAB_Error);
+		ReplicationSlotAcquire(cmd->slotname, true);
 		if (SlotIsLogical(MyReplicationSlot))
 			ereport(ERROR,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -973,7 +973,7 @@ CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
 		 */
 		ReplicationSlotCreate(cmd->slotname, true,
 							  cmd->temporary ? RS_TEMPORARY : RS_EPHEMERAL,
-							  cmd->two_phase);
+							  false);
 	}
 
 	if (cmd->kind == REPLICATION_KIND_LOGICAL)
@@ -1156,7 +1156,7 @@ StartLogicalReplication(StartReplicationCmd *cmd)
 
 	Assert(!MyReplicationSlot);
 
-	(void) ReplicationSlotAcquire(cmd->slotname, SAB_Error);
+	ReplicationSlotAcquire(cmd->slotname, true);
 
 	if (XLogRecPtrIsInvalid(MyReplicationSlot->data.restart_lsn))
 		ereport(ERROR,

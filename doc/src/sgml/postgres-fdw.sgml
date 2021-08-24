@@ -266,11 +266,11 @@ OPTIONS (ADD password_required 'false');
      <term><literal>fdw_startup_cost</literal></term>
      <listitem>
       <para>
-       This option, which can be specified for a foreign server, is a numeric
-       value that is added to the estimated startup cost of any foreign-table
-       scan on that server.  This represents the additional overhead of
-       establishing a connection, parsing and planning the query on the
-       remote side, etc.
+       This option, which can be specified for a foreign server, is a floating
+       point value that is added to the estimated startup cost of any
+       foreign-table scan on that server.  This represents the additional
+       overhead of establishing a connection, parsing and planning the query on
+       the remote side, etc.
        The default value is <literal>100</literal>.
       </para>
      </listitem>
@@ -280,8 +280,8 @@ OPTIONS (ADD password_required 'false');
      <term><literal>fdw_tuple_cost</literal></term>
      <listitem>
       <para>
-       This option, which can be specified for a foreign server, is a numeric
-       value that is used as extra cost per-tuple for foreign-table
+       This option, which can be specified for a foreign server, is a floating
+       point value that is used as extra cost per-tuple for foreign-table
        scans on that server.  This represents the additional overhead of
        data transfer between servers.  You might increase or decrease this
        number to reflect higher or lower network delay to the remote server.
@@ -372,6 +372,17 @@ OPTIONS (ADD password_required 'false');
        overrides an option specified for the server.
        The default is <literal>1</literal>.
       </para>
+
+      <para>
+       Note the actual number of rows <filename>postgres_fdw</filename> inserts at
+       once depends on the number of columns and the provided
+       <literal>batch_size</literal> value. The batch is executed as a single
+       query, and the libpq protocol (which <filename>postgres_fdw</filename>
+       uses to connect to a remote server) limits the number of parameters in a
+       single query to 65535. When the number of columns * <literal>batch_size</literal>
+       exceeds the limit, the <literal>batch_size</literal> will be adjusted to
+       avoid an error.
+      </para>
      </listitem>
     </varlistentry>
 
@@ -386,7 +397,7 @@ OPTIONS (ADD password_required 'false');
     <filename>postgres_fdw</filename> supports asynchronous execution, which
     runs multiple parts of an <structname>Append</structname> node
     concurrently rather than serially to improve performance.
-    This execution can be controled using the following option:
+    This execution can be controlled using the following option:
    </para>
 
    <variablelist>
@@ -410,6 +421,19 @@ OPTIONS (ADD password_required 'false');
        involved, unless those tables are subject to different user mappings.
        In such a case, it may be more performant to disable this option to
        eliminate the overhead associated with running queries asynchronously.
+      </para>
+
+      <para>
+       Asynchronous execution is applied even when an
+       <structname>Append</structname> node contains subplan(s) executed
+       synchronously as well as subplan(s) executed asynchronously.
+       In such a case, if the asynchronous subplans are ones processed using
+       <filename>postgres_fdw</filename>, tuples from the asynchronous
+       subplans are not returned until after at least one synchronous subplan
+       returns all tuples, as that subplan is executed while the asynchronous
+       subplans are waiting for the results of asynchronous queries sent to
+       foreign servers.
+       This behavior might change in a future release.
       </para>
      </listitem>
     </varlistentry>
@@ -527,6 +551,18 @@ OPTIONS (ADD password_required 'false');
        differently on the local server than they would be on the remote
        server; <function>nextval()</function> is a common source of problems.
        The <command>IMPORT</command> will fail altogether if an imported default
+       expression uses a function or operator that does not exist locally.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>import_generated</literal> (<type>boolean</type>)</term>
+     <listitem>
+      <para>
+       This option controls whether column <literal>GENERATED</literal> expressions
+       are included in the definitions of foreign tables imported
+       from a foreign server. The default is <literal>true</literal>.
+       The <command>IMPORT</command> will fail altogether if an imported generated
        expression uses a function or operator that does not exist locally.
       </para>
      </listitem>

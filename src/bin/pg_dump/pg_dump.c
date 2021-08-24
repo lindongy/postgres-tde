@@ -276,7 +276,6 @@ static void dumpDatabaseConfig(Archive *AH, PQExpBuffer outbuf,
 static void dumpEncoding(Archive *AH);
 static void dumpStdStrings(Archive *AH);
 static void dumpSearchPath(Archive *AH);
-static void dumpToastCompression(Archive *AH);
 static void binary_upgrade_set_type_oids_by_type_oid(Archive *fout,
 													 PQExpBuffer upgrade_buffer,
 													 Oid pg_type_oid,
@@ -925,13 +924,11 @@ main(int argc, char **argv)
 	 */
 
 	/*
-	 * First the special entries for ENCODING, STDSTRINGS, SEARCHPATH and
-	 * TOASTCOMPRESSION.
+	 * First the special entries for ENCODING, STDSTRINGS, and SEARCHPATH.
 	 */
 	dumpEncoding(fout);
 	dumpStdStrings(fout);
 	dumpSearchPath(fout);
-	dumpToastCompression(fout);
 
 	/* The database items are always next, unless we don't want them at all */
 	if (dopt.outputCreateDB)
@@ -3396,58 +3393,6 @@ dumpSearchPath(Archive *AH)
 	PQclear(res);
 	destroyPQExpBuffer(qry);
 	destroyPQExpBuffer(path);
-}
-
-/*
- * dumpToastCompression: save the dump-time default TOAST compression in the
- * archive
- */
-static void
-dumpToastCompression(Archive *AH)
-{
-	char	   *toast_compression;
-	PQExpBuffer qry;
-
-	if (AH->dopt->no_toast_compression)
-	{
-		/* we don't intend to dump the info, so no need to fetch it either */
-		return;
-	}
-
-	if (AH->remoteVersion < 140000)
-	{
-		/* pre-v14, the only method was pglz */
-		toast_compression = pg_strdup("pglz");
-	}
-	else
-	{
-		PGresult   *res;
-
-		res = ExecuteSqlQueryForSingleRow(AH, "SHOW default_toast_compression");
-		toast_compression = pg_strdup(PQgetvalue(res, 0, 0));
-		PQclear(res);
-	}
-
-	qry = createPQExpBuffer();
-	appendPQExpBufferStr(qry, "SET default_toast_compression = ");
-	appendStringLiteralAH(qry, toast_compression, AH);
-	appendPQExpBufferStr(qry, ";\n");
-
-	pg_log_info("saving default_toast_compression = %s", toast_compression);
-
-	ArchiveEntry(AH, nilCatalogId, createDumpId(),
-				 ARCHIVE_OPTS(.tag = "TOASTCOMPRESSION",
-							  .description = "TOASTCOMPRESSION",
-							  .section = SECTION_PRE_DATA,
-							  .createStmt = qry->data));
-
-	/*
-	 * Also save it in AH->default_toast_compression, in case we're doing
-	 * plain text dump.
-	 */
-	AH->default_toast_compression = toast_compression;
-
-	destroyPQExpBuffer(qry);
 }
 
 
@@ -8001,6 +7946,7 @@ getTriggers(Archive *fout, TableInfo tblinfo[], int numTables)
 				i_tgconstrrelid,
 				i_tgconstrrelname,
 				i_tgenabled,
+				i_tgisinternal,
 				i_tgdeferrable,
 				i_tginitdeferred,
 				i_tgdef;
@@ -8019,18 +7965,63 @@ getTriggers(Archive *fout, TableInfo tblinfo[], int numTables)
 					tbinfo->dobj.name);
 
 		resetPQExpBuffer(query);
-		if (fout->remoteVersion >= 90000)
+		if (fout->remoteVersion >= 130000)
 		{
 			/*
 			 * NB: think not to use pretty=true in pg_get_triggerdef.  It
 			 * could result in non-forward-compatible dumps of WHEN clauses
 			 * due to under-parenthesization.
+			 *
+			 * NB: We need to see tgisinternal triggers in partitions, in case
+			 * the tgenabled flag has been changed from the parent.
 			 */
 			appendPQExpBuffer(query,
-							  "SELECT tgname, "
-							  "tgfoid::pg_catalog.regproc AS tgfname, "
-							  "pg_catalog.pg_get_triggerdef(oid, false) AS tgdef, "
-							  "tgenabled, tableoid, oid "
+							  "SELECT t.tgname, "
+							  "t.tgfoid::pg_catalog.regproc AS tgfname, "
+							  "pg_catalog.pg_get_triggerdef(t.oid, false) AS tgdef, "
+							  "t.tgenabled, t.tableoid, t.oid, t.tgisinternal "
+							  "FROM pg_catalog.pg_trigger t "
+							  "LEFT JOIN pg_catalog.pg_trigger u ON u.oid = t.tgparentid "
+							  "WHERE t.tgrelid = '%u'::pg_catalog.oid "
+							  "AND (NOT t.tgisinternal OR t.tgenabled != u.tgenabled)",
+							  tbinfo->dobj.catId.oid);
+		}
+		else if (fout->remoteVersion >= 110000)
+		{
+			/*
+			 * NB: We need to see tgisinternal triggers in partitions, in case
+			 * the tgenabled flag has been changed from the parent. No
+			 * tgparentid in version 11-12, so we have to match them via
+			 * pg_depend.
+			 *
+			 * See above about pretty=true in pg_get_triggerdef.
+			 */
+			appendPQExpBuffer(query,
+							  "SELECT t.tgname, "
+							  "t.tgfoid::pg_catalog.regproc AS tgfname, "
+							  "pg_catalog.pg_get_triggerdef(t.oid, false) AS tgdef, "
+							  "t.tgenabled, t.tableoid, t.oid, t.tgisinternal "
+							  "FROM pg_catalog.pg_trigger t "
+							  "LEFT JOIN pg_catalog.pg_depend AS d ON "
+							  " d.classid = 'pg_catalog.pg_trigger'::pg_catalog.regclass AND "
+							  " d.refclassid = 'pg_catalog.pg_trigger'::pg_catalog.regclass AND "
+							  " d.objid = t.oid "
+							  "LEFT JOIN pg_catalog.pg_trigger AS pt ON pt.oid = refobjid "
+							  "WHERE t.tgrelid = '%u'::pg_catalog.oid "
+							  "AND (NOT t.tgisinternal%s)",
+							  tbinfo->dobj.catId.oid,
+							  tbinfo->ispartition ?
+							  " OR t.tgenabled != pt.tgenabled" : "");
+		}
+		else if (fout->remoteVersion >= 90000)
+		{
+			/* See above about pretty=true in pg_get_triggerdef */
+			appendPQExpBuffer(query,
+							  "SELECT t.tgname, "
+							  "t.tgfoid::pg_catalog.regproc AS tgfname, "
+							  "pg_catalog.pg_get_triggerdef(t.oid, false) AS tgdef, "
+							  "t.tgenabled, false as tgisinternal, "
+							  "t.tableoid, t.oid "
 							  "FROM pg_catalog.pg_trigger t "
 							  "WHERE tgrelid = '%u'::pg_catalog.oid "
 							  "AND NOT tgisinternal",
@@ -8045,6 +8036,7 @@ getTriggers(Archive *fout, TableInfo tblinfo[], int numTables)
 							  "SELECT tgname, "
 							  "tgfoid::pg_catalog.regproc AS tgfname, "
 							  "tgtype, tgnargs, tgargs, tgenabled, "
+							  "false as tgisinternal, "
 							  "tgisconstraint, tgconstrname, tgdeferrable, "
 							  "tgconstrrelid, tginitdeferred, tableoid, oid, "
 							  "tgconstrrelid::pg_catalog.regclass AS tgconstrrelname "
@@ -8093,6 +8085,7 @@ getTriggers(Archive *fout, TableInfo tblinfo[], int numTables)
 		i_tgconstrrelid = PQfnumber(res, "tgconstrrelid");
 		i_tgconstrrelname = PQfnumber(res, "tgconstrrelname");
 		i_tgenabled = PQfnumber(res, "tgenabled");
+		i_tgisinternal = PQfnumber(res, "tgisinternal");
 		i_tgdeferrable = PQfnumber(res, "tgdeferrable");
 		i_tginitdeferred = PQfnumber(res, "tginitdeferred");
 		i_tgdef = PQfnumber(res, "tgdef");
@@ -8112,6 +8105,7 @@ getTriggers(Archive *fout, TableInfo tblinfo[], int numTables)
 			tginfo[j].dobj.namespace = tbinfo->dobj.namespace;
 			tginfo[j].tgtable = tbinfo;
 			tginfo[j].tgenabled = *(PQgetvalue(res, j, i_tgenabled));
+			tginfo[j].tgisinternal = *(PQgetvalue(res, j, i_tgisinternal)) == 't';
 			if (i_tgdef >= 0)
 			{
 				tginfo[j].tgdef = pg_strdup(PQgetvalue(res, j, i_tgdef));
@@ -16399,6 +16393,33 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 			}
 
 			/*
+			 * Dump per-column compression, if it's been set.
+			 */
+			if (!dopt->no_toast_compression)
+			{
+				const char *cmname;
+
+				switch (tbinfo->attcompression[j])
+				{
+					case 'p':
+						cmname = "pglz";
+						break;
+					case 'l':
+						cmname = "lz4";
+						break;
+					default:
+						cmname = NULL;
+						break;
+				}
+
+				if (cmname != NULL)
+					appendPQExpBuffer(q, "ALTER %sTABLE ONLY %s ALTER COLUMN %s SET COMPRESSION %s;\n",
+									  foreign, qualrelname,
+									  fmtId(tbinfo->attnames[j]),
+									  cmname);
+			}
+
+			/*
 			 * Dump per-column attributes.
 			 */
 			if (tbinfo->attoptions[j][0] != '\0')
@@ -16419,35 +16440,6 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 								  qualrelname,
 								  fmtId(tbinfo->attnames[j]),
 								  tbinfo->attfdwoptions[j]);
-
-			/*
-			 * Dump per-column compression, if different from default.
-			 */
-			if (!dopt->no_toast_compression)
-			{
-				const char *cmname;
-
-				switch (tbinfo->attcompression[j])
-				{
-					case 'p':
-						cmname = "pglz";
-						break;
-					case 'l':
-						cmname = "lz4";
-						break;
-					default:
-						cmname = NULL;
-						break;
-				}
-
-				if (cmname != NULL &&
-					(fout->default_toast_compression == NULL ||
-					 strcmp(cmname, fout->default_toast_compression) != 0))
-					appendPQExpBuffer(q, "ALTER %sTABLE ONLY %s ALTER COLUMN %s SET COMPRESSION %s;\n",
-									  foreign, qualrelname,
-									  fmtId(tbinfo->attnames[j]),
-									  cmname);
-			}
 		}						/* end loop over columns */
 
 		if (ftoptions)
@@ -17748,7 +17740,40 @@ dumpTrigger(Archive *fout, const TriggerInfo *tginfo)
 								"pg_catalog.pg_trigger", "TRIGGER",
 								trigidentity->data);
 
-	if (tginfo->tgenabled != 't' && tginfo->tgenabled != 'O')
+	if (tginfo->tgisinternal)
+	{
+		/*
+		 * Triggers marked internal only appear here because their 'tgenabled'
+		 * flag differs from its parent's.  The trigger is created already, so
+		 * remove the CREATE and replace it with an ALTER.  (Clear out the
+		 * DROP query too, so that pg_dump --create does not cause errors.)
+		 */
+		resetPQExpBuffer(query);
+		resetPQExpBuffer(delqry);
+		appendPQExpBuffer(query, "\nALTER %sTABLE %s ",
+						  tbinfo->relkind == RELKIND_FOREIGN_TABLE ? "FOREIGN " : "",
+						  fmtQualifiedDumpable(tbinfo));
+		switch (tginfo->tgenabled)
+		{
+			case 'f':
+			case 'D':
+				appendPQExpBufferStr(query, "DISABLE");
+				break;
+			case 't':
+			case 'O':
+				appendPQExpBufferStr(query, "ENABLE");
+				break;
+			case 'R':
+				appendPQExpBufferStr(query, "ENABLE REPLICA");
+				break;
+			case 'A':
+				appendPQExpBufferStr(query, "ENABLE ALWAYS");
+				break;
+		}
+		appendPQExpBuffer(query, " TRIGGER %s;\n",
+						  fmtId(tginfo->dobj.name));
+	}
+	else if (tginfo->tgenabled != 't' && tginfo->tgenabled != 'O')
 	{
 		appendPQExpBuffer(query, "\nALTER %sTABLE %s ",
 						  tbinfo->relkind == RELKIND_FOREIGN_TABLE ? "FOREIGN " : "",
