@@ -506,7 +506,7 @@ ProcessClientReadInterrupt(bool blocked)
 
 		/* Process notify interrupts, if any */
 		if (notifyInterruptPending)
-			ProcessNotifyInterrupt();
+			ProcessNotifyInterrupt(true);
 	}
 	else if (ProcDiePending)
 	{
@@ -4145,6 +4145,8 @@ PostgresMain(int argc, char *argv[],
 	if (IsUnderPostmaster && Log_disconnections)
 		on_proc_exit(log_disconnections, 0);
 
+	pgstat_report_connect(MyDatabaseId);
+
 	/* Perform initialization specific to a WAL sender process. */
 	if (am_walsender)
 		InitWalSender();
@@ -4408,17 +4410,15 @@ PostgresMain(int argc, char *argv[],
 			}
 			else
 			{
-				/* Send out notify signals and transmit self-notifies */
-				ProcessCompletedNotifies();
-
 				/*
-				 * Also process incoming notifies, if any.  This is mostly to
-				 * ensure stable behavior in tests: if any notifies were
-				 * received during the just-finished transaction, they'll be
-				 * seen by the client before ReadyForQuery is.
+				 * Process incoming notifies (including self-notifies), if
+				 * any, and send relevant messages to the client.  Doing it
+				 * here helps ensure stable behavior in tests: if any notifies
+				 * were received during the just-finished transaction, they'll
+				 * be seen by the client before ReadyForQuery is.
 				 */
 				if (notifyInterruptPending)
-					ProcessNotifyInterrupt();
+					ProcessNotifyInterrupt(false);
 
 				pgstat_report_stat(false);
 
