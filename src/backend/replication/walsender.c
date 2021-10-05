@@ -2660,6 +2660,7 @@ XLogSendPhysical(void)
 	XLogRecPtr	startptr;
 	XLogRecPtr	endptr;
 	Size		nbytes;
+	TimeLineID	tli_req;
 
 	/* If requested switch the WAL sender to the stopping state. */
 	if (got_STOPPING)
@@ -2875,8 +2876,85 @@ XLogSendPhysical(void)
 	 * calls.
 	 */
 	enlargeStringInfo(&output_message, nbytes);
+	tli_req = sendTimeLine;
 	XLogRead(&output_message.data[output_message.len], startptr, nbytes,
 			 decrypt_stream);
+	/*
+	 * As its comment explains, XLogRead() can open segment in a TLI newer
+	 * than the requested one. Since the TLI is used in the encryption IV,
+	 * we've got to decrypt the data and encrypt it while taking the new TLI
+	 * into account.
+	 */
+	if (data_encrypted && !decrypt_stream && tli_req != curFileTimeLine)
+	{
+		XLogRecPtr	reencr_ptr = startptr;
+		int	reencr_nbytes = nbytes;
+		int	skip = 0;
+		char	*data_ptr;
+
+		/*
+		 * The WALRead() call above shouldn't have crossed more than one
+		 * segment boundary.
+		 */
+		Assert(nbytes < wal_segment_size);
+
+		/*
+		 * If the segment boundary is crossed, only the data from the second
+		 * segment need the re-encryption.
+		 */
+		if (reencr_ptr / wal_segment_size !=
+			(reencr_ptr + nbytes) / wal_segment_size)
+		{
+			skip = wal_segment_size - XLogSegmentOffset(reencr_ptr,
+														wal_segment_size);
+			reencr_ptr += skip;
+			reencr_nbytes -= skip;
+		}
+
+		/*
+		 * WALRead() should have read something from the new segment after
+		 * having it opened.
+		 */
+		Assert(reencr_nbytes > 0);
+
+		data_ptr = &output_message.data[output_message.len] + skip;
+
+		/* Process one page at a time. */
+		while (reencr_nbytes > 0)
+		{
+			PGAlignedXLogBlock buffer;
+			char		tweak[TWEAK_SIZE];
+			int	page_off = reencr_ptr % XLOG_BLCKSZ;
+			int	seg_off = (reencr_ptr - page_off) % wal_segment_size;
+			int	this_page = Min(XLOG_BLCKSZ - page_off, reencr_nbytes);
+
+			memcpy(buffer.data + page_off, data_ptr, this_page);
+			/* For decryption, use the TLI of the file actually read. */
+			XLogEncryptionTweak(tweak, curFileTimeLine, sendSegNo, seg_off);
+			decrypt_block(buffer.data,
+						  buffer.data,
+						  XLOG_BLCKSZ,
+						  tweak,
+						  InvalidBlockNumber,
+						  EDK_PERMANENT);
+
+			/* For encryption, use the TLI the receiver expects. */
+			XLogEncryptionTweak(tweak, tli_req, sendSegNo, seg_off);
+			encrypt_block(buffer.data,
+						  buffer.data,
+						  XLOG_BLCKSZ,
+						  tweak,
+						  InvalidXLogRecPtr,
+						  InvalidBlockNumber,
+						  EDK_PERMANENT);
+			memcpy(data_ptr, buffer.data + page_off, this_page);
+
+			reencr_ptr += this_page;
+			data_ptr += this_page;
+			reencr_nbytes -= this_page;
+		}
+	}
+
 	output_message.len += nbytes;
 	output_message.data[output_message.len] = '\0';
 
