@@ -440,6 +440,19 @@ main(int argc, char *argv[])
 	if (ControlFile.data_cipher > PG_CIPHER_NONE && !noupdate)
 #ifdef USE_ENCRYPTION
 	{
+		/*
+		 * Try to retrieve the command from environment variable. We do this
+		 * primarily to create encrypted clusters during automated tests. XXX
+		 * Not sure the variable should be documented. If we do, then pg_ctl
+		 * should probably accept it too.
+		 */
+		if (encryption_key_command == NULL)
+		{
+			encryption_key_command = getenv("PGENCRKEYCMD");
+			if (encryption_key_command && strlen(encryption_key_command) == 0)
+				encryption_key_command = NULL;
+		}
+
 		if (encryption_key_command)
 			run_encryption_key_command(DataDir);
 		else
