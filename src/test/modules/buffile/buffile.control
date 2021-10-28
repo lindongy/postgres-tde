@@ -1,5 +1,0 @@
-# buffile_test extension
-comment = 'buffile_test'
-default_version = '1.0'
-module_pathname = '$libdir/buffile_test'
-relocatable = true

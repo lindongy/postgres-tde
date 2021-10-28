@@ -204,8 +204,7 @@ static const char *show_tcp_keepalives_idle(void);
 static const char *show_tcp_keepalives_interval(void);
 static const char *show_tcp_keepalives_count(void);
 static const char *show_tcp_user_timeout(void);
-static bool check_buffile_max_filesize(int *newval, void **extra, GucSource source);
-static void assign_buffile_max_filesize(int newval, void *extra);
+static void assign_buffile_seg_blocks(int newval, void *extra);
 static bool check_maxconnections(int *newval, void **extra, GucSource source);
 static bool check_max_worker_processes(int *newval, void **extra, GucSource source);
 static bool check_autovacuum_max_workers(int *newval, void **extra, GucSource source);
@@ -3561,15 +3560,15 @@ static struct config_int ConfigureNamesInt[] =
 	},
 
 	{
-		/* Not for general use */
-		{"buffile_max_filesize", PGC_SUSET, DEVELOPER_OPTIONS,
+		/* NOT for general use */
+		{"buffile_seg_blocks", PGC_SUSET, DEVELOPER_OPTIONS,
 			gettext_noop("Maximum size of BufFile segment."),
-			gettext_noop("This makes testing of some corner cases easier, especially when read or write crosses segment boundary."),
-			GUC_NOT_IN_SAMPLE | GUC_UNIT_BYTE
+			gettext_noop("This makes testing of some corner cases easier, especially crossing of segment boundary."),
+			GUC_NOT_IN_SAMPLE | GUC_UNIT_BLOCKS
 		},
-		&buffile_max_filesize,
-		MAX_PHYSICAL_FILESIZE, BLCKSZ, MAX_PHYSICAL_FILESIZE,
-		check_buffile_max_filesize, assign_buffile_max_filesize, NULL
+		&buffile_seg_blocks,
+		BUFFILE_SEG_BLOCKS, 2, BUFFILE_SEG_BLOCKS,
+		NULL, assign_buffile_seg_blocks, NULL
 	},
 
 	/* End-of-list marker */
@@ -12007,21 +12006,10 @@ show_tcp_user_timeout(void)
 	return nbuf;
 }
 
-static bool
-check_buffile_max_filesize(int *newval, void **extra, GucSource source)
-{
-	if (*newval % BLCKSZ != 0)
-	{
-		GUC_check_errdetail("The value must be whole multiple of BLCKSZ.");
-		return false;
-	}
-	return true;
-}
-
 static void
-assign_buffile_max_filesize(int newval, void *extra)
+assign_buffile_seg_blocks(int newval, void *extra)
 {
-	buffile_seg_blocks = BUFFILE_SEG_BLOCKS(newval);
+	BufFileAdjustConfiguration(newval);
 }
 
 static bool

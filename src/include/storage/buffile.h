@@ -27,6 +27,7 @@
 #ifndef BUFFILE_H
 #define BUFFILE_H
 
+#include "storage/encryption.h"
 #include "storage/sharedfileset.h"
 
 /*
@@ -38,23 +39,122 @@ typedef struct BufFile BufFile;
 typedef struct TransientBufFile TransientBufFile;
 
 /*
+ * If the file is encrypted, some metadata is needed for each buffer. Thus we
+ * can only start load/dump at an offset that is a whole multiple of BLCKSZ.
+ */
+typedef struct BufFilePageHeader
+{
+	/* The encryption IV. */
+	char		tweak[TWEAK_SIZE];
+
+	/*
+	 * The number of useful bytes in the buffer, the rest is only padding up
+	 * to BLCKSZ. Note that this field is included in the encrypted region.
+	 */
+	int16	nbytes;
+} BufFilePageHeader;
+
+#define	SizeOfBufFilePageHeader	(offsetof(BufFilePageHeader, nbytes) + sizeof(int16))
+
+/*
+ * Express segment size in the number of blocks.
+ *
  * We break BufFiles into gigabyte-sized segments, regardless of RELSEG_SIZE.
  * The reason is that we'd like large BufFiles to be spread across multiple
  * tablespaces when available.
- *
- * An integer value indicating the number of useful bytes in the segment is
- * appended to each segment of if the file is both shared and encrypted, see
- * BufFile.useful.
  */
-#define MAX_PHYSICAL_FILESIZE		0x40000000
+#define BUFFILE_SEG_BLOCKS	0x20000
 
-/* Express segment size in the number of blocks. */
-#define BUFFILE_SEG_BLOCKS(phys)	((phys) / BLCKSZ)
+#define MAX_PHYSICAL_FILESIZE(blocks)	((blocks) * BLCKSZ)
 
 /* GUC to control size of the file segment. */
-extern int buffile_max_filesize;
-/* Segment size in blocks, derived from the above. */
 extern int buffile_seg_blocks;
+
+/* Segment size in bytes, derived from the above. */
+extern int buffile_max_filesize;
+
+/* Number of BLCKSZ chunks that user can write into a single segment file. */
+extern int buffile_seg_blocks_logical;
+
+/* The amount of data a full segment file occupies on disk. */
+#define	BYTES_PER_SEGMENT	(buffile_seg_blocks * BLCKSZ)
+
+/*
+ * The amount of data user can write into a single segment file. If the
+ * instance is encrypted, this is lower than BYTES_PER_SEGMENT because the
+ * file blocks contain metadata (headers).
+ */
+#define	BYTES_PER_SEGMENT_LOGICAL	(buffile_seg_blocks_logical * BLCKSZ)
+
+/*
+ * User of buffile.c should only be interested in the logical position. The
+ * physical position is the same for unencrypted file, however it's different
+ * for encrypted file due to the presence of BufFilePageHeader.
+ */
+static inline off_t
+BufFileLogicalToPhysicalPos(off_t pos)
+{
+	off_t	last_seg_bytes, result;
+	int	full_segs;
+
+	if (!data_encrypted)
+		return pos;
+
+	full_segs = pos / BYTES_PER_SEGMENT_LOGICAL;
+	result = full_segs * BYTES_PER_SEGMENT;
+
+	last_seg_bytes = pos % BYTES_PER_SEGMENT_LOGICAL;
+	if (last_seg_bytes > 0)
+	{
+		off_t	full_blocks;
+		int		last_block_usage;
+		int		useful_per_block = BLCKSZ - SizeOfBufFilePageHeader;
+
+		full_blocks = last_seg_bytes / useful_per_block;
+		result += full_blocks * BLCKSZ;
+
+		last_block_usage = last_seg_bytes % useful_per_block;
+		if (last_block_usage > 0)
+			result += last_block_usage;
+	}
+
+	/*
+	 * Even if we're at block boundary, add the header size so that we end
+	 * up at usable position.
+	 */
+	result += SizeOfBufFilePageHeader;
+
+	return result;
+}
+
+static inline off_t
+BufFilePhysicalToLogicalPos(off_t pos)
+{
+	int		full_segs;
+	off_t	last_seg_bytes, result;
+
+	if (!data_encrypted)
+		return pos;
+
+	full_segs = pos / BYTES_PER_SEGMENT;
+	result = full_segs * BYTES_PER_SEGMENT_LOGICAL;
+
+	last_seg_bytes = pos % BYTES_PER_SEGMENT;
+	if (last_seg_bytes > 0)
+	{
+		off_t	full_blocks;
+		int		last_block_usage;
+
+		full_blocks = last_seg_bytes / BLCKSZ;
+		last_block_usage = last_seg_bytes % BLCKSZ;
+
+		result += full_blocks * (BLCKSZ - SizeOfBufFilePageHeader);
+		if (last_block_usage > 0)
+			result += last_block_usage - SizeOfBufFilePageHeader;
+	}
+
+	return result;
+}
 
 /*
  * The portion of the encryption tweak that does not depend on position within
@@ -78,7 +178,7 @@ typedef enum TransientBufFileKind
 /*
  * prototypes for functions in buffile.c
  */
-
+extern void BufFileAdjustConfiguration(int buffile_seg_blocks);
 extern BufFile *BufFileCreateTemp(bool interXact);
 extern void BufFileClose(BufFile *file);
 extern size_t BufFileRead(BufFile *file, void *ptr, size_t size);

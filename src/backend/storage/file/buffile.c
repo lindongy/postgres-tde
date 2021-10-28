@@ -49,22 +49,92 @@
 #include <unistd.h>
 
 #include "commands/tablespace.h"
+#include "common/string.h"
 #include "executor/instrument.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "storage/buf_internals.h"
 #include "storage/buffile.h"
-#include "storage/encryption.h"
 #include "storage/fd.h"
 #include "utils/datetime.h"
 #include "utils/resowner.h"
 
 /*
- * The functions bellow actually use integer constants so that the size can be
- * controlled by GUC. This is useful for development and regression tests.
+ * Unlike PG core, we implement these parameters as GUC so that crossing of
+ * segment boundaries can be tested easily. Note also that we derive
+ * buffile_max_filesize from buffile_seg_blocks, not the other way round. It'd
+ * be weird to let user set buffile_max_filesize directly because it's usually
+ * adjusted in an encrypted cluster (see assign_buffile_seg_blocks()).
  */
-int buffile_max_filesize	=  MAX_PHYSICAL_FILESIZE;
-int buffile_seg_blocks	=	BUFFILE_SEG_BLOCKS(MAX_PHYSICAL_FILESIZE);
+int buffile_seg_blocks	=	BUFFILE_SEG_BLOCKS;
+int buffile_max_filesize	=  MAX_PHYSICAL_FILESIZE(BUFFILE_SEG_BLOCKS);
+
+/*
+ * The following is only relevant to encrypted cluster.
+ *
+ * To make sure that BufFileLogicalToPhysicalPos() and
+ * BufFilePhysicalToLogicalPos() can handle segment file boundaries despite
+ * BufFileAppend() creates holes in the temporary file, we ensure that user
+ * can only write a whole multiple of BLCKSZ-sized chunks of payload into a
+ * segment file.
+ *
+ * Thus buffile_seg_blocks_logical is the number of BLCKSZ chunks that the
+ * user can write into a segment file. When computing the value, we also
+ * adjust buffile_max_filesize (see assign_buffile_seg_blocks()) so that the
+ * segment file does not accept any data beyond the last "logical
+ * block". (Actually we encrypt BLCKSZ bytes at a time, so the unused part of
+ * the last "physical" buffer will be written to disk too.)
+ *
+ * The fact that the first logical block of the next segment file is at the
+ * beginning of that file also allows BufFileAppend() to return a (logical)
+ * block number that can be passed to BufFileSeekBlock(). Otherwise
+ * BufFileSeekBlock() would think that the desired physical position is in the
+ * hole created by BufFileAppend().
+ */
+int buffile_seg_blocks_logical	=	BUFFILE_SEG_BLOCKS;
+
+/* Have we already run BufFileAdjustConfiguration()? */
+static bool	conf_adjusted = false;
+
+/*
+ * Compute buffile_max_filesize and buffile_seg_blocks_logical out of
+ * buffile_seg_blocks.
+ */
+void
+BufFileAdjustConfiguration(int buffile_seg_blocks)
+{
+	if (!data_encrypted)
+	{
+		buffile_max_filesize = MAX_PHYSICAL_FILESIZE(buffile_seg_blocks);
+		buffile_seg_blocks_logical = buffile_seg_blocks;
+	}
+	else
+	{
+		off_t	useful, last_block_usage;
+		int		blocks;
+
+		/*
+		 * The useful space, including the incomplete last chunk of BLCKSZ
+		 * bytes.
+		 */
+		useful = buffile_seg_blocks * (BLCKSZ - SizeOfBufFilePageHeader);
+		/* Round down to a multiple of BLCKSZ - only this part can be used. */
+		useful -= useful % BLCKSZ;
+		/* Fully used (physical) blocks needed. */
+		blocks = useful / (BLCKSZ - SizeOfBufFilePageHeader);
+		/* Space needed in the last (only partially used) physical block. */
+		last_block_usage = useful % (BLCKSZ - SizeOfBufFilePageHeader);
+
+		/* Compute the physical offset. */
+		buffile_max_filesize = blocks * BLCKSZ;
+		if (last_block_usage > 0)
+			buffile_max_filesize += SizeOfBufFilePageHeader +
+				last_block_usage;
+
+		/* How many chunks can the user write? */
+		buffile_seg_blocks_logical = useful / BLCKSZ;
+	}
+}
 
 /*
  * Fields that both BufFile and TransientBufFile structures need. It must be
@@ -88,29 +158,27 @@ typedef struct BufFileCommon
 
 	bool		append;			/* should new data be appended to the end? */
 
-	/*
-	 * If the file is encrypted, only the whole buffer can be loaded / dumped
-	 * --- see BufFileLoadBuffer() for more info --- whether it's space is
-	 * used up or not. Therefore we need to keep track of the actual amount of
-	 * useful data for each component file, as it would be if there was no
-	 * encryption.
-	 *
-	 * List would make coding simpler, however it would not be good for
-	 * performance. Random access is important here.
-	 */
-	off_t	   *useful;
-
-	/*
-	 * The "useful" array may need to be expanded independent from
-	 * extendBufFile() (i.e. earlier than the buffer gets dumped), so store
-	 * the number of elements separate from numFiles.
-	 *
-	 * Always 1 for TransientBufFile.
-	 */
-	int			nuseful;
-
 	PGAlignedBlock buffer;
 } BufFileCommon;
+
+/*
+ * The convention is that in an encrypted file, nbytes should be exactly
+ * SizeOfBufFilePageHeader if no data could be loaded.
+ */
+#define BUFFER_IS_EMPTY(file) ((file)->nbytes <= 0 || \
+							   (data_encrypted && (file)->nbytes == SizeOfBufFilePageHeader))
+
+/*
+ * Sometimes it's useful to cache the segment size, so wrap the file
+ * descriptor and the size into this structure.
+ */
+typedef struct BufFileSegment
+{
+	File	vfd;
+	uint64	size;
+} BufFileSegment;
+
+#define	InvalidSegmentSize	0xffffffffffffffff
 
 /*
  * This data structure represents a buffered file that consists of one or
@@ -122,27 +190,13 @@ struct BufFile
 	BufFileCommon common;		/* Common fields, see above. */
 
 	int			numFiles;		/* number of physical files in set */
-	/* all files except the last have length exactly buffile_max_filesize */
-	File	   *files;			/* palloc'd array with numFiles entries */
 
-	/*
-	 * Segment number is used to compute encryption tweak so we must remember
-	 * the original numbers of segments if the file is encrypted and if it was
-	 * passed as target to BufFileAppend() at least once. If this field is
-	 * NULL, ->curFile is used to compute the tweak.
-	 */
-	off_t	   *segnos;
+	BufFileSegment	*files;			/* palloc'd array with numFiles entries */
 
 	bool		isInterXact;	/* keep open over transactions? */
 
 	SharedFileSet *fileset;		/* space for segment files if shared */
 	const char *name;			/* name of this BufFile if shared */
-
-	/*
-	 * Per-PID identifier if the file is encrypted and not shared. Used for
-	 * tweak computation.
-	 */
-	uint32		number;
 
 	/*
 	 * resowner is the ResourceOwner to use for underlying temp files.  (We
@@ -169,34 +223,40 @@ struct TransientBufFile
 	BufFileCommon common;
 
 	/* The underlying file. */
-	File		vfd;
+	BufFileSegment	file;;
 	char		*path;
-
-	/* Path-dependent part of the encryption tweak. */
-	char	tweakBase[TWEAK_BASE_SIZE];
 };
+
+/*
+ * This counter is used to generate the encryption tweak, see
+ * BufFileTweak().
+ */
+static	uint64	blocks_written = 0;
 
 static BufFile *makeBufFileCommon(int nfiles);
 static BufFile *makeBufFile(File firstfile);
 static void extendBufFile(BufFile *file);
 static void BufFileLoadBuffer(BufFile *file);
 static void BufFileDumpBuffer(BufFile *file);
-static void BufFileDumpBufferEncrypted(BufFile *file);
+static void BufFileDumpBufferEncrypted(BufFile *file, bool last_in_segment);
 static void BufFileFlush(BufFile *file);
 static File MakeNewSharedSegment(BufFile *file, int segment);
 
-static void BufFileTweak(char *tweak, BufFileCommon *file, bool is_transient);
-static void ensureUsefulArraySize(BufFileCommon *file, int required);
-static void BufFileAppendMetadata(BufFile *target, BufFile *source);
+static void BufFileTweak(char *tweak, BufFileCommon *file);
+static int64 BufFileSegmentSize(BufFileSegment *seg);
+static bool BufFileLastBlock(BufFileCommon *file, int *numSegments);
 
 static void BufFileLoadBufferTransient(TransientBufFile *file);
 static void BufFileDumpBufferTransient(TransientBufFile *file);
 
 static size_t BufFileReadCommon(BufFileCommon *file, void *ptr, size_t size,
-				  bool is_transient);
+								int *numSegments);
 static size_t BufFileWriteCommon(BufFileCommon *file, void *ptr, size_t size,
 								 bool is_transient);
-static void BufFileUpdateUsefulLength(BufFileCommon *file, bool is_transient);
+static int16 BufFileGetUsefulBytes(File segment, off_t offset,
+								   PGAlignedBlock *buffer);
+static void BufFileAdjustUsefulBytes(BufFileCommon *file,
+									 BufFileSegment *segments);
 
 /*
  * Create BufFile and perform the common initialization.
@@ -207,35 +267,31 @@ makeBufFileCommon(int nfiles)
 	BufFile    *file = (BufFile *) palloc0(sizeof(BufFile));
 	BufFileCommon *fcommon = &file->common;
 
+	/*
+	 * Make sure that BufFileAdjustConfiguration() has been run before the
+	 * first use of temporary file. The GUC assign_hook will call the function
+	 * whenever buffile_seg_blocks gets changed, however it does not help
+	 * during startup: when the GUC subsystem is initialized, data_encrypted
+	 * is still false.
+	 */
+	if (data_encrypted && !conf_adjusted)
+	{
+		BufFileAdjustConfiguration(buffile_seg_blocks);
+		conf_adjusted = true;
+	}
+
 	fcommon->dirty = false;
 	fcommon->curFile = 0;
 	fcommon->curOffset = 0L;
-	fcommon->pos = 0;
-	fcommon->nbytes = 0;
+	if (!data_encrypted)
+		fcommon->pos = fcommon->nbytes = 0;
+	else
+		fcommon->pos = fcommon->nbytes = SizeOfBufFilePageHeader;
 
 	file->numFiles = nfiles;
 	file->isInterXact = false;
 	file->resowner = CurrentResourceOwner;
 
-	if (data_encrypted)
-	{
-		fcommon->useful = (off_t *) palloc0(sizeof(off_t) * nfiles);
-		fcommon->nuseful = nfiles;
-
-		file->segnos = NULL;
-
-		/*
-		 * The unused (trailing) part of the buffer should not contain
-		 * undefined data: if we encrypt such a buffer and flush it to disk,
-		 * the encrypted form of that "undefined part" can get zeroed due to
-		 * seek and write beyond EOF. If such a buffer gets loaded and
-		 * decrypted, the change of the undefined part to zeroes can affect
-		 * the valid part if it does not end at block boundary. By setting the
-		 * whole buffer to zeroes we ensure that the unused part of the buffer
-		 * always contains zeroes.
-		 */
-		MemSet(fcommon->buffer.data, 0, BLCKSZ);
-	}
 	return file;
 }
 
@@ -248,8 +304,9 @@ makeBufFile(File firstfile)
 {
 	BufFile    *file = makeBufFileCommon(1);
 
-	file->files = (File *) palloc(sizeof(File));
-	file->files[0] = firstfile;
+	file->files = (BufFileSegment *) palloc(sizeof(BufFileSegment));
+	file->files[0].vfd = firstfile;
+	file->files[0].size = InvalidSegmentSize;
 	file->common.readOnly = false;
 	file->fileset = NULL;
 	file->name = NULL;
@@ -279,22 +336,11 @@ extendBufFile(BufFile *file)
 
 	CurrentResourceOwner = oldowner;
 
-	file->files = (File *) repalloc(file->files,
-									(file->numFiles + 1) * sizeof(File));
+	file->files = (BufFileSegment *) repalloc(file->files,
+											  (file->numFiles + 1) * sizeof(BufFileSegment));
+	file->files[file->numFiles].vfd = pfile;
+	file->files[file->numFiles].size = InvalidSegmentSize;
 
-	if (data_encrypted)
-	{
-		ensureUsefulArraySize(&file->common, file->numFiles + 1);
-
-		if (file->segnos)
-		{
-			file->segnos = (off_t *) repalloc(file->segnos,
-											  (file->numFiles + 1) * sizeof(off_t));
-			file->segnos[file->numFiles] = file->numFiles;
-		}
-	}
-
-	file->files[file->numFiles] = pfile;
 	file->numFiles++;
 }
 
@@ -316,8 +362,6 @@ BufFileCreateTemp(bool interXact)
 	BufFile    *file;
 	File		pfile;
 
-	static uint32 counter_temp = 0;
-
 	/*
 	 * Ensure that temp tablespaces are set up for OpenTemporaryFile to use.
 	 * Possibly the caller will have done this already, but it seems useful to
@@ -333,10 +377,6 @@ BufFileCreateTemp(bool interXact)
 	Assert(pfile >= 0);
 
 	file = makeBufFile(pfile);
-
-	file->number = counter_temp;
-	counter_temp = (counter_temp + 1) % INT_MAX;
-
 	file->isInterXact = interXact;
 
 	return file;
@@ -398,8 +438,9 @@ BufFileCreateShared(SharedFileSet *fileset, const char *name)
 	file = makeBufFileCommon(1);
 	file->fileset = fileset;
 	file->name = pstrdup(name);
-	file->files = (File *) palloc(sizeof(File));
-	file->files[0] = MakeNewSharedSegment(file, 0);
+	file->files = (BufFileSegment *) palloc(sizeof(BufFileSegment));
+	file->files[0].vfd = MakeNewSharedSegment(file, 0);
+	file->files[0].size = InvalidSegmentSize;
 	file->common.readOnly = false;
 
 	return file;
@@ -418,10 +459,10 @@ BufFileOpenShared(SharedFileSet *fileset, const char *name, int mode)
 	BufFile    *file;
 	char		segment_name[MAXPGPATH];
 	Size		capacity = 16;
-	File	   *files;
+	BufFileSegment   *files;
 	int			nfiles = 0;
 
-	files = palloc(sizeof(File) * capacity);
+	files = palloc(sizeof(BufFileSegment) * capacity);
 
 	/*
 	 * We don't know how many segments there are, so we'll probe the
@@ -433,13 +474,14 @@ BufFileOpenShared(SharedFileSet *fileset, const char *name, int mode)
 		if (nfiles + 1 > capacity)
 		{
 			capacity *= 2;
-			files = repalloc(files, sizeof(File) * capacity);
+			files = repalloc(files, sizeof(BufFileSegment) * capacity);
 		}
 		/* Try to load a segment. */
 		SharedSegmentName(segment_name, name, nfiles);
-		files[nfiles] = SharedFileSetOpen(fileset, segment_name, mode);
-		if (files[nfiles] <= 0)
+		files[nfiles].vfd = SharedFileSetOpen(fileset, segment_name, mode);
+		if (files[nfiles].vfd <= 0)
 			break;
+		files[nfiles].size = InvalidSegmentSize;
 
 		++nfiles;
 
@@ -458,49 +500,19 @@ BufFileOpenShared(SharedFileSet *fileset, const char *name, int mode)
 
 	file = makeBufFileCommon(nfiles);
 
-	/*
-	 * Shared encrypted segment should, at its end, contain information on the
-	 * number of useful bytes in the last buffer.
-	 */
-	if (data_encrypted)
-	{
-		off_t		pos;
-		int			i;
-
-		for (i = 0; i < nfiles; i++)
-		{
-			int			nbytes;
-			File		segment = files[i];
-
-			pos = FileSize(segment) - sizeof(off_t);
-
-			/*
-			 * The word must immediately follow the last buffer of the
-			 * segment.
-			 */
-			if (pos <= 0 || pos % BLCKSZ != 0)
-				ereport(ERROR,
-						(errcode_for_file_access(),
-						 errmsg("could not find padding info in BufFile \"%s\": %m",
-								name)));
-
-			nbytes = FileRead(segment, (char *) &file->common.useful[i],
-							  sizeof(off_t), pos, WAIT_EVENT_BUFFILE_READ);
-			if (nbytes != sizeof(off_t))
-				ereport(ERROR,
-						(errcode_for_file_access(),
-						 errmsg("could not read padding info from BufFile \"%s\": %m",
-								name)));
-			Assert(file->common.useful[i] > 0);
-
-			CHECK_FOR_INTERRUPTS();
-		}
-	}
-
 	file->files = files;
 	file->common.readOnly = (mode == O_RDONLY) ? true : false;
 	file->fileset = fileset;
 	file->name = pstrdup(name);
+
+	/*
+	 * Load the buffer if needed.
+	 *
+	 * BufFileReadCommon() could do that lazily but it'd get more complex
+	 * because initially nbytes is not a multiple of BLCKSZ.
+	 */
+	if (data_encrypted)
+		BufFileLoadBuffer(file);
 
 	return file;
 }
@@ -573,17 +585,9 @@ BufFileClose(BufFile *file)
 	BufFileFlush(file);
 	/* close and delete the underlying file(s) */
 	for (i = 0; i < file->numFiles; i++)
-		FileClose(file->files[i]);
+		FileClose(file->files[i].vfd);
 	/* release the buffer space */
 	pfree(file->files);
-
-	if (data_encrypted)
-	{
-		if (file->segnos)
-			pfree(file->segnos);
-		pfree(file->common.useful);
-	}
-
 	pfree(file);
 }
 
@@ -597,107 +601,48 @@ BufFileClose(BufFile *file)
 static void
 BufFileLoadBuffer(BufFile *file)
 {
-	File		thisfile;
+	BufFileCommon	*f = &file->common;
+	BufFileSegment		*thisfile;
 
 	/*
 	 * Only whole multiple of BLCKSZ can be encrypted / decrypted.
 	 */
-	Assert(file->common.curOffset % BLCKSZ == 0 || !data_encrypted);
+	Assert(f->curOffset % BLCKSZ == 0 || !data_encrypted);
 
 	/*
 	 * Advance to next component file if necessary and possible.
 	 */
-	if (file->common.curOffset >= buffile_max_filesize &&
-		file->common.curFile + 1 < file->numFiles)
+	if (f->curOffset >= buffile_max_filesize &&
+		f->curFile + 1 < file->numFiles)
 	{
-		file->common.curFile++;
-		file->common.curOffset = 0L;
+		f->curFile++;
+		f->curOffset = 0L;
 	}
-
-	/*
-	 * See makeBufFileCommon().
-	 *
-	 * Actually here we only handle the case of FileRead() returning zero
-	 * bytes below. In contrast, if the buffer contains any data but it's not
-	 * full, it should already have the trailing zeroes (encrypted) on disk.
-	 * And as the encrypted buffer is always loaded in its entirety (i.e. EOF
-	 * should only appear at buffer boundary if the data is encrypted), all
-	 * unused bytes of the buffer should eventually be zeroes after
-	 * decryption.
-	 */
-	if (data_encrypted)
-		MemSet(file->common.buffer.data, 0, BLCKSZ);
 
 	/*
 	 * Read whatever we can get, up to a full bufferload.
 	 */
-	thisfile = file->files[file->common.curFile];
-	file->common.nbytes = FileRead(thisfile,
-								   file->common.buffer.data,
-								   sizeof(file->common.buffer),
-								   file->common.curOffset,
-								   WAIT_EVENT_BUFFILE_READ);
-	if (file->common.nbytes < 0)
+	thisfile = &file->files[f->curFile];
+	f->nbytes = FileRead(thisfile->vfd,
+						 f->buffer.data,
+						 sizeof(f->buffer),
+						 f->curOffset,
+						 WAIT_EVENT_BUFFILE_READ);
+	if (f->nbytes < 0)
 	{
-		file->common.nbytes = 0;
+		f->nbytes = 0;
 		ereport(ERROR,
 				(errcode_for_file_access(),
 				 errmsg("could not read file \"%s\": %m",
-						FilePathName(thisfile))));
+						FilePathName(thisfile->vfd))));
 	}
 
 	/* we choose not to advance curOffset here */
 
-	if (data_encrypted && file->common.nbytes > 0)
-	{
-		char		tweak[TWEAK_SIZE];
-		int			nbytes = file->common.nbytes;
+	if (data_encrypted)
+		BufFileAdjustUsefulBytes(f, file->files);
 
-		/*
-		 * The encrypted component file can only consist of whole number of
-		 * our encryption units. (Only the whole buffers are dumped / loaded.)
-		 * The only exception is that we're at the end of segment file and
-		 * found the word indicating the number of useful bytes in the
-		 * segment. This can only happen for shared file.
-		 */
-		if (nbytes % BLCKSZ != 0)
-		{
-			Assert(nbytes == sizeof(off_t) && file->fileset != NULL);
-
-			/*
-			 * This metadata his hidden to caller, so all he needs to know
-			 * that there's no real data at the end of the file.
-			 */
-			file->common.nbytes = 0;
-			return;
-		}
-
-		/* Decrypt the whole block at once. */
-		BufFileTweak(tweak, &file->common, false);
-		decrypt_block(file->common.buffer.data,
-					  file->common.buffer.data,
-					  BLCKSZ,
-					  tweak,
-					  InvalidBlockNumber,
-					  EDK_BUFFILE);
-
-#ifdef	USE_ASSERT_CHECKING
-
-		/*
-		 * The unused part of the buffer which we've read from disk and
-		 * decrypted should only contain zeroes, as explained in front of the
-		 * MemSet() call.
-		 */
-		{
-			int			i;
-
-			for (i = file->common.nbytes; i < BLCKSZ; i++)
-				Assert(file->common.buffer.data[i] == 0);
-		}
-#endif							/* USE_ASSERT_CHECKING */
-	}
-
-	if (file->common.nbytes > 0)
+	if (f->nbytes > 0)
 		pgBufferUsage.temp_blks_read++;
 }
 
@@ -713,7 +658,7 @@ BufFileDumpBuffer(BufFile *file)
 {
 	int			wpos = 0;
 	int			bytestowrite;
-	File		thisfile;
+	BufFileSegment		*thisfile;
 
 	/*
 	 * Unlike BufFileLoadBuffer, we must dump the whole buffer even if it
@@ -743,8 +688,8 @@ BufFileDumpBuffer(BufFile *file)
 		if ((off_t) bytestowrite > availbytes)
 			bytestowrite = (int) availbytes;
 
-		thisfile = file->files[file->common.curFile];
-		bytestowrite = FileWrite(thisfile,
+		thisfile = &file->files[file->common.curFile];
+		bytestowrite = FileWrite(thisfile->vfd,
 								 file->common.buffer.data + wpos,
 								 bytestowrite,
 								 file->common.curOffset,
@@ -753,7 +698,12 @@ BufFileDumpBuffer(BufFile *file)
 			ereport(ERROR,
 					(errcode_for_file_access(),
 					 errmsg("could not write to file \"%s\": %m",
-							FilePathName(thisfile))));
+							FilePathName(thisfile->vfd))));
+
+		/* Set or update the cached size. */
+		if (thisfile->size == InvalidSegmentSize ||
+			(file->common.curOffset + bytestowrite) > thisfile->size)
+			thisfile->size = file->common.curOffset + bytestowrite;
 
 		file->common.curOffset += bytestowrite;
 		wpos += bytestowrite;
@@ -789,13 +739,17 @@ BufFileDumpBuffer(BufFile *file)
  * Encrypt buffer and dump it. The functionality is sufficiently different
  * from BufFileDumpBuffer to be implemented as a separate function. The most
  * notable difference is that no loop is needed here.
+ *
+ * last_in_segment tells that this should be the last buffer in the segment
+ * file, i.e. curOffset should be advanced even if the buffer is not
+ * full. Pass false if you don't know/care.
  */
 static void
-BufFileDumpBufferEncrypted(BufFile *file)
+BufFileDumpBufferEncrypted(BufFile *file, bool last_in_segment)
 {
-	char		tweak[TWEAK_SIZE];
 	int			bytestowrite;
-	File		thisfile;
+	BufFileSegment		*thisfile;
+	BufFilePageHeader	*hdr;
 
 	/*
 	 * Caller's responsibility.
@@ -819,136 +773,79 @@ BufFileDumpBufferEncrypted(BufFile *file)
 	}
 
 	/*
-	 * This condition plus the alignment of curOffset to BLCKSZ (checked
-	 * above) ensure that the encrypted buffer never crosses component file
-	 * boundary.
-	 */
-	Assert((buffile_max_filesize % BLCKSZ) == 0);
-
-	/*
-	 * Encrypted data is dumped all at once.
+	 * Keep curOffset aligned to BLCKSZ.
 	 *
-	 * Unlike BufFileDumpBuffer(), we don't have to check here how much bytes
-	 * is available in the segment. According to the assertions above,
-	 * currOffset should be lower than buffile_max_filesize by non-zero
-	 * multiple of BLCKSZ.
+	 * Unlike BufFileDumpBuffer(), we don't have to check here how much data
+	 * is available in the segment. According to the code above, currOffset
+	 * should be lower than buffile_max_filesize by non-zero multiple of
+	 * BLCKSZ.
 	 */
 	bytestowrite = BLCKSZ;
 
 	/*
-	 * The amount of data encrypted must be a multiple of ENCRYPTION_BLOCK. We
-	 * meet this condition simply by encrypting the whole buffer.
-	 *
-	 * XXX Alternatively we could encrypt only as few encryption blocks that
-	 * encompass file->common.nbyte bytes, but then we'd have to care how many
-	 * blocks should be decrypted: decryption of the unencrypted trailing
-	 * zeroes produces garbage, which can be a problem if lseek() created
-	 * "holes" in the file. Such a hole should be read as a sequence of
-	 * zeroes.
+	 * Fill-in the page header and encrypt everything except for the IV.
 	 */
-	BufFileTweak(tweak, &file->common, false);
-
-	encrypt_block(file->common.buffer.data,
-				  encrypt_buf.data,
-				  BLCKSZ,
-				  tweak,
+	hdr = (BufFilePageHeader *) file->common.buffer.data;
+	BufFileTweak(hdr->tweak, &file->common);
+	Assert(file->common.nbytes >= SizeOfBufFilePageHeader);
+	hdr->nbytes = file->common.nbytes;
+	encrypt_block(file->common.buffer.data + TWEAK_SIZE,
+				  encrypt_buf.data + TWEAK_SIZE,
+				  BLCKSZ - TWEAK_SIZE,
+				  hdr->tweak,
 				  InvalidXLogRecPtr,
 				  InvalidBlockNumber,
 				  EDK_BUFFILE);
+	/* Copy the unencrypted part. */
+	memcpy(encrypt_buf.data, file->common.buffer.data, TWEAK_SIZE);
 
-	thisfile = file->files[file->common.curFile];
-	bytestowrite = FileWrite(thisfile,
+	thisfile = &file->files[file->common.curFile];
+	bytestowrite = FileWrite(thisfile->vfd,
 							 encrypt_buf.data,
 							 bytestowrite,
 							 file->common.curOffset,
 							 WAIT_EVENT_BUFFILE_WRITE);
+
+	/* Set or update the cached size. */
+	if (thisfile->size == InvalidSegmentSize ||
+		(file->common.curOffset + bytestowrite) > thisfile->size)
+		thisfile->size = file->common.curOffset + bytestowrite;
+
 	if (bytestowrite <= 0 || bytestowrite != BLCKSZ)
 		ereport(ERROR,
 				(errcode_for_file_access(),
 				 errmsg("could not write to file \"%s\": %m",
-						FilePathName(thisfile))));
+						FilePathName(thisfile->vfd))));
 
 	file->common.curOffset += bytestowrite;
+
+	/* Wasn't last_in_segment passed for non-last buffer? */
+	Assert(file->common.curOffset >= buffile_max_filesize ||
+		   !last_in_segment);
+
 	pgBufferUsage.temp_blks_written++;
+	/* For encryption purposes, see BufFileTweak().*/
+	blocks_written++;
 
-	/*
-	 * The number of useful bytes needs to be written at the end of each
-	 * encrypted segment of a shared file so that the other backends know
-	 * how many bytes of the last buffer are useful.
-	 */
-	if (file->fileset != NULL)
-	{
-		off_t		useful;
-
-		/*
-		 * nuseful may be increased earlier than numFiles but not later, so
-		 * the corresponding entry should already exist in ->useful.
-		 */
-		Assert(file->common.curFile < file->common.nuseful);
-
-		/*
-		 * The number of useful bytes in the current segment file.
-		 */
-		useful = file->common.useful[file->common.curFile];
-
-		/*
-		 * Have we dumped the last buffer of the segment, i.e. the one that
-		 * can contain padding?
-		 */
-		if (file->common.curOffset >= useful)
-		{
-			int			bytes_extra;
-
-			/*
-			 * Write the number of useful bytes in the segment.
-			 *
-			 * Do not increase curOffset afterwards. Thus we ensure that the
-			 * next buffer appended will overwrite the "useful" value just
-			 * written, instead of being appended to it.
-			 */
-			bytes_extra = FileWrite(file->files[file->common.curFile],
-									(char *) &useful,
-									sizeof(useful),
-									file->common.curOffset,
-									WAIT_EVENT_BUFFILE_WRITE);
-			if (bytes_extra != sizeof(useful))
-				ereport(ERROR,
-						(errcode_for_file_access(),
-						 errmsg("could not write to file \"%s\": %m",
-								FilePathName(thisfile))));
-		}
-	}
 	file->common.dirty = false;
 
-	if (file->common.pos >= BLCKSZ)
+	if (file->common.pos >= BLCKSZ || last_in_segment)
 	{
-		Assert(file->common.pos == BLCKSZ);
+		Assert(file->common.pos == BLCKSZ || last_in_segment);
 
 		/*
 		 * curOffset points to the beginning of the next buffer, so just reset
 		 * pos and nbytes.
 		 */
-		file->common.pos = 0;
-		file->common.nbytes = 0;
-
-		/* See makeBufFile() */
-		MemSet(file->common.buffer.data, 0, BLCKSZ);
+		file->common.pos = file->common.nbytes = SizeOfBufFilePageHeader;
 	}
 	else
 	{
 		/*
-		 * Move curOffset to the beginning of the just-written buffer and
-		 * preserve pos.
+		 * Move curOffset to the beginning of the just-written buffer so it
+		 * stays at BLCKSZ boundary, and preserve pos.
 		 */
 		file->common.curOffset -= BLCKSZ;
-
-		/*
-		 * At least pos bytes should be written even if the first change since
-		 * now appears at pos == nbytes, but in fact the whole buffer will be
-		 * written regardless pos. This is the price we pay for the choosing
-		 * BLCKSZ as the I/O unit for encrypted data.
-		 */
-		file->common.nbytes = BLCKSZ;
 	}
 }
 
@@ -961,7 +858,7 @@ BufFileDumpBufferEncrypted(BufFile *file)
 size_t
 BufFileRead(BufFile *file, void *ptr, size_t size)
 {
-	return BufFileReadCommon(&file->common, ptr, size, false);
+	return BufFileReadCommon(&file->common, ptr, size, &file->numFiles);
 }
 
 /*
@@ -989,7 +886,7 @@ BufFileFlush(BufFile *file)
 		if (!data_encrypted)
 			BufFileDumpBuffer(file);
 		else
-			BufFileDumpBufferEncrypted(file);
+			BufFileDumpBufferEncrypted(file, false);
 	}
 
 	Assert(!file->common.dirty);
@@ -1011,13 +908,41 @@ BufFileSeek(BufFile *file, int fileno, off_t offset, int whence)
 {
 	int			newFile;
 	off_t		newOffset;
-	File		lastSeg;
+	BufFileSegment	*lastSeg;
+	bool		end_of_segment = false;
 
 	switch (whence)
 	{
 		case SEEK_SET:
 			if (fileno < 0)
 				return EOF;
+
+			if (data_encrypted)
+			{
+				off_t	pos_log, pos_phys;
+
+				/*
+				 * The caller thinks that all BLCKSZ bytes in the block are
+				 * usable for the data, so compute the real position in our
+				 * file in which each page contains some metadata
+				 * (BufFilePageHeader).
+				 */
+				pos_log = fileno * BYTES_PER_SEGMENT_LOGICAL;
+
+				/*
+				 * We don't expect anyone to seek back more than the file
+				 * size, otherwise it'd be less trivial to handle negative
+				 * offset.
+				 */
+				Assert(abs(offset) <= pos_log || offset >= 0);
+
+				pos_log += offset;
+				pos_phys = BufFileLogicalToPhysicalPos(pos_log);
+
+				fileno = pos_phys / BYTES_PER_SEGMENT;
+				offset = pos_phys % BYTES_PER_SEGMENT;
+			}
+
 			newFile = fileno;
 			newOffset = offset;
 			break;
@@ -1028,8 +953,33 @@ BufFileSeek(BufFile *file, int fileno, off_t offset, int whence)
 			 * fileno. Note that large offsets (> 1 GB) risk overflow in this
 			 * add, unless we have 64-bit off_t.
 			 */
-			newFile = file->common.curFile;
-			newOffset = (file->common.curOffset + file->common.pos) + offset;
+			if (!data_encrypted)
+			{
+				newFile = file->common.curFile;
+				newOffset = (file->common.curOffset + file->common.pos) + offset;
+			}
+			else
+			{
+				off_t	pos_log, pos_phys;
+
+				/* 'offset' is the logical position, so treat it accordingly */
+				pos_phys = file->common.curFile * BYTES_PER_SEGMENT +
+					file->common.curOffset + file->common.pos;
+				pos_log = BufFilePhysicalToLogicalPos(pos_phys);
+
+				/*
+				 * We don't expect anyone to seek back more than the file
+				 * size, otherwise it'd be less trivial to handle negative
+				 * offset.
+				 */
+				Assert(abs(offset) <= pos_log || offset >= 0);
+
+				pos_log += offset;
+				pos_phys = BufFileLogicalToPhysicalPos(pos_log);
+
+				newFile = pos_phys / BYTES_PER_SEGMENT;
+				newOffset = pos_phys % BYTES_PER_SEGMENT;
+			}
 			break;
 		case SEEK_END:
 
@@ -1041,47 +991,41 @@ BufFileSeek(BufFile *file, int fileno, off_t offset, int whence)
 			 * file.
 			 */
 			newFile = file->numFiles - 1;
-			lastSeg = file->files[file->numFiles - 1];
-			newOffset = FileSize(lastSeg);
-
-			/*
-			 * If the file is encrypted, the number of useful bytes should be
-			 * recorded at the end of the segment.
-			 */
-			if ((!data_encrypted && newOffset < 0) ||
-				(data_encrypted && newOffset < sizeof(off_t)))
-				ereport(ERROR,
-						(errcode_for_file_access(),
-						 errmsg("could not determine size of temporary file \"%s\" from BufFile: %m",
-								FilePathName(lastSeg))));
+			lastSeg = &file->files[file->numFiles - 1];
+			newOffset = BufFileSegmentSize(lastSeg);
 
 			if (data_encrypted)
 			{
-				/* Read the information on bytes used in the segment. */
-				if (FileRead(lastSeg, (char *) &newOffset,
-							 sizeof(off_t), newOffset - sizeof(off_t),
-							 WAIT_EVENT_BUFFILE_READ) != sizeof(off_t))
-					ereport(ERROR,
-							(errcode_for_file_access(),
-							 errmsg("could not read padding info from BufFile \"%s\": %m",
-									FilePathName(lastSeg))));;
+				/*
+				 * Reading/writing of an encrypted file starts at block
+				 * boundary.
+				 */
+				Assert(newOffset % BLCKSZ == 0);
 
-				if (newOffset < 0)
-					ereport(ERROR,
-							(errcode_for_file_access(),
-							 errmsg("could not determine size of temporary file \"%s\" from BufFile: %m",
-									FilePathName(lastSeg))));
+				/* Adjust the end offset of the segment file. */
+				if (newOffset > 0)
+				{
+					PGAlignedBlock	buffer;
+
+					newOffset -= BLCKSZ;
+					newOffset += BufFileGetUsefulBytes(lastSeg->vfd, newOffset,
+													   &buffer);
+				}
 			}
 			break;
 		default:
 			elog(ERROR, "invalid whence: %d", whence);
 			return EOF;
 	}
-	while (newOffset < 0)
+	/* Negative offset for data_encrypted had to be handled already. */
+	if (!data_encrypted)
 	{
-		if (--newFile < 0)
-			return EOF;
-		newOffset += buffile_max_filesize;
+		while (newOffset < 0)
+		{
+			if (--newFile < 0)
+				return EOF;
+			newOffset += buffile_max_filesize;
+		}
 	}
 	if (newFile == file->common.curFile &&
 		newOffset >= file->common.curOffset &&
@@ -1105,11 +1049,18 @@ BufFileSeek(BufFile *file, int fileno, off_t offset, int whence)
 	 * not work (at least not with this code).
 	 */
 
-	/* convert seek to "start of next seg" to "end of last seg" */
-	if (newFile == file->numFiles && newOffset == 0)
+	/*
+	 * Convert seek to "start of next seg" to "end of last seg". If
+	 * data_encrypted, the page header itself is not a reason to increment
+	 * newFile right now.
+	 */
+	if (newFile == file->numFiles &&
+		(newOffset == 0 ||
+		 (data_encrypted && newOffset == SizeOfBufFilePageHeader)))
 	{
 		newFile--;
 		newOffset = buffile_max_filesize;
+		end_of_segment = true;
 	}
 	while (newOffset > buffile_max_filesize)
 	{
@@ -1129,22 +1080,25 @@ BufFileSeek(BufFile *file, int fileno, off_t offset, int whence)
 	}
 	else
 	{
-		/*
-		 * Offset of an encrypted buffer must be a multiple of BLCKSZ.
-		 */
+		/* Now we can finally account for the header. */
+		if (end_of_segment)
+			newOffset = BYTES_PER_SEGMENT + SizeOfBufFilePageHeader;
+
+		/* Offset of an encrypted buffer must be a multiple of BLCKSZ. */
 		file->common.pos = newOffset % BLCKSZ;
 		file->common.curOffset = newOffset - file->common.pos;
+		/* BufFileLoadBuffer() will set nbytes. */
 
 		/*
-		 * BufFileLoadBuffer() will set nbytes iff it can read something.
-		 */
-		file->common.nbytes = 0;
-
-		/*
-		 * Load and decrypt the existing part of the buffer.
+		 * Load and decrypt the existing part of the buffer. Since curOffset
+		 * must be at block boundary (as opposed to setting it to newOffset),
+		 * we need to load the data between curOffset and newOffset, otherwise
+		 * we could overwrite this part with what the unrelated data we
+		 * currently have in the buffer.
 		 */
 		BufFileLoadBuffer(file);
-		if (file->common.nbytes == 0)
+
+		if (BUFFER_IS_EMPTY(&file->common))
 		{
 			/*
 			 * The data requested is not in the file, but this is not an
@@ -1152,11 +1106,6 @@ BufFileSeek(BufFile *file, int fileno, off_t offset, int whence)
 			 */
 			return 0;
 		}
-
-		/*
-		 * The whole buffer should have been loaded.
-		 */
-		Assert(file->common.nbytes == BLCKSZ);
 	}
 	return 0;
 }
@@ -1164,8 +1113,23 @@ BufFileSeek(BufFile *file, int fileno, off_t offset, int whence)
 void
 BufFileTell(BufFile *file, int *fileno, off_t *offset)
 {
-	*fileno = file->common.curFile;
-	*offset = file->common.curOffset + file->common.pos;
+	if (!data_encrypted)
+	{
+		*fileno = file->common.curFile;
+		*offset = file->common.curOffset + file->common.pos;
+	}
+	else
+	{
+		off_t	pos_phys, pos_log;
+
+		/* Caller should only be interested in the logical offset. */
+		pos_phys = file->common.curFile * BYTES_PER_SEGMENT +
+			file->common.curOffset + file->common.pos;
+		pos_log = BufFilePhysicalToLogicalPos(pos_phys);
+
+		*fileno = pos_log / BYTES_PER_SEGMENT_LOGICAL;
+		*offset = pos_log % BYTES_PER_SEGMENT_LOGICAL;
+	}
 }
 
 /*
@@ -1182,119 +1146,37 @@ BufFileTell(BufFile *file, int *fileno, off_t *offset)
 int
 BufFileSeekBlock(BufFile *file, long blknum)
 {
-	return BufFileSeek(file,
-					   (int) (blknum / buffile_seg_blocks),
-					   (off_t) (blknum % buffile_seg_blocks) * BLCKSZ,
-					   SEEK_SET);
+	if (!data_encrypted)
+		return BufFileSeek(file,
+						   (int) (blknum / buffile_seg_blocks),
+						   (off_t) (blknum % buffile_seg_blocks) * BLCKSZ,
+						   SEEK_SET);
+	else
+		return BufFileSeek(file,
+						   (int) (blknum / buffile_seg_blocks_logical),
+						   (off_t) (blknum % buffile_seg_blocks_logical) * BLCKSZ,
+						   SEEK_SET);
 }
 
 static void
-BufFileTweak(char *tweak, BufFileCommon *file, bool is_transient)
+BufFileTweak(char *tweak, BufFileCommon *file)
 {
-	uint64		block;
+	pid_t		pid = MyProcPid;
+	char	*c = tweak;
 
-	/*
-	 * The unused bytes should always be defined.
-	 */
+	/* Any unused bytes should always be defined. */
 	memset(tweak, 0, TWEAK_SIZE);
 
-	if (!is_transient)
-	{
-		BufFile    *tmpfile = (BufFile *) file;
-		pid_t		pid;
-		uint32		number;
-		int			curFile;
-		int		pid_bytes;
-		char	*c = tweak;
-
-/* Only this part of the PID fits into the tweak. */
-#define PID_BYTES_USABLE	4
-
-		if (tmpfile->fileset)
-		{
-			pid = tmpfile->fileset->creator_pid;
-			number = tmpfile->fileset->number;
-		}
-		else
-		{
-			pid = MyProcPid;
-			number = tmpfile->number;
-		}
-
-		curFile = file->curFile;
-
-		/*
-		 * If the file was produced by BufFileAppend(), we need the original
-		 * curFile, as it was used originally for encryption.
-		 */
-		if (tmpfile->segnos)
-			curFile = tmpfile->segnos[curFile];
-
-		block = curFile * buffile_seg_blocks + file->curOffset / BLCKSZ;
-
-		StaticAssertStmt(PID_BYTES_USABLE + sizeof(number) + sizeof(block)
-						 <= TWEAK_SIZE,
-						 "tweak components do not fit into TWEAK_SIZE");
-
-		/*
-		 * The tweak consists of PID of the owning backend (the leader backend
-		 * in the case of parallel query processing), number within the PID
-		 * and block number.
-		 *
-		 * There's only room for PID_BYTES_USABLE bytes of the PID. Use the
-		 * less significant part so that PID increment always causes tweak
-		 * change.
-		 */
-		pid_bytes = Min(sizeof(pid), PID_BYTES_USABLE);
-#ifdef WORDS_BIGENDIAN
-		memcpy(c, ((char *) &pid) + sizeof(pid) - pid_bytes, pid_bytes);
-#else
-		memcpy(c, &pid, pid_bytes);
-#endif
-		c += pid_bytes;
-		memcpy(c, &number, sizeof(number));
-		c += sizeof(number);
-		memcpy(c, &block, sizeof(block));
-	}
-	else
-	{
-		TransientBufFile *transfile = (TransientBufFile *) file;
-
-		StaticAssertStmt(TWEAK_BASE_SIZE + sizeof(block) <= TWEAK_SIZE,
-						 "tweak components do not fit into TWEAK_SIZE");
-
-		/* The path-dependent part. */
-		memcpy(tweak, transfile->tweakBase, TWEAK_BASE_SIZE);
-		tweak += TWEAK_BASE_SIZE;
-
-		/* The block-dependent part. */
-		block = file->curOffset / BLCKSZ;
-		*((uint64 *) tweak) = block;
-	}
-}
-
-/*
- * Make sure that BufFile.useful array has the required size.
- */
-static void
-ensureUsefulArraySize(BufFileCommon *file, int required)
-{
-	/*
-	 * Does the array already have enough space?
-	 */
-	if (required <= file->nuseful)
-		return;
+	StaticAssertStmt(sizeof(pid) + sizeof(blocks_written) <= TWEAK_SIZE,
+					 "tweak components do not fit into TWEAK_SIZE");
 
 	/*
-	 * It shouldn't be possible to jump beyond the end of the last segment,
-	 * i.e. skip more than 1 segment.
+	 * The tweak consists of PID of the backend and the number of blocks
+	 * written by the backend so far.
 	 */
-	Assert(file->nuseful + 1 == required);
-
-	file->useful = (off_t *)
-		repalloc(file->useful, required * sizeof(off_t));
-	file->useful[file->nuseful] = 0L;
-	file->nuseful++;
+	memcpy(c, &pid, sizeof(pid));
+	c += sizeof(pid);
+	memcpy(c, &blocks_written, sizeof(blocks_written));
 }
 
 #ifdef NOT_USED
@@ -1308,11 +1190,24 @@ BufFileTellBlock(BufFile *file)
 {
 	long		blknum;
 
-	blknum = (file->common.curOffset + file->common.pos) / BLCKSZ;
-	blknum += file->common.curFile * buffile_seg_blocks;
-	return blknum;
-}
+	if (!data_encrypted)
+	{
+		blknum = (file->common.curOffset + file->common.pos) / BLCKSZ;
+		blknum += file->common.curFile * buffile_seg_blocks;
+		return blknum;
+	}
+	else
+	{
+		off_t	pos_phys, pos_log;
 
+		/* Caller should only be interested in the logical offset. */
+		pos_phys = file->common.curFile * BYTES_PER_SEGMENT +
+			file->common.curOffset + file->common.pos;
+		pos_log = BufFilePhysicalToLogicalPos(pos_phys);
+
+		return pos_log / BLCKSZ;
+	}
+}
 #endif
 
 /*
@@ -1324,39 +1219,108 @@ BufFileTellBlock(BufFile *file)
 int64
 BufFileSize(BufFile *file)
 {
+	BufFileSegment	*lastFile = &file->files[file->numFiles - 1];
 	int64		lastFileSize;
+	off_t	size;
 
-	Assert(file->fileset != NULL);
+	/* Get the size of the last physical file. */
+	lastFileSize = BufFileSegmentSize(lastFile);
 
 	if (!data_encrypted)
-	{
-		/* Get the size of the last physical file. */
-		lastFileSize = FileSize(file->files[file->numFiles - 1]);
-		if (lastFileSize < 0)
-			ereport(ERROR,
-					(errcode_for_file_access(),
-					 errmsg("could not determine size of temporary file \"%s\" from BufFile \"%s\": %m",
-							FilePathName(file->files[file->numFiles - 1]),
-							file->name)));
-	}
+		size = ((file->numFiles - 1) * (int64) buffile_max_filesize) +
+			lastFileSize;
 	else
 	{
-		/*
-		 * "useful" should be initialized even for shared file, see
-		 * BufFileOpenShared().
-		 */
-		Assert(file->common.useful != NULL &&
-			   file->common.nuseful >= file->numFiles);
+		/* Caller should only be interested in the logical size. */
+		if (lastFileSize > 0)
+		{
+			PGAlignedBlock	buffer;
+			off_t	last_page, size_phys;
+			int	nbytes;
 
-		/*
-		 * The number of useful bytes in the segment is what caller is
-		 * interested in.
-		 */
-		lastFileSize = file->common.useful[file->common.nuseful - 1];
+
+			Assert(lastFileSize % BLCKSZ == 0);
+			last_page = lastFileSize - BLCKSZ;
+			nbytes = BufFileGetUsefulBytes(lastFile->vfd, last_page, &buffer);
+			size_phys = last_page + nbytes;
+			lastFileSize = BufFilePhysicalToLogicalPos(size_phys);
+		}
+
+		size = (file->numFiles - 1) * BYTES_PER_SEGMENT_LOGICAL +
+			lastFileSize;
 	}
 
-	return ((file->numFiles - 1) * (int64) buffile_max_filesize) +
-		lastFileSize;
+	return size;
+}
+
+/*
+ * Return value of given segment size. Check the file only if the size is not
+ * cached.
+ */
+static int64
+BufFileSegmentSize(BufFileSegment *seg)
+{
+	off_t	size;
+
+	if (seg->size != InvalidSegmentSize)
+		return seg->size;
+
+	size = FileSize(seg->vfd);
+	if (seg < 0)
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not determine size of temporary file \"%s\": %m",
+						FilePathName(seg->vfd))));
+
+	seg->size = size;
+	return size;
+}
+
+/*
+ * Check whether the buffer contains the last block of the temporary file.
+ *
+ * The meaning of numSegments is as the comment of BufFileReadCommon()
+ * explains.
+ */
+static bool
+BufFileLastBlock(BufFileCommon *file, int *numSegments)
+{
+	bool is_transient = numSegments == NULL;
+
+	/* Should only be called on an encrypted file. */
+	Assert(data_encrypted);
+
+	if (is_transient || (file->curFile + 1) == *numSegments)
+	{
+		uint64	seg_size;
+		BufFileSegment	*seg;
+
+		/* The last segment, need to check the size. */
+
+		if (!is_transient)
+		{
+			BufFile	*bf = (BufFile *) file;
+
+			seg = &bf->files[file->curFile];
+		}
+		else
+		{
+			TransientBufFile	*tf = (TransientBufFile *) file;
+
+			seg = &tf->file;
+		}
+		seg_size = BufFileSegmentSize(seg);
+
+		/* Last block in the file/segment? */
+		if ((file->curOffset + BLCKSZ) >= seg_size)
+			return true;
+		else
+			/* Lower than last block. */
+			return false;
+	}
+	else
+		/* Lower than the last segment. */
+		return false;
 }
 
 /*
@@ -1380,9 +1344,14 @@ BufFileSize(BufFile *file)
 long
 BufFileAppend(BufFile *target, BufFile *source)
 {
-	long		startBlock = target->numFiles * buffile_seg_blocks;
+	long		startBlock;
 	int			newNumFiles = target->numFiles + source->numFiles;
 	int			i;
+
+	if (!data_encrypted)
+		startBlock = target->numFiles * buffile_seg_blocks;
+	else
+		startBlock = target->numFiles * buffile_seg_blocks_logical;
 
 	Assert(target->fileset != NULL);
 	Assert(source->common.readOnly);
@@ -1392,81 +1361,14 @@ BufFileAppend(BufFile *target, BufFile *source)
 	if (target->resowner != source->resowner)
 		elog(ERROR, "could not append BufFile with non-matching resource owner");
 
-	target->files = (File *)
-		repalloc(target->files, sizeof(File) * newNumFiles);
+	target->files = (BufFileSegment *)
+		repalloc(target->files, sizeof(BufFileSegment) * newNumFiles);
 	for (i = target->numFiles; i < newNumFiles; i++)
 		target->files[i] = source->files[i - target->numFiles];
-
-	if (data_encrypted)
-		BufFileAppendMetadata(target, source);
 
 	target->numFiles = newNumFiles;
 
 	return startBlock;
-}
-
-/*
- * Add encryption-specific metadata of the source file to the target.
- */
-static void
-BufFileAppendMetadata(BufFile *target, BufFile *source)
-{
-	int			newNumFiles = target->numFiles + source->numFiles;
-	int			newNUseful = target->common.nuseful + source->common.nuseful;
-	int	i;
-
-	/*
-	 * XXX As the typical use case is that parallel workers expose file to the
-	 * leader, can we expect both target and source to have been exported,
-	 * i.e. flushed? In such a case "nuseful" would have to be equal to
-	 * "numFiles" for both input files and the code could get a bit
-	 * simpler. It seems that at least source should be flushed, as
-	 * source->readOnly is expected to be true above.
-	 */
-	target->common.useful = (off_t *)
-		repalloc(target->common.useful, sizeof(off_t) * newNUseful);
-
-	for (i = target->common.nuseful; i < newNUseful; i++)
-		target->common.useful[i] = source->common.useful[i - target->common.nuseful];
-	target->common.nuseful = newNUseful;
-
-	/*
-	 * File segments can appear at different position due to concatenation, so
-	 * make sure we remember the original positions for the sake of encryption
-	 * tweak.
-	 */
-	if (target->segnos == NULL)
-	{
-		/*
-		 * If the target does not have the array yet, allocate it for both
-		 * target and source and initialize the target part.
-		 */
-		target->segnos = (off_t *) palloc(newNumFiles * sizeof(off_t));
-		for (i = 0; i < target->numFiles; i++)
-			target->segnos[i] = i;
-	}
-	else
-	{
-		/*
-		 * Use the existing target part and add space for the source part.
-		 */
-		target->segnos = (off_t *) repalloc(target->segnos,
-											newNumFiles * sizeof(off_t));
-	}
-
-	/*
-	 * The source segment number either equals to (0-based) index of the
-	 * segment, or to an element of an already existing array.
-	 */
-	for (i = target->numFiles; i < newNumFiles; i++)
-	{
-		off_t		segno = i - target->numFiles;
-
-		if (source->segnos == NULL)
-			target->segnos[i] = segno;
-		else
-			target->segnos[i] = source->segnos[segno];
-	}
 }
 
 /*
@@ -1486,7 +1388,6 @@ BufFileOpenTransient(const char *path, int fileFlags,
 	TransientBufFile *file;
 	BufFileCommon *fcommon;
 	File		vfd;
-	off_t		size;
 
 	/* Either read or write mode, but not both. */
 	Assert((fileFlags & O_RDWR) == 0);
@@ -1541,85 +1442,44 @@ BufFileOpenTransient(const char *path, int fileFlags,
 	file = (TransientBufFile *) palloc0(sizeof(TransientBufFile));
 	fcommon = &file->common;
 	fcommon->dirty = false;
-	fcommon->pos = 0;
-	fcommon->nbytes = 0;
+	if (!data_encrypted)
+		fcommon->pos = fcommon->nbytes = 0;
+	else
+		fcommon->pos = fcommon->nbytes = SizeOfBufFilePageHeader;
 	fcommon->readOnly = readOnly;
 	fcommon->append = append;
 	fcommon->curFile = 0;
-	fcommon->useful = (off_t *) palloc0(sizeof(off_t));
-	fcommon->nuseful = 1;
-	file->vfd = vfd;
+	file->file.vfd = vfd;
+	file->file.size = InvalidSegmentSize;
 	file->path = pstrdup(path);
-
-	if (data_encrypted)
-		memcpy(file->tweakBase, tweak_base, TWEAK_BASE_SIZE);
-
-	size = FileSize(file->vfd);
-	if (size < 0)
-		ereport(ERROR,
-				(errcode_for_file_access(),
-				 errmsg("could not initialize TransientBufFile for file \"%s\": %m",
-						path)));
 
 	if (fcommon->append)
 	{
 		/* Position the buffer at the end of the file. */
-		fcommon->curOffset = size;
+		fcommon->curOffset = BufFileSegmentSize(&file->file);
 	}
 	else
 		fcommon->curOffset = 0L;
 
 	/*
-	 * Encrypted transient file should, at its end, contain information on the
-	 * number of useful bytes in the last buffer.
+	 * When reading, or when writing in the append mode, we need to consider
+	 * the current status of the file.
 	 */
-	if (data_encrypted)
+	if (data_encrypted && (fcommon->append || readOnly))
 	{
-		off_t		pos = size;
-		int			nbytes;
+		Assert(fcommon->curOffset % BLCKSZ == 0);
 
-		/* No metadata in an empty file. */
-		if (pos == 0)
-			return file;
-
-		pos -= sizeof(off_t);
-
-		/*
-		 * The word must immediately follow the last buffer of the segment.
-		 */
-		if (pos < 0 || pos % BLCKSZ != 0)
-			ereport(ERROR,
-					(errcode_for_file_access(),
-					 errmsg("could not find padding info in TransientBufFile \"%s\": %m",
-							path)));
-
-		errno = 0;
-		nbytes = FileRead(file->vfd,
-						  (char *) &fcommon->useful[0],
-						  sizeof(off_t),
-						  pos,
-						  WAIT_EVENT_BUFFILE_READ);
-		if (nbytes != sizeof(off_t))
-			ereport(ERROR,
-					(errcode_for_file_access(),
-					 errmsg("could not read padding info from TransientBufFile \"%s\": %m",
-							path)));
-		Assert(fcommon->useful[0] > 0);
-
-		if (fcommon->append)
+		if (fcommon->curOffset > 0)
 		{
-			off_t		useful = fcommon->useful[0];
+			/* Load the last block. */
+			fcommon->curOffset -= BLCKSZ;
+		}
+		BufFileLoadBufferTransient(file);
 
-			/*
-			 * If new buffer should be added, make sure it will end up
-			 * immediately after the last complete one, and also that the next
-			 * write position follows the last valid byte.
-			 */
-			fcommon->pos = useful % BLCKSZ;
-			fcommon->curOffset = useful - fcommon->pos;
-
-			/* Load the existing contents of the buffer. */
-			BufFileLoadBufferTransient(file);
+		if (fcommon->append && fcommon->nbytes > 0)
+		{
+			Assert(fcommon->nbytes >= SizeOfBufFilePageHeader);
+			fcommon->pos = fcommon->nbytes;
 		}
 	}
 
@@ -1646,10 +1506,8 @@ BufFileCloseTransient(TransientBufFile *file)
 		}
 	}
 
-	FileClose(file->vfd);
+	FileClose(file->file.vfd);
 
-	if (data_encrypted)
-		pfree(file->common.useful);
 	pfree(file->path);
 	pfree(file);
 }
@@ -1657,7 +1515,7 @@ BufFileCloseTransient(TransientBufFile *file)
 File
 BufFileTransientGetVfd(TransientBufFile *file)
 {
-	return file->vfd;
+	return file->file.vfd;
 }
 
 /*
@@ -1670,14 +1528,10 @@ BufFileLoadBufferTransient(TransientBufFile *file)
 {
 	Assert(!file->common.dirty);
 
-	/* See comments in BufFileLoadBuffer(). */
-	if (data_encrypted)
-		MemSet(file->common.buffer.data, 0, BLCKSZ);
-
 	/*
 	 * Read whatever we can get, up to a full bufferload.
 	 */
-	file->common.nbytes = FileRead(file->vfd,
+	file->common.nbytes = FileRead(file->file.vfd,
 								   file->common.buffer.data,
 								   sizeof(file->common.buffer),
 								   file->common.curOffset,
@@ -1687,57 +1541,13 @@ BufFileLoadBufferTransient(TransientBufFile *file)
 		ereport(ERROR,
 				(errcode_for_file_access(),
 				 errmsg("could not read file \"%s\": %m",
-						FilePathName(file->vfd))));
+						FilePathName(file->file.vfd))));
 	/* we choose not to advance offset here */
 
-	if (data_encrypted && file->common.nbytes > 0)
-	{
-		char		tweak[TWEAK_SIZE];
-		int			nbytes = file->common.nbytes;
+	if (!data_encrypted)
+		return;
 
-		/*
-		 * The encrypted file can only consist of whole number of our
-		 * encryption units. (Only the whole buffers are dumped / loaded.) The
-		 * only exception is that we're at the end of segment file and found
-		 * the word indicating the number of useful bytes in the segment. This
-		 * can only happen for shared file.
-		 */
-		if (nbytes % BLCKSZ != 0)
-		{
-			Assert(nbytes == sizeof(off_t));
-
-			/*
-			 * This metadata his hidden to caller, so all he needs to know
-			 * that there's no real data at the end of the file.
-			 */
-			file->common.nbytes = 0;
-			return;
-		}
-
-		/* Decrypt the whole block at once. */
-		BufFileTweak(tweak, &file->common, true);
-		decrypt_block(file->common.buffer.data,
-					  file->common.buffer.data,
-					  BLCKSZ,
-					  tweak,
-					  InvalidBlockNumber,
-					  EDK_BUFFILE);
-
-#ifdef	USE_ASSERT_CHECKING
-
-		/*
-		 * The unused part of the buffer which we've read from disk and
-		 * decrypted should only contain zeroes, as explained in front of the
-		 * MemSet() call.
-		 */
-		{
-			int			i;
-
-			for (i = file->common.nbytes; i < BLCKSZ; i++)
-				Assert(file->common.buffer.data[i] == 0);
-		}
-#endif							/* USE_ASSERT_CHECKING */
-	}
+	BufFileAdjustUsefulBytes(&file->common, NULL);
 }
 
 /*
@@ -1746,6 +1556,7 @@ BufFileLoadBufferTransient(TransientBufFile *file)
 static void
 BufFileDumpBufferTransient(TransientBufFile *file)
 {
+	BufFileSegment	*seg;
 	int			bytestowrite,
 				nwritten;
 	char	   *write_ptr;
@@ -1764,79 +1575,57 @@ BufFileDumpBufferTransient(TransientBufFile *file)
 	}
 	else
 	{
-		char		tweak[TWEAK_SIZE];
+		BufFilePageHeader	*hdr;
 
 		/*
-		 * Encrypt the whole buffer, see comments in BufFileDumpBuffer().
+		 * Encrypt the whole buffer, see comments of BufFilePageHeader.
 		 */
-		BufFileTweak(tweak, &file->common, true);
-		encrypt_block(file->common.buffer.data,
-					  encrypt_buf.data,
-					  BLCKSZ,
-					  tweak,
+		hdr = (BufFilePageHeader *) file->common.buffer.data;
+		BufFileTweak(hdr->tweak, &file->common);
+		Assert(file->common.nbytes >= SizeOfBufFilePageHeader);
+		hdr->nbytes = file->common.nbytes;
+		encrypt_block(file->common.buffer.data + TWEAK_SIZE,
+					  encrypt_buf.data + TWEAK_SIZE,
+					  BLCKSZ - TWEAK_SIZE,
+					  hdr->tweak,
 					  InvalidXLogRecPtr,
 					  InvalidBlockNumber,
 					  EDK_BUFFILE);
+		/* Copy the unencrypted part. */
+		memcpy(encrypt_buf.data, file->common.buffer.data, TWEAK_SIZE);
 		write_ptr = encrypt_buf.data;
 		bytestowrite = BLCKSZ;
 	}
 
-	nwritten = FileWrite(file->vfd,
+	seg = &file->file;
+	nwritten = FileWrite(seg->vfd,
 						 write_ptr,
 						 bytestowrite,
 						 file->common.curOffset,
 						 WAIT_EVENT_BUFFILE_WRITE);
+
+	/* For encryption purposes, see BufFileTweak().*/
+	blocks_written++;
+
+	/* Set or update the cached size. */
+	if (seg->size == InvalidSegmentSize ||
+		(file->common.curOffset + nwritten) > seg->size)
+		seg->size = file->common.curOffset + nwritten;
 
 	/* if write didn't set errno, assume problem is no disk space */
 	if (nwritten != bytestowrite)
 		ereport(ERROR,
 				(errcode_for_file_access(),
 				 errmsg("could not write to file \"%s\": %m",
-						FilePathName(file->vfd))));
+						FilePathName(seg->vfd))));
 
 	file->common.curOffset += nwritten;
-
-	if (data_encrypted)
-	{
-		off_t		useful;
-
-		/*
-		 * The number of useful bytes in file.
-		 */
-		useful = file->common.useful[0];
-
-		/*
-		 * Have we dumped the last buffer of the segment, i.e. the one that
-		 * can contain padding?
-		 */
-		if (file->common.curOffset >= useful)
-		{
-			int			bytes_extra;
-
-			/*
-			 * Write the number of useful bytes in the file
-			 *
-			 * Do not increase curOffset afterwards. Thus we ensure that the
-			 * next buffer appended will overwrite the "useful" value just
-			 * written, instead of being appended to it.
-			 */
-			bytes_extra = FileWrite(file->vfd,
-									(char *) &useful,
-									sizeof(useful),
-									file->common.curOffset,
-									WAIT_EVENT_BUFFILE_WRITE);
-			if (bytes_extra != sizeof(useful))
-				ereport(ERROR,
-						(errcode_for_file_access(),
-						 errmsg("could not write to file \"%s\": %m",
-								FilePathName(file->vfd))));
-		}
-	}
-
 	file->common.dirty = false;
 
-	file->common.pos = 0;
-	file->common.nbytes = 0;
+	if (!data_encrypted)
+		file->common.pos = file->common.nbytes = 0;
+	else
+		file->common.pos = file->common.nbytes = SizeOfBufFilePageHeader;
 }
 
 /*
@@ -1845,7 +1634,7 @@ BufFileDumpBufferTransient(TransientBufFile *file)
 size_t
 BufFileReadTransient(TransientBufFile *file, void *ptr, size_t size)
 {
-	return BufFileReadCommon(&file->common, ptr, size, true);
+	return BufFileReadCommon(&file->common, ptr, size, NULL);
 }
 
 /*
@@ -1861,13 +1650,25 @@ BufFileWriteTransient(TransientBufFile *file, void *ptr, size_t size)
  * BufFileWriteCommon
  *
  * Functionality needed by both BufFileRead() and BufFileReadTransient().
+ *
+ * numSegments is a pointer to the number of segment files of a temporary
+ * file, or NULL if the file is a "transient" file (which always consists of a
+ * single segment).
  */
 static size_t
 BufFileReadCommon(BufFileCommon *file, void *ptr, size_t size,
-				  bool is_transient)
+				  int *numSegments)
 {
 	size_t		nread = 0;
 	size_t		nthistime;
+	bool is_transient = numSegments == NULL;
+
+	/*
+	 * For encrypted data, even BufFileSeek() tries to load the buffer, so if
+	 * the buffer is empty now, there's nothing to read.
+	 */
+	if (data_encrypted && BUFFER_IS_EMPTY(file))
+		return nread;
 
 	BufFileFlush((BufFile *) file);
 
@@ -1876,109 +1677,46 @@ BufFileReadCommon(BufFileCommon *file, void *ptr, size_t size,
 		if (file->pos >= file->nbytes)
 		{
 			/*
-			 * Neither read nor write nor seek should leave pos greater than
-			 * nbytes, regardless the data is encrypted or not. pos can only
-			 * be greater if nbytes is zero --- this situation can be caused
-			 * by BufFileSeek().
-			 */
-			Assert(file->pos == file->nbytes || file->nbytes == 0);
-
-			/*
-			 * The Assert() above implies that pos is a whole multiple of
-			 * BLCKSZ, so curOffset has meet the same encryption-specific
-			 * requirement too.
+			 * In the data_encrypted case, curOffset should always stay at
+			 * BLCKSZ boundary.
 			 */
 			Assert(file->curOffset % BLCKSZ == 0 || !data_encrypted);
 
-			file->nbytes = 0;
-			/* Try to load more data into buffer. */
-			if (!data_encrypted || file->pos % BLCKSZ == 0)
+			/*
+			 * Try to load more data into the buffer.
+			 *
+			 * In an encrypted file we should only advance if the current
+			 * block is not the last one in the file. Otherwise, we might skip
+			 * unused space in the block and the next write would create a
+			 * hole.
+			 */
+			if (!data_encrypted || !BufFileLastBlock(file, numSegments))
 			{
-				file->curOffset += file->pos;
-				file->pos = 0;
+				if (!data_encrypted)
+					file->curOffset += file->pos;
+				else
+					file->curOffset += BLCKSZ;
+				file->pos = !data_encrypted ? 0 : SizeOfBufFilePageHeader;
 
 				if (!is_transient)
 					BufFileLoadBuffer((BufFile *) file);
 				else
 					BufFileLoadBufferTransient((TransientBufFile *) file);
 
-				if (file->nbytes <= 0)
+				if (BUFFER_IS_EMPTY(file))
 					break;		/* no more data available */
 			}
 			else
 			{
-				int			nbytes_orig = file->nbytes;
-
 				/*
-				 * Given that BLCKSZ is the I/O unit for encrypted data (see
-				 * comments in BufFileDumpBuffer), we cannot add pos to
-				 * curOffset because that would make it point outside block
-				 * boundary. The only thing we can do is to reload the whole
-				 * buffer and see if more data (i.e. the useful data, not
-				 * padding bytes) is eventually there than the previous load
-				 * has fetched.
+				 * Last block of an encrypted file. Now that we've ran out of
+				 * this block's data, there's no more data available.
 				 */
-				if (!is_transient)
-					BufFileLoadBuffer((BufFile *) file);
-				else
-					BufFileLoadBufferTransient((TransientBufFile *) file);
-
-				Assert(file->nbytes >= nbytes_orig);
-				if (file->nbytes == nbytes_orig)
-					break;		/* no more data available */
+				break;
 			}
 		}
 
 		nthistime = file->nbytes - file->pos;
-
-		/*
-		 * The buffer can contain trailing zeroes because BLCKSZ is the I/O
-		 * unit for encrypted data. These are not available for reading.
-		 */
-		if (data_encrypted)
-		{
-			off_t		useful = file->useful[file->curFile];
-
-			/*
-			 * The criterion is whether the useful data ends within the
-			 * currently loaded buffer.
-			 */
-			if (useful < file->curOffset + BLCKSZ)
-			{
-				int			avail;
-
-				/*
-				 * Compute the number of bytes available in the current
-				 * buffer.
-				 */
-				avail = useful - file->curOffset;
-				Assert(avail >= 0);
-
-				/*
-				 * An empty buffer can exist, e.g. after a seek to the end of
-				 * the last component file.
-				 */
-				if (avail == 0)
-					break;
-
-				/*
-				 * Seek beyond the current EOF, which was not followed by
-				 * write, could have resulted in position outside the useful
-				 * data
-				 */
-				if (file->pos > avail)
-					break;
-
-				nthistime = avail - file->pos;
-				Assert(nthistime >= 0);
-
-				/*
-				 * Have we reached the end of the valid data?
-				 */
-				if (nthistime == 0)
-					break;
-			}
-		}
 
 		if (nthistime > size)
 			nthistime = size;
@@ -2006,12 +1744,13 @@ BufFileWriteCommon(BufFileCommon *file, void *ptr, size_t size,
 {
 	size_t		nwritten = 0;
 	size_t		nthistime;
+	bool		last_in_seg = false;
 
 	Assert(!file->readOnly);
 
 	while (size > 0)
 	{
-		if (file->pos >= BLCKSZ)
+		if (file->pos >= BLCKSZ || last_in_seg)
 		{
 			/* Buffer full, dump it out */
 			if (file->dirty)
@@ -2021,30 +1760,69 @@ BufFileWriteCommon(BufFileCommon *file, void *ptr, size_t size,
 					if (!data_encrypted)
 						BufFileDumpBuffer((BufFile *)file);
 					else
-						BufFileDumpBufferEncrypted((BufFile *) file);
+					{
+#ifdef USE_ASSERT_CHECKING
+						int	fileno = file->curFile;
+#endif
+						int	off = file->curOffset;
+
+						BufFileDumpBufferEncrypted((BufFile *) file,
+												   last_in_seg);
+						last_in_seg = false;
+
+						/*
+						 * If overwriting, load the next buffer first. Since
+						 * (unlike the unencrypted case) we only dump the
+						 * whole buffers so w/o the load the next dump could
+						 * overwrite even the part of the file that should
+						 * stay unchanged.
+						 */
+						if (!file->append && file->curOffset != off)
+						{
+							/*
+							 * curOffset must have advanced to the next block,
+							 * possibly in the next segment file.
+							 */
+							Assert(file->curOffset == (off + BLCKSZ) ||
+								   ((file->curFile == (fileno + 1)) &&
+									file->curOffset == BLCKSZ));
+
+							BufFileLoadBuffer((BufFile *) file);
+						}
+					}
 				}
 				else
 					BufFileDumpBufferTransient((TransientBufFile *) file);
 			}
 			else
 			{
-				Assert(!is_transient);
-
-				/*
-				 * Hmm, went directly from reading to writing?
-				 *
-				 * As pos should be exactly BLCKSZ, there is nothing special
-				 * to do about data_encrypted, except for zeroing the buffer.
-				 */
+				/* Hmm, went directly from reading to writing? */
+				Assert(!last_in_seg);
 				Assert(file->pos == BLCKSZ);
 
 				file->curOffset += file->pos;
-				file->pos = 0;
-				file->nbytes = 0;
-
-				/* See makeBufFile() */
-				if (data_encrypted)
-					MemSet(file->buffer.data, 0, BLCKSZ);
+				if (!data_encrypted)
+					file->pos = file->nbytes = 0;
+				else
+				{
+					if (!is_transient)
+					{
+						/*
+						 * Load the next buffer so that we don't corrupt the
+						 * existing contents.
+						 */
+						file->pos = SizeOfBufFilePageHeader;
+						BufFileLoadBuffer((BufFile *) file);
+					}
+					else
+					{
+						/*
+						 * For transient file we can get here if an existing
+						 * file was opened for writing in append mode.
+						 */
+						file->pos = file->nbytes = SizeOfBufFilePageHeader;
+					}
+				}
 			}
 
 			/*
@@ -2059,19 +1837,63 @@ BufFileWriteCommon(BufFileCommon *file, void *ptr, size_t size,
 			nthistime = size;
 		Assert(nthistime > 0);
 
+		/*
+		 * Close the segment if its last logical block ends here. (Transient
+		 * files consist of a single segment so this is not relevant).
+		 */
+		if (data_encrypted && !is_transient)
+		{
+			off_t	next_off;
+
+			/*
+			 * If curFile hasn't been incremented yet, curOffset may still be
+			 * beyond the end of the last dumped buffer. Therefore use modulo.
+			 */
+			next_off = file->curOffset % BYTES_PER_SEGMENT + file->pos;
+
+			/*
+			 * buffile_max_filesize should accommodate exactly
+			 * BYTES_PER_SEGMENT_LOGICAL bytes of payload. Do not try to write
+			 * more into the segment even if part of the last block stays
+			 * unused.
+			 */
+			if (next_off + nthistime > buffile_max_filesize)
+			{
+				nthistime = buffile_max_filesize - next_off;
+				last_in_seg = true;
+
+				/*
+				 * If buffile_max_filesize bytes are already there, flush the
+				 * buffer immediately, or just advance to the next one if
+				 * already flushed.
+				 */
+				if (nthistime == 0)
+				{
+					if (file->dirty)
+						/* BufFileDumpBufferEncrypted will do the rest. */
+						continue;
+					else
+					{
+						file->curOffset += BLCKSZ;
+						file->pos = file->nbytes = SizeOfBufFilePageHeader;
+						/* The problem of the last block is solved now. */
+						last_in_seg = false;
+						/*
+						 * Load the existing contents of the next buffer so
+						 * that the next flush does not corrupt it.
+						 */
+						BufFileLoadBuffer((BufFile *) file);
+					}
+				}
+			}
+		}
+
 		memcpy(file->buffer.data + file->pos, ptr, nthistime);
 
 		file->dirty = true;
 		file->pos += nthistime;
 		if (file->nbytes < file->pos)
 			file->nbytes = file->pos;
-
-		/*
-		 * Remember how many bytes of the file are valid - the rest is
-		 * padding.
-		 */
-		if (data_encrypted)
-			BufFileUpdateUsefulLength(file, is_transient);
 
 		ptr = (void *) ((char *) ptr + nthistime);
 		size -= nthistime;
@@ -2082,80 +1904,140 @@ BufFileWriteCommon(BufFileCommon *file, void *ptr, size_t size,
 }
 
 /*
- * Update information about the effective length of the file.
+ * Retrieve the BufFilePageHeader.nbytes field from the page of 'segment' file
+ * which starts at 'offset'. The whole page we get the information from will
+ * end up in the memory pointed to by 'buffer'.
+ */
+static int16
+BufFileGetUsefulBytes(File segment, off_t offset, PGAlignedBlock *buffer)
+{
+	BufFilePageHeader	*hdr;
+	char	*data = buffer->data;
+
+	/* Encrypted file is flushed one buffer at a time. */
+	Assert(offset % BLCKSZ == 0);
+
+	/*
+	 * Read the information on bytes used in the last page of the
+	 * segment.
+	 */
+	if (FileRead(segment,
+				 data,
+				 BLCKSZ,
+				 offset,
+				 WAIT_EVENT_BUFFILE_READ) != sizeof(*buffer))
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not read the page from BufFile \"%s\" at offset %zu: %m",
+						FilePathName(segment), offset)));;
+
+	/* Get the number of useful bytes in the last buffer. */
+	hdr = (BufFilePageHeader *) buffer;
+	decrypt_block(data + TWEAK_SIZE,
+				  data + TWEAK_SIZE,
+				  BLCKSZ - TWEAK_SIZE,
+				  hdr->tweak,
+				  InvalidBlockNumber,
+				  EDK_BUFFILE);
+
+	return hdr->nbytes;
+}
+
+/*
+ * After the buffer has been loaded, adjust the usage info if trailing part is
+ * actually not used. The point is that BLCKSZ bytes is always written if the
+ * file is encrypted.
+ *
+ * 'segments' is an array of file segments, or NULL for a transient file.
  */
 static void
-BufFileUpdateUsefulLength(BufFileCommon *file, bool is_transient)
+BufFileAdjustUsefulBytes(BufFileCommon *file, BufFileSegment *segments)
 {
-	off_t		new_useful;
-	int			fileno;
+	BufFilePageHeader	*hdr;
+	bool is_transient = segments == NULL;
 
-	if (is_transient)
+	/* This function is only need for encrypted files. */
+	Assert(data_encrypted);
 
+	/*
+	 * Only the whole blocks are written/read in the data_encrypted case.
+	 */
+	Assert(file->nbytes % BLCKSZ == 0);
+
+	if (file->nbytes == 0)
+	{
+		/* Maintain the convention that nbytes accounts for the header. */
+		file->nbytes = SizeOfBufFilePageHeader;
+	}
+	else if (!is_transient && IsAllZero(file->buffer.data, BLCKSZ))
 	{
 		/*
-		 * Transient file is a single file on the disk, so the whole thing is
-		 * pretty simple.
+		 * Looks like a hole due to lseek() - user should really see zeroes,
+		 * so do not lower file->nbytes. This should not happen to a transient
+		 * file as it does not support lseek().
 		 */
-		fileno = 0;
-
-		new_useful = file->curOffset + file->pos;
-		if (new_useful > file->useful[fileno])
-			file->useful[fileno] = new_useful;
 	}
 	else
 	{
-		fileno = file->curFile;
+		/* Decrypt the buffer. */
+		hdr = (BufFilePageHeader *) file->buffer.data;
+		decrypt_block(file->buffer.data + TWEAK_SIZE,
+					  file->buffer.data + TWEAK_SIZE,
+					  BLCKSZ - TWEAK_SIZE,
+					  hdr->tweak,
+					  InvalidBlockNumber,
+					  EDK_BUFFILE);
 
-		/*
-		 * curFile does not necessarily correspond to the offset: it can still
-		 * have the initial value if BufFileSeek() skipped the previous file
-		 * w/o dumping anything of it. While curFile will be fixed during the
-		 * next dump, we need valid fileno now.
-		 */
-		if (file->curOffset >= buffile_max_filesize)
+		/* Isn't the header corrupt? */
+		Assert(hdr->nbytes <= file->nbytes);
+		Assert(hdr->nbytes >= SizeOfBufFilePageHeader);
+
+		/* Adjust the usage information if needed. */
+		if (hdr->nbytes < file->nbytes)
 		{
-			/*
-			 * Even BufFileSeek() should not allow curOffset to become more
-			 * than buffile_max_filesize (if caller passes higher offset,
-			 * curFile gets increased instead).
-			 */
-			Assert(file->curOffset == buffile_max_filesize);
+			if (!is_transient)
+			{
+				uint64	seg_size;
 
-			fileno++;
+				/* Check the size of the current physical file. */
+				seg_size = BufFileSegmentSize(&segments[file->curFile]);
+
+				/* Is the current buffer at the end of the segment file? */
+				if (file->curOffset + BLCKSZ < seg_size)
+				{
+					/*
+					 * Not at the end, so it should be a hole created by
+					 * lseek(). All the data beyond hdr->nbytes should be
+					 * zeroes.
+					 */
+					MemSet(file->buffer.data + hdr->nbytes, 0,
+						   BLCKSZ - hdr->nbytes);
+
+					/*
+					 * The zeroes should be available to the user, so do not
+					 * lower file->nbytes.
+					 */
+				}
+				else
+				{
+					Assert(file->curOffset + BLCKSZ == seg_size);
+
+					/*
+					 * We're at the end of the segment. Data beyond
+					 * hdr->nbytes should only be padding up to BLCKSZ.
+					 */
+					file->nbytes = hdr->nbytes;
+				}
+			}
+			else
+			{
+				/*
+				 * There's no lseek for transient files, so there should be no
+				 * holes in it. Thus we should be at the end of the file.
+				 */
+				file->nbytes = hdr->nbytes;
+			}
 		}
-
-		/*
-		 * fileno can now point to a segment that does not exist on disk yet.
-		 */
-		ensureUsefulArraySize(file, fileno + 1);
-
-		/*
-		 * Update the number of useful bytes in the underlying component file
-		 * if we've added any useful data.
-		 */
-		new_useful = file->curOffset;
-
-		/*
-		 * Make sure the offset is relative to the correct component file
-		 * (segment). If the write just crossed segment boundary, curOffset
-		 * can still point at the end of the previous segment, and so
-		 * new_useful is also relative to the start of that previous
-		 * segment. Make sure it's relative to the current (fileno) segment.
-		 */
-		if (file->curOffset % buffile_max_filesize == 0)
-			new_useful %= buffile_max_filesize;
-
-		/* Finalize the offset. */
-		new_useful += file->pos;
-
-		/*
-		 * Adjust the number of useful bytes in the file if needed.  This has
-		 * to happen immediately, independent from BufFileDumpBuffer(), so
-		 * that BufFileRead() works correctly anytime.
-		 */
-		if (new_useful > file->useful[fileno])
-			file->useful[fileno] = new_useful;
 	}
 }
 
@@ -2167,10 +2049,29 @@ void
 BufFileTruncateShared(BufFile *file, int fileno, off_t offset)
 {
 	int			numFiles = file->numFiles;
-	int			newFile = fileno;
-	off_t		newOffset = file->common.curOffset;
+	int			newFile;
+	off_t		newOffset;
 	char		segment_name[MAXPGPATH];
 	int			i;
+
+	if (data_encrypted)
+	{
+		off_t	pos_log, pos_phys;
+
+		/*
+		 * The caller thinks that all BLCKSZ bytes in the block are usable for
+		 * the data, so compute the real position in our file in which each
+		 * page contains some metadata (BufFilePageHeader).
+		 */
+		pos_log = fileno * BYTES_PER_SEGMENT_LOGICAL + offset;
+		pos_phys = BufFileLogicalToPhysicalPos(pos_log);
+
+		fileno = pos_phys / BYTES_PER_SEGMENT;
+		offset = pos_phys % BYTES_PER_SEGMENT;
+	}
+
+	newFile = fileno;
+	newOffset = file->common.curOffset;
 
 	/*
 	 * Loop over all the files up to the given fileno and remove the files
@@ -2183,14 +2084,14 @@ BufFileTruncateShared(BufFile *file, int fileno, off_t offset)
 		if ((i != fileno || offset == 0) && i != 0)
 		{
 			SharedSegmentName(segment_name, file->name, i);
-			FileClose(file->files[i]);
+			FileClose(file->files[i].vfd);
 			if (!SharedFileSetDelete(file->fileset, segment_name, true))
 				ereport(ERROR,
 						(errcode_for_file_access(),
 						 errmsg("could not delete shared fileset \"%s\": %m",
 								segment_name)));
 			numFiles--;
-			newOffset = buffile_max_filesize;
+			newOffset = BYTES_PER_SEGMENT;
 
 			/*
 			 * This is required to indicate that we have deleted the given
@@ -2203,31 +2104,18 @@ BufFileTruncateShared(BufFile *file, int fileno, off_t offset)
 		{
 			if (!data_encrypted)
 			{
-				if (FileTruncate(file->files[i], offset,
+				if (FileTruncate(file->files[i].vfd, offset,
 								 WAIT_EVENT_BUFFILE_TRUNCATE) < 0)
 					ereport(ERROR,
 							(errcode_for_file_access(),
 							 errmsg("could not truncate file \"%s\": %m",
-									FilePathName(file->files[i]))));
+									FilePathName(file->files[i].vfd))));
+				file->files[i].size = offset;
 			}
 			else
 			{
-				int	j, bytes_extra;
 				off_t	offset_phys;
-				File	thisfile = file->files[i];
-
-				/*
-				 * We do not allow truncation to extend the file.
-				 *
-				 * XXX Should we instead round up 'offset' to the block
-				 * boundary too? In that case we'd have to ensure that the
-				 * added buffer gets filled with zeroes, encrypted and
-				 * flushed, because ftruncate() fills the gap with zeroes.
-				 */
-				if (offset > file->common.useful[i])
-					ereport(ERROR,
-							(errmsg("could not truncate file \"%s\", it's already smaller than the requested size",
-									FilePathName(thisfile))));
+				BufFileSegment	*thisfile = &file->files[i];
 
 				/* Encrypted file can only be truncated at block boundary. */
 				if (offset % BLCKSZ == 0)
@@ -2235,28 +2123,61 @@ BufFileTruncateShared(BufFile *file, int fileno, off_t offset)
 				else
 					offset_phys = offset - offset % BLCKSZ + BLCKSZ;
 
-				if (FileTruncate(thisfile, offset_phys,
+				if (FileTruncate(thisfile->vfd, offset_phys,
 								 WAIT_EVENT_BUFFILE_TRUNCATE) < 0)
 					ereport(ERROR,
 							(errcode_for_file_access(),
 							 errmsg("could not truncate file \"%s\": %m",
-									FilePathName(thisfile))));
+									FilePathName(thisfile->vfd))));
+				thisfile->size = offset_phys;
 
-				/* Update the metadata on useful bytes. */
-				bytes_extra = FileWrite(thisfile,
-										(char *) &offset,
-										sizeof(offset),
-										offset_phys,
-										WAIT_EVENT_BUFFILE_WRITE);
-				if (bytes_extra != sizeof(offset))
-					ereport(ERROR,
-							(errcode_for_file_access(),
-							 errmsg("could not write to file \"%s\": %m",
-									FilePathName(thisfile))));
-				/* The same in memory. */
-				file->common.useful[i] = offset;
-				for (j = i + 1; j < file->common.nuseful; j++)
-					file->common.useful[j] = 0;
+				/*
+				 * If only part of the last page should remain valid, update
+				 * the page header.
+				 */
+				if (offset_phys != offset)
+				{
+					PGAlignedBlock	buffer;
+					int		nbytes;
+					off_t	off_page = offset - offset % BLCKSZ;
+					int	nbytes_new = offset % BLCKSZ;
+
+					nbytes = BufFileGetUsefulBytes(thisfile->vfd, off_page,
+												   &buffer);
+					if (nbytes_new < nbytes)
+					{
+						BufFilePageHeader	*hdr;
+						int	written;
+
+						/*
+						 * Update the header, encrypt the page again and write
+						 * it.
+						 */
+						hdr = (BufFilePageHeader *) buffer.data;
+						hdr->nbytes = nbytes_new;
+						encrypt_block(buffer.data + TWEAK_SIZE,
+									  buffer.data + TWEAK_SIZE,
+									  BLCKSZ - TWEAK_SIZE,
+									  hdr->tweak,
+									  InvalidXLogRecPtr,
+									  InvalidBlockNumber,
+									  EDK_BUFFILE);
+						written = FileWrite(thisfile->vfd,
+											buffer.data,
+											BLCKSZ,
+											off_page,
+											WAIT_EVENT_BUFFILE_WRITE);
+						if (written <= 0 || written != BLCKSZ)
+							ereport(ERROR,
+									(errcode_for_file_access(),
+									 errmsg("could not write to file \"%s\": %m",
+											FilePathName(thisfile->vfd))));
+					}
+					else if (nbytes_new >= nbytes)
+						ereport(ERROR,
+								(errmsg("could not truncate file \"%s\", it's already smaller than the requested size",
+										FilePathName(thisfile->vfd))));
+				}
 			}
 			newOffset = offset;
 		}
@@ -2277,17 +2198,7 @@ BufFileTruncateShared(BufFile *file, int fileno, off_t offset)
 			file->common.pos = (int) (newOffset - file->common.curOffset);
 
 		/* Adjust the nbytes for the current buffer. */
-		if (!data_encrypted)
-			file->common.nbytes = (int) (newOffset - file->common.curOffset);
-		else
-		{
-			/*
-			 * Only the whole buffer should be loaded if the data is
-			 * encrypted. The 'useful' item should reflect the truncation.
-			 */
-			Assert(file->common.nbytes % BLCKSZ == 0);
-			Assert(file->common.useful[file->common.curFile] == newOffset);
-		}
+		file->common.nbytes = (int) (newOffset - file->common.curOffset);
 	}
 	else if (newFile == file->common.curFile &&
 			 newOffset < file->common.curOffset)
@@ -2308,7 +2219,6 @@ BufFileTruncateShared(BufFile *file, int fileno, off_t offset)
 			/* Encrypted buffer must start at block boundary. */
 			file->common.pos = newOffset % BLCKSZ;
 			file->common.curOffset = newOffset - file->common.pos;
-			file->common.nbytes = 0;
 
 			/*
 			 * Unlike the unencrypted code path, which allows the buffer to
@@ -2340,7 +2250,6 @@ BufFileTruncateShared(BufFile *file, int fileno, off_t offset)
 			/* See above. */
 			file->common.pos = newOffset % BLCKSZ;
 			file->common.curOffset = newOffset - file->common.pos;
-			file->common.nbytes = 0;
 			BufFileLoadBuffer(file);
 			file->common.dirty = false;
 		}

@@ -6,7 +6,6 @@ include $(top_builddir)/src/Makefile.global
 
 SUBDIRS = \
 		  brin \
-		  buffile \
 		  commit_ts \
 		  delay_execution \
 		  dummy_index_am \

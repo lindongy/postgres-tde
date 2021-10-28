@@ -324,6 +324,15 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
 
 	ctx = data_kind != EDK_BUFFILE ? ctx_encrypt : ctx_encrypt_buffile;
 
+	/*
+	 * The amount of encrypted data should be a multiple of the encryption
+	 * block size.
+	 */
+#ifdef USE_ASSERT_CHECKING
+	if (EVP_CIPHER_CTX_block_size(ctx) > 1)
+		Assert(size % EVP_CIPHER_CTX_block_size(ctx) == 0);
+#endif
+
 	/* The remaining initialization. */
 	if (EVP_EncryptInit_ex(ctx, NULL, NULL, encryption_key,
 						   (unsigned char *) tweak) != 1)
@@ -420,6 +429,15 @@ decrypt_block(const char *input, char *output, Size size, char *tweak,
 	}
 
 	ctx = data_kind != EDK_BUFFILE ? ctx_encrypt : ctx_encrypt_buffile;
+
+	/*
+	 * The amount of decrypted data should be a multiple of the encryption
+	 * block size.
+	 */
+#ifdef USE_ASSERT_CHECKING
+	if (EVP_CIPHER_CTX_block_size(ctx) > 1)
+		Assert(size % EVP_CIPHER_CTX_block_size(ctx) == 0);
+#endif
 
 	/* The remaining initialization. */
 	if (EVP_DecryptInit_ex(ctx, NULL, NULL, encryption_key,
