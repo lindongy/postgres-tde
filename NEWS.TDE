@@ -1,10 +1,14 @@
-14.0_TDE_1.0
+TDE_1.1.0
+=========
+
+Improved encryption of temporary files.
+
+A new, unpredictable value of the initialization vector (IV) is now used for
+each execution of encryption. This affects the use cases where (a part of) an
+existing file is overwritten with new data.
+
+
+TDE_1.0.0
 ============
 
-Merged TDE 1.0 into PostgreSQL 14.0
-
-
-13.1_TDE_1.0
-============
-
-Merged TDE 1.0 into PostgreSQL 13.1
+The initial implementation of the TDE feature.
