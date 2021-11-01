@@ -2025,7 +2025,34 @@ BufFileWriteCommon(BufFileCommon *file, void *ptr, size_t size,
 					if (!data_encrypted)
 						BufFileDumpBuffer((BufFile *)file);
 					else
+					{
+#ifdef USE_ASSERT_CHECKING
+						int	fileno = file->curFile;
+#endif
+						int	off = file->curOffset;
+
 						BufFileDumpBufferEncrypted((BufFile *) file);
+
+						/*
+						 * If overwriting, load the next buffer first. Since
+						 * (unlike the unencrypted case) we only dump the
+						 * whole buffers so w/o the load the next dump could
+						 * overwrite even the part of the file that should
+						 * stay unchanged.
+						 */
+						if (!file->append && file->curOffset != off)
+						{
+							/*
+							 * curOffset must have advanced to the next block,
+							 * possibly in the next segment file.
+							 */
+							Assert(file->curOffset == (off + BLCKSZ) ||
+								   ((file->curFile == (fileno + 1)) &&
+									file->curOffset == BLCKSZ));
+
+							BufFileLoadBuffer((BufFile *) file);
+						}
+					}
 				}
 				else
 					BufFileDumpBufferTransient((TransientBufFile *) file);
