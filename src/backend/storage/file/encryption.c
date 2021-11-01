@@ -333,10 +333,42 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
 		Assert(size % EVP_CIPHER_CTX_block_size(ctx) == 0);
 #endif
 
-	/* The remaining initialization. */
-	if (EVP_EncryptInit_ex(ctx, NULL, NULL, encryption_key,
-						   (unsigned char *) tweak) != 1)
-		evp_error();
+	/* For the AES-CBC mode make sure the IV is unpredictable. */
+	if (data_kind == EDK_BUFFILE)
+	{
+		char	tweak_iv[TWEAK_SIZE];
+
+		memset(tweak_iv, 0, TWEAK_SIZE);
+
+		if (EVP_EncryptInit_ex(ctx, NULL, NULL, encryption_key,
+							   (unsigned char *) tweak_iv) != 1)
+			evp_error();
+
+		if (EVP_EncryptUpdate(ctx, (unsigned char *) tweak,
+							  &out_size, (unsigned char *) tweak,
+							  TWEAK_SIZE) != 1)
+			evp_error();
+
+		if (out_size != TWEAK_SIZE)
+		{
+#ifndef FRONTEND
+			ereport(ERROR, (errmsg("Some data left undecrypted")));
+#else
+			/* Front-end shouldn't actually get here, but be careful. */
+			fprintf(stderr, "Some data left undecrypted\n");
+			exit(EXIT_FAILURE);
+#endif	/* FRONTEND */
+		}
+
+		/* Initialize again, using the encrypted IV. */
+		if (EVP_EncryptInit_ex(ctx, NULL, NULL, encryption_key,
+							   (unsigned char *) tweak) != 1)
+			evp_error();
+	}
+	else
+		if (EVP_EncryptInit_ex(ctx, NULL, NULL, encryption_key,
+							   (unsigned char *) tweak) != 1)
+			evp_error();
 
 	/* Do the actual encryption. */
 	if (EVP_EncryptUpdate(ctx, (unsigned char *) output,

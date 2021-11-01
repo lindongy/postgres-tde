@@ -796,8 +796,8 @@ BufFileDumpBufferEncrypted(BufFile *file, bool last_in_segment)
 				  InvalidXLogRecPtr,
 				  InvalidBlockNumber,
 				  EDK_BUFFILE);
-	/* Copy the unencrypted part. */
-	memcpy(encrypt_buf.data, file->common.buffer.data, TWEAK_SIZE);
+	/* Copy the encrypted tweak. */
+	memcpy(encrypt_buf.data, hdr->tweak, TWEAK_SIZE);
 
 	thisfile = &file->files[file->common.curFile];
 	bytestowrite = FileWrite(thisfile->vfd,
@@ -1591,8 +1591,9 @@ BufFileDumpBufferTransient(TransientBufFile *file)
 					  InvalidXLogRecPtr,
 					  InvalidBlockNumber,
 					  EDK_BUFFILE);
-		/* Copy the unencrypted part. */
-		memcpy(encrypt_buf.data, file->common.buffer.data, TWEAK_SIZE);
+		/* Copy the encrypted tweak. */
+		memcpy(encrypt_buf.data, hdr->tweak, TWEAK_SIZE);
+
 		write_ptr = encrypt_buf.data;
 		bytestowrite = BLCKSZ;
 	}
