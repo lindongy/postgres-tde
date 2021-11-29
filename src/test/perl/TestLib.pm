@@ -104,17 +104,39 @@ BEGIN
 	delete $ENV{LC_ALL};
 	$ENV{LC_MESSAGES} = 'C';
 
-	delete $ENV{PGCONNECT_TIMEOUT};
-	delete $ENV{PGDATA};
-	delete $ENV{PGDATABASE};
-	delete $ENV{PGHOSTADDR};
-	delete $ENV{PGREQUIRESSL};
-	delete $ENV{PGSERVICE};
-	delete $ENV{PGSSLMODE};
-	delete $ENV{PGUSER};
-	delete $ENV{PGPORT};
-	delete $ENV{PGHOST};
-	delete $ENV{PG_COLOR};
+	# This list should be kept in sync with pg_regress.c.
+	my @envkeys = qw (
+	  PGCHANNELBINDING
+	  PGCLIENTENCODING
+	  PGCONNECT_TIMEOUT
+	  PGDATA
+	  PGDATABASE
+	  PGGSSENCMODE
+	  PGGSSLIB
+	  PGHOSTADDR
+	  PGKRBSRVNAME
+	  PGPASSFILE
+	  PGPASSWORD
+	  PGREQUIREPEER
+	  PGREQUIRESSL
+	  PGSERVICE
+	  PGSERVICEFILE
+	  PGSSLCERT
+	  PGSSLCRL
+	  PGSSLCRLDIR
+	  PGSSLKEY
+	  PGSSLMAXPROTOCOLVERSION
+	  PGSSLMINPROTOCOLVERSION
+	  PGSSLMODE
+	  PGSSLROOTCERT
+	  PGSSLSNI
+	  PGTARGETSESSIONATTRS
+	  PGUSER
+	  PGPORT
+	  PGHOST
+	  PG_COLOR
+	);
+	delete @ENV{@envkeys};
 
 	$ENV{PGAPPNAME} = basename($0);
 
@@ -127,7 +149,7 @@ BEGIN
 	{
 		require Win32API::File;
 		Win32API::File->import(
-			qw(createFile OsFHandleOpen CloseHandle setFilePointer));
+			qw(createFile OsFHandleOpen CloseHandle));
 	}
 
 	# Specifies whether to use Unix sockets for test setups.  On
@@ -282,6 +304,8 @@ except for the case of Perl=msys and host=mingw32.  The subject need not
 exist, but its parent or grandparent directory must exist unless cygpath is
 available.
 
+The returned path uses forward slashes but has no trailing slash.
+
 =cut
 
 sub perl2host
@@ -291,10 +315,11 @@ sub perl2host
 	if ($is_msys2)
 	{
 		# get absolute, windows type path
-		my $path = qx{cygpath -a -w "$subject"};
+		my $path = qx{cygpath -a -m "$subject"};
 		if (!$?)
 		{
 			chomp $path;
+			$path =~ s!/$!!;
 			return $path if $path;
 		}
 		# fall through if this didn't work.
@@ -320,6 +345,7 @@ sub perl2host
 	# this odd way of calling 'pwd -W' is the only way that seems to work.
 	my $dir = qx{sh -c "pwd -W"};
 	chomp $dir;
+	$dir =~ s!/$!!;
 	chdir $here;
 	return $dir . $leaf;
 }
@@ -388,6 +414,7 @@ sub run_command
 	my ($cmd) = @_;
 	my ($stdout, $stderr);
 	my $result = IPC::Run::run $cmd, '>', \$stdout, '2>', \$stderr;
+	foreach ($stderr, $stdout) { s/\r\n/\n/g if $Config{osname} eq 'msys'; }
 	chomp($stdout);
 	chomp($stderr);
 	return ($stdout, $stderr);
@@ -445,33 +472,33 @@ sub slurp_file
 	my ($filename, $offset) = @_;
 	local $/;
 	my $contents;
+	my $fh;
+
+	# On windows open file using win32 APIs, to allow us to set the
+	# FILE_SHARE_DELETE flag ("d" below), otherwise other accesses to the file
+	# may fail.
 	if ($Config{osname} ne 'MSWin32')
 	{
-		open(my $in, '<', $filename)
+		open($fh, '<', $filename)
 		  or croak "could not read \"$filename\": $!";
-		if (defined($offset))
-		{
-			seek($in, $offset, SEEK_SET)
-			  or croak "could not seek \"$filename\": $!";
-		}
-		$contents = <$in>;
-		close $in;
 	}
 	else
 	{
 		my $fHandle = createFile($filename, "r", "rwd")
 		  or croak "could not open \"$filename\": $^E";
-		OsFHandleOpen(my $fh = IO::Handle->new(), $fHandle, 'r')
+		OsFHandleOpen($fh = IO::Handle->new(), $fHandle, 'r')
 		  or croak "could not read \"$filename\": $^E\n";
-		if (defined($offset))
-		{
-			setFilePointer($fh, $offset, qw(FILE_BEGIN))
-			  or croak "could not seek \"$filename\": $^E\n";
-		}
-		$contents = <$fh>;
-		CloseHandle($fHandle)
-		  or croak "could not close \"$filename\": $^E\n";
 	}
+
+	if (defined($offset))
+	{
+		seek($fh, $offset, SEEK_SET)
+		  or croak "could not seek \"$filename\": $!";
+	}
+
+	$contents = <$fh>;
+	close $fh;
+
 	$contents =~ s/\r\n/\n/g if $Config{osname} eq 'msys';
 	return $contents;
 }
@@ -832,6 +859,7 @@ sub command_like
 	my $result = IPC::Run::run $cmd, '>', \$stdout, '2>', \$stderr;
 	ok($result, "$test_name: exit code 0");
 	is($stderr, '', "$test_name: no stderr");
+	$stdout =~ s/\r\n/\n/g if $Config{osname} eq 'msys';
 	like($stdout, $expected_stdout, "$test_name: matches");
 	return;
 }
@@ -884,6 +912,7 @@ sub command_fails_like
 	print("# Running: " . join(" ", @{$cmd}) . "\n");
 	my $result = IPC::Run::run $cmd, '>', \$stdout, '2>', \$stderr;
 	ok(!$result, "$test_name: exit code not 0");
+	$stderr =~ s/\r\n/\n/g if $Config{osname} eq 'msys';
 	like($stderr, $expected_stderr, "$test_name: matches");
 	return;
 }
@@ -927,6 +956,8 @@ sub command_checks_all
 	die "command exited with signal " . ($ret & 127)
 	  if $ret & 127;
 	$ret = $ret >> 8;
+
+	foreach ($stderr, $stdout) { s/\r\n/\n/g if $Config{osname} eq 'msys'; }
 
 	# check status
 	ok($ret == $expected_ret,

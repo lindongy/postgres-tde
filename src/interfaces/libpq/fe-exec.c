@@ -191,7 +191,7 @@ PQmakeEmptyPGresult(PGconn *conn, ExecStatusType status)
 				/* non-error cases */
 				break;
 			default:
-				pqSetResultError(result, conn->errorMessage.data);
+				pqSetResultError(result, &conn->errorMessage);
 				break;
 		}
 
@@ -662,14 +662,28 @@ pqResultStrdup(PGresult *res, const char *str)
  *		assign a new error message to a PGresult
  */
 void
-pqSetResultError(PGresult *res, const char *msg)
+pqSetResultError(PGresult *res, PQExpBuffer errorMessage)
 {
+	char	   *msg;
+
 	if (!res)
 		return;
-	if (msg && *msg)
-		res->errMsg = pqResultStrdup(res, msg);
+
+	/*
+	 * We handle two OOM scenarios here.  The errorMessage buffer might be
+	 * marked "broken" due to having previously failed to allocate enough
+	 * memory for the message, or it might be fine but pqResultStrdup fails
+	 * and returns NULL.  In either case, just make res->errMsg point directly
+	 * at a constant "out of memory" string.
+	 */
+	if (!PQExpBufferBroken(errorMessage))
+		msg = pqResultStrdup(res, errorMessage->data);
 	else
-		res->errMsg = NULL;
+		msg = NULL;
+	if (msg)
+		res->errMsg = msg;
+	else
+		res->errMsg = libpq_gettext("out of memory\n");
 }
 
 /*
@@ -852,19 +866,19 @@ pqInternalNotice(const PGNoticeHooks *hooks, const char *fmt,...)
 	/* XXX should provide a SQLSTATE too? */
 
 	/*
-	 * Result text is always just the primary message + newline. If we can't
-	 * allocate it, don't bother invoking the receiver.
+	 * Result text is always just the primary message + newline.  If we can't
+	 * allocate it, substitute "out of memory", as in pqSetResultError.
 	 */
 	res->errMsg = (char *) pqResultAlloc(res, strlen(msgBuf) + 2, false);
 	if (res->errMsg)
-	{
 		sprintf(res->errMsg, "%s\n", msgBuf);
+	else
+		res->errMsg = libpq_gettext("out of memory\n");
 
-		/*
-		 * Pass to receiver, then free it.
-		 */
-		res->noticeHooks.noticeRec(res->noticeHooks.noticeRecArg, res);
-	}
+	/*
+	 * Pass to receiver, then free it.
+	 */
+	res->noticeHooks.noticeRec(res->noticeHooks.noticeRecArg, res);
 	PQclear(res);
 }
 
@@ -1223,7 +1237,8 @@ pqAllocCmdQueueEntry(PGconn *conn)
 
 /*
  * pqAppendCmdQueueEntry
- *		Append a caller-allocated command queue entry to the queue.
+ *		Append a caller-allocated entry to the command queue, and update
+ *		conn->asyncStatus to account for it.
  *
  * The query itself must already have been put in the output buffer by the
  * caller.
@@ -1239,6 +1254,38 @@ pqAppendCmdQueueEntry(PGconn *conn, PGcmdQueueEntry *entry)
 		conn->cmd_queue_tail->next = entry;
 
 	conn->cmd_queue_tail = entry;
+
+	switch (conn->pipelineStatus)
+	{
+		case PQ_PIPELINE_OFF:
+		case PQ_PIPELINE_ON:
+
+			/*
+			 * When not in pipeline aborted state, if there's a result ready
+			 * to be consumed, let it be so (that is, don't change away from
+			 * READY or READY_MORE); otherwise set us busy to wait for
+			 * something to arrive from the server.
+			 */
+			if (conn->asyncStatus == PGASYNC_IDLE)
+				conn->asyncStatus = PGASYNC_BUSY;
+			break;
+
+		case PQ_PIPELINE_ABORTED:
+
+			/*
+			 * In aborted pipeline state, we don't expect anything from the
+			 * server (since we don't send any queries that are queued).
+			 * Therefore, if IDLE then do what PQgetResult would do to let
+			 * itself consume commands from the queue; if we're in any other
+			 * state, we don't have to do anything.
+			 */
+			if (conn->asyncStatus == PGASYNC_IDLE)
+			{
+				resetPQExpBuffer(&conn->errorMessage);
+				pqPipelineProcessQueue(conn);
+			}
+			break;
+	}
 }
 
 /*
@@ -1329,7 +1376,8 @@ PQsendQueryInternal(PGconn *conn, const char *query, bool newQuery)
 	{
 		/*
 		 * In pipeline mode we cannot use the simple protocol, so we send
-		 * Parse, Bind, Describe Portal, Execute.
+		 * Parse, Bind, Describe Portal, Execute, Close Portal (with the
+		 * unnamed portal).
 		 */
 		if (pqPutMsgStart('P', conn) < 0 ||
 			pqPuts("", conn) < 0 ||
@@ -1355,6 +1403,11 @@ PQsendQueryInternal(PGconn *conn, const char *query, bool newQuery)
 			pqPutInt(0, 4, conn) < 0 ||
 			pqPutMsgEnd(conn) < 0)
 			goto sendFailed;
+		if (pqPutMsgStart('C', conn) < 0 ||
+			pqPutc('P', conn) < 0 ||
+			pqPuts("", conn) < 0 ||
+			pqPutMsgEnd(conn) < 0)
+			goto sendFailed;
 
 		entry->queryclass = PGQUERY_EXTENDED;
 		entry->query = strdup(query);
@@ -1369,8 +1422,6 @@ PQsendQueryInternal(PGconn *conn, const char *query, bool newQuery)
 
 	/* OK, it's launched! */
 	pqAppendCmdQueueEntry(conn, entry);
-	if (conn->pipelineStatus == PQ_PIPELINE_OFF)
-		conn->asyncStatus = PGASYNC_BUSY;
 	return 1;
 
 sendFailed:
@@ -1403,10 +1454,11 @@ PQsendQueryParams(PGconn *conn,
 							 libpq_gettext("command string is a null pointer\n"));
 		return 0;
 	}
-	if (nParams < 0 || nParams > 65535)
+	if (nParams < 0 || nParams > PQ_QUERY_PARAM_MAX_LIMIT)
 	{
-		appendPQExpBufferStr(&conn->errorMessage,
-							 libpq_gettext("number of parameters must be between 0 and 65535\n"));
+		appendPQExpBuffer(&conn->errorMessage,
+						  libpq_gettext("number of parameters must be between 0 and %d\n"),
+						  PQ_QUERY_PARAM_MAX_LIMIT);
 		return 0;
 	}
 
@@ -1451,10 +1503,11 @@ PQsendPrepare(PGconn *conn,
 							 libpq_gettext("command string is a null pointer\n"));
 		return 0;
 	}
-	if (nParams < 0 || nParams > 65535)
+	if (nParams < 0 || nParams > PQ_QUERY_PARAM_MAX_LIMIT)
 	{
-		appendPQExpBufferStr(&conn->errorMessage,
-							 libpq_gettext("number of parameters must be between 0 and 65535\n"));
+		appendPQExpBuffer(&conn->errorMessage,
+						  libpq_gettext("number of parameters must be between 0 and %d\n"),
+						  PQ_QUERY_PARAM_MAX_LIMIT);
 		return 0;
 	}
 
@@ -1503,11 +1556,6 @@ PQsendPrepare(PGconn *conn,
 	/* if insufficient memory, query just winds up NULL */
 	entry->query = strdup(query);
 
-	pqAppendCmdQueueEntry(conn, entry);
-
-	if (conn->pipelineStatus == PQ_PIPELINE_OFF)
-		conn->asyncStatus = PGASYNC_BUSY;
-
 	/*
 	 * Give the data a push (in pipeline mode, only if we're past the size
 	 * threshold).  In nonblock mode, don't complain if we're unable to send
@@ -1515,6 +1563,9 @@ PQsendPrepare(PGconn *conn,
 	 */
 	if (pqPipelineFlush(conn) < 0)
 		goto sendFailed;
+
+	/* OK, it's launched! */
+	pqAppendCmdQueueEntry(conn, entry);
 
 	return 1;
 
@@ -1548,10 +1599,11 @@ PQsendQueryPrepared(PGconn *conn,
 							 libpq_gettext("statement name is a null pointer\n"));
 		return 0;
 	}
-	if (nParams < 0 || nParams > 65535)
+	if (nParams < 0 || nParams > PQ_QUERY_PARAM_MAX_LIMIT)
 	{
-		appendPQExpBufferStr(&conn->errorMessage,
-							 libpq_gettext("number of parameters must be between 0 and 65535\n"));
+		appendPQExpBuffer(&conn->errorMessage,
+						  libpq_gettext("number of parameters must be between 0 and %d\n"),
+						  PQ_QUERY_PARAM_MAX_LIMIT);
 		return 0;
 	}
 
@@ -1808,8 +1860,7 @@ PQsendQueryGuts(PGconn *conn,
 
 	/* OK, it's launched! */
 	pqAppendCmdQueueEntry(conn, entry);
-	if (conn->pipelineStatus == PQ_PIPELINE_OFF)
-		conn->asyncStatus = PGASYNC_BUSY;
+
 	return 1;
 
 sendFailed:
@@ -2085,7 +2136,7 @@ PQgetResult(PGconn *conn)
 				appendPQExpBuffer(&conn->errorMessage,
 								  libpq_gettext("PGEventProc \"%s\" failed during PGEVT_RESULTCREATE event\n"),
 								  res->events[i].name);
-				pqSetResultError(res, conn->errorMessage.data);
+				pqSetResultError(res, &conn->errorMessage);
 				res->resultStatus = PGRES_FATAL_ERROR;
 				break;
 			}
@@ -2439,8 +2490,7 @@ PQsendDescribe(PGconn *conn, char desc_type, const char *desc_target)
 
 	/* OK, it's launched! */
 	pqAppendCmdQueueEntry(conn, entry);
-	if (conn->pipelineStatus == PQ_PIPELINE_OFF)
-		conn->asyncStatus = PGASYNC_BUSY;
+
 	return 1;
 
 sendFailed:
@@ -2943,7 +2993,7 @@ pqCommandQueueAdvance(PGconn *conn)
  * pqPipelineProcessQueue: subroutine for PQgetResult
  *		In pipeline mode, start processing the results of the next query in the queue.
  */
-void
+static void
 pqPipelineProcessQueue(PGconn *conn)
 {
 	switch (conn->asyncStatus)
@@ -3067,8 +3117,6 @@ PQpipelineSync(PGconn *conn)
 		pqPutMsgEnd(conn) < 0)
 		goto sendFailed;
 
-	pqAppendCmdQueueEntry(conn, entry);
-
 	/*
 	 * Give the data a push.  In nonblock mode, don't complain if we're unable
 	 * to send it all; PQgetResult() will do any additional flushing needed.
@@ -3076,11 +3124,8 @@ PQpipelineSync(PGconn *conn)
 	if (PQflush(conn) < 0)
 		goto sendFailed;
 
-	/*
-	 * Call pqPipelineProcessQueue so the user can call start calling
-	 * PQgetResult.
-	 */
-	pqPipelineProcessQueue(conn);
+	/* OK, it's launched! */
+	pqAppendCmdQueueEntry(conn, entry);
 
 	return 1;
 
@@ -3090,6 +3135,42 @@ sendFailed:
 	return 0;
 }
 
+/*
+ * PQsendFlushRequest
+ *		Send request for server to flush its buffer.  Useful in pipeline
+ *		mode when a sync point is not desired.
+ */
+int
+PQsendFlushRequest(PGconn *conn)
+{
+	if (!conn)
+		return 0;
+
+	/* Don't try to send if we know there's no live connection. */
+	if (conn->status != CONNECTION_OK)
+	{
+		appendPQExpBufferStr(&conn->errorMessage,
+							 libpq_gettext("no connection to the server\n"));
+		return 0;
+	}
+
+	/* Can't send while already busy, either, unless enqueuing for later */
+	if (conn->asyncStatus != PGASYNC_IDLE &&
+		conn->pipelineStatus == PQ_PIPELINE_OFF)
+	{
+		appendPQExpBufferStr(&conn->errorMessage,
+							 libpq_gettext("another command is already in progress\n"));
+		return 0;
+	}
+
+	if (pqPutMsgStart('H', conn) < 0 ||
+		pqPutMsgEnd(conn) < 0)
+	{
+		return 0;
+	}
+
+	return 1;
+}
 
 /* ====== accessor funcs for PGresult ======== */
 

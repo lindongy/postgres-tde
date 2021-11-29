@@ -8,14 +8,12 @@ use Config;
 use PostgresNode;
 use TestLib;
 use Test::More;
-use Cwd;
 
 my $node = get_new_node('main');
 $node->init;
 $node->start;
 
 my $numrows = 700;
-$ENV{PATH} = "$ENV{PATH}:" . getcwd();
 
 my ($out, $err) = run_command([ 'libpq_pipeline', 'tests' ]);
 die "oops: $err" unless $err eq '';
@@ -27,7 +25,7 @@ for my $testname (@tests)
 {
 	my @extraargs = ('-r', $numrows);
 	my $cmptrace = grep(/^$testname$/,
-		qw(simple_pipeline multi_pipelines prepared singlerow
+		qw(simple_pipeline nosync multi_pipelines prepared singlerow
 		  pipeline_abort transaction disallowed_in_pipeline)) > 0;
 
 	# For a bunch of tests, generate a libpq trace file too.

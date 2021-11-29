@@ -607,7 +607,6 @@ lazy_scan_zheap(LVRelState *vacrel, VacuumParams *params, bool aggressive)
 	vacrel->pages_removed = 0;
 	vacrel->lpdead_item_pages = 0;
 	vacrel->nonempty_pages = 0;
-	vacrel->lock_waiter_detected = false;
 
 	/* Initialize instrumentation counters */
 	vacrel->num_index_scans = 0;
@@ -686,7 +685,7 @@ lazy_scan_zheap(LVRelState *vacrel, VacuumParams *params, bool aggressive)
 		 * scanning of last page.
 		 */
 #define FORCE_CHECK_PAGE() \
-		(blkno == nblocks - 1 && should_attempt_truncation(vacrel, params))
+		(blkno == nblocks - 1 && should_attempt_truncation(vacrel))
 
 		/* Report the number of blocks scanned. */
 		pgstat_progress_update_param(PROGRESS_VACUUM_HEAP_BLKS_SCANNED, blkno);
@@ -1360,11 +1359,22 @@ lazy_vacuum_zheap_rel(Relation rel, VacuumParams *params,
 					 &vacrel->indrels);
 	vacrel->do_index_vacuuming = true;
 	vacrel->do_index_cleanup = true;
-	vacrel->do_failsafe = false;
-	if (params->index_cleanup == VACOPT_TERNARY_DISABLED)
+	vacrel->do_rel_truncate = (params->truncate != VACOPTVALUE_DISABLED);
+	if (params->index_cleanup == VACOPTVALUE_DISABLED)
 	{
+		/* Force disable index vacuuming up-front */
 		vacrel->do_index_vacuuming = false;
 		vacrel->do_index_cleanup = false;
+	}
+	else if (params->index_cleanup == VACOPTVALUE_ENABLED)
+	{
+		/* Force index vacuuming.  Note that failsafe can still bypass. */
+		vacrel->consider_bypass_optimization = false;
+	}
+	else
+	{
+		/* Default/auto, make all decisions dynamically */
+		Assert(params->index_cleanup == VACOPTVALUE_AUTO);
 	}
 	vacrel->bstrategy = bstrategy;
 	vacrel->old_rel_pages = rel->rd_rel->relpages;
@@ -1419,7 +1429,7 @@ lazy_vacuum_zheap_rel(Relation rel, VacuumParams *params,
 	/*
 	 * Optionally truncate the relation.
 	 */
-	if (should_attempt_truncation(vacrel, params))
+	if (should_attempt_truncation(vacrel))
 	{
 		/*
 		 * Update error traceback information.  This is the last phase during
@@ -1572,7 +1582,7 @@ lazy_vacuum_zheap_rel(Relation rel, VacuumParams *params,
 				{
 					msgfmt = _(" %u pages from table (%.2f%% of total) have %lld dead item identifiers\n");
 
-					if (!vacrel->do_failsafe)
+					if (!vacrel->failsafe_active)
 						appendStringInfo(&buf, _("index scan bypassed:"));
 					else
 						appendStringInfo(&buf, _("index scan bypassed by failsafe:"));

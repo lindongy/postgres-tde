@@ -73,6 +73,7 @@
 #include "storage/procarray.h"
 #include "storage/smgr.h"
 #include "utils/builtins.h"
+#include "utils/datum.h"
 #include "utils/fmgroids.h"
 #include "utils/guc.h"
 #include "utils/inval.h"
@@ -345,8 +346,8 @@ ConstructTupleDescriptor(Relation heapRelation,
 			to->attndims = from->attndims;
 			to->atttypmod = from->atttypmod;
 			to->attbyval = from->attbyval;
-			to->attstorage = from->attstorage;
 			to->attalign = from->attalign;
+			to->attstorage = from->attstorage;
 			to->attcompression = from->attcompression;
 		}
 		else
@@ -373,16 +374,16 @@ ConstructTupleDescriptor(Relation heapRelation,
 			 */
 			to->atttypid = keyType;
 			to->attlen = typeTup->typlen;
-			to->attbyval = typeTup->typbyval;
-			to->attstorage = typeTup->typstorage;
-			to->attalign = typeTup->typalign;
 			to->atttypmod = exprTypmod(indexkey);
+			to->attbyval = typeTup->typbyval;
+			to->attalign = typeTup->typalign;
+			to->attstorage = typeTup->typstorage;
 
 			/*
 			 * For expression columns, set attcompression invalid, since
 			 * there's no table column from which to copy the value. Whenever
 			 * we actually need to compress a value, we'll use whatever the
-			 * current value of default_compression_method is at that point in
+			 * current value of default_toast_compression is at that point in
 			 * time.
 			 */
 			to->attcompression = InvalidCompressionMethod;
@@ -464,6 +465,8 @@ ConstructTupleDescriptor(Relation heapRelation,
 			to->attbyval = typeTup->typbyval;
 			to->attalign = typeTup->typalign;
 			to->attstorage = typeTup->typstorage;
+			/* As above, use the default compression method in this case */
+			to->attcompression = InvalidCompressionMethod;
 
 			ReleaseSysCache(tuple);
 		}
@@ -1361,6 +1364,15 @@ index_concurrently_create_copy(Relation heapRelation, Oid oldIndexId,
 
 		indexColNames = lappend(indexColNames, NameStr(att->attname));
 		newInfo->ii_IndexAttrNumbers[i] = oldInfo->ii_IndexAttrNumbers[i];
+	}
+
+	/* Extract opclass parameters for each attribute, if any */
+	if (oldInfo->ii_OpclassOptions != NULL)
+	{
+		newInfo->ii_OpclassOptions = palloc0(sizeof(Datum) *
+											 newInfo->ii_NumIndexAttrs);
+		for (int i = 0; i < newInfo->ii_NumIndexAttrs; i++)
+			newInfo->ii_OpclassOptions[i] = get_attoptions(oldIndexId, i + 1);
 	}
 
 	/*

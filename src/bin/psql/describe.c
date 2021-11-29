@@ -1636,9 +1636,9 @@ describeOneTableDetails(const char *schemaname,
 				indexdef_col = -1,
 				fdwopts_col = -1,
 				attstorage_col = -1,
+				attcompression_col = -1,
 				attstattarget_col = -1,
-				attdescr_col = -1,
-				attcompression_col = -1;
+				attdescr_col = -1;
 	int			numrows;
 	struct
 	{
@@ -2055,7 +2055,7 @@ describeOneTableDetails(const char *schemaname,
 		appendPQExpBufferStr(&buf, ",\n  a.attstorage");
 		attstorage_col = cols++;
 
-		/* compression info */
+		/* compression info, if relevant to relkind */
 		if (pset.sversion >= 140000 &&
 			!pset.hide_compression &&
 			(tableinfo.relkind == RELKIND_RELATION ||
@@ -2259,7 +2259,7 @@ describeOneTableDetails(const char *schemaname,
 		if (fdwopts_col >= 0)
 			printTableAddCell(&cont, PQgetvalue(res, i, fdwopts_col), false, false);
 
-		/* Storage and Description */
+		/* Storage mode, if relevant */
 		if (attstorage_col >= 0)
 		{
 			char	   *storage = PQgetvalue(res, i, attstorage_col);
@@ -2273,7 +2273,7 @@ describeOneTableDetails(const char *schemaname,
 							  false, false);
 		}
 
-		/* Column compression. */
+		/* Column compression, if relevant */
 		if (attcompression_col >= 0)
 		{
 			char	   *compression = PQgetvalue(res, i, attcompression_col);
@@ -2881,7 +2881,7 @@ describeOneTableDetails(const char *schemaname,
 							  "stxrelid::pg_catalog.regclass, "
 							  "stxnamespace::pg_catalog.regnamespace AS nsp, "
 							  "stxname,\n"
-							  "pg_get_statisticsobjdef_columns(oid) AS columns,\n"
+							  "pg_catalog.pg_get_statisticsobjdef_columns(oid) AS columns,\n"
 							  "  'd' = any(stxkind) AS ndist_enabled,\n"
 							  "  'f' = any(stxkind) AS deps_enabled,\n"
 							  "  'm' = any(stxkind) AS mcv_enabled,\n"
@@ -2917,7 +2917,7 @@ describeOneTableDetails(const char *schemaname,
 					printfPQExpBuffer(&buf, "    ");
 
 					/* statistics object name (qualified with namespace) */
-					appendPQExpBuffer(&buf, "\"%s\".\"%s\"",
+					appendPQExpBuffer(&buf, "\"%s.%s\"",
 									  PQgetvalue(result, i, 2),
 									  PQgetvalue(result, i, 3));
 
@@ -2934,7 +2934,7 @@ describeOneTableDetails(const char *schemaname,
 
 					if (has_some && !has_all)
 					{
-						appendPQExpBuffer(&buf, " (");
+						appendPQExpBufferStr(&buf, " (");
 
 						/* options */
 						if (has_ndistinct)
@@ -2954,7 +2954,7 @@ describeOneTableDetails(const char *schemaname,
 							appendPQExpBuffer(&buf, "%smcv", gotone ? ", " : "");
 						}
 
-						appendPQExpBuffer(&buf, ")");
+						appendPQExpBufferChar(&buf, ')');
 					}
 
 					appendPQExpBuffer(&buf, " ON %s FROM %s",
@@ -3012,7 +3012,7 @@ describeOneTableDetails(const char *schemaname,
 					printfPQExpBuffer(&buf, "    ");
 
 					/* statistics object name (qualified with namespace) */
-					appendPQExpBuffer(&buf, "\"%s\".\"%s\" (",
+					appendPQExpBuffer(&buf, "\"%s.%s\" (",
 									  PQgetvalue(result, i, 2),
 									  PQgetvalue(result, i, 3));
 
@@ -3577,7 +3577,7 @@ describeOneTableDetails(const char *schemaname,
 					child_relkind == RELKIND_PARTITIONED_INDEX)
 					appendPQExpBufferStr(&buf, ", PARTITIONED");
 				if (strcmp(PQgetvalue(result, i, 2), "t") == 0)
-					appendPQExpBuffer(&buf, " (DETACH PENDING)");
+					appendPQExpBufferStr(&buf, " (DETACH PENDING)");
 				if (i < tuples - 1)
 					appendPQExpBufferChar(&buf, ',');
 
@@ -4275,12 +4275,12 @@ listPartitionedTables(const char *reltypes, const char *pattern, bool verbose)
 
 	if (showNested || pattern)
 		appendPQExpBuffer(&buf,
-						  ",\n  inh.inhparent::regclass as \"%s\"",
+						  ",\n  inh.inhparent::pg_catalog.regclass as \"%s\"",
 						  gettext_noop("Parent name"));
 
 	if (showIndexes)
 		appendPQExpBuffer(&buf,
-						  ",\n c2.oid::regclass as \"%s\"",
+						  ",\n c2.oid::pg_catalog.regclass as \"%s\"",
 						  gettext_noop("Table"));
 
 	if (verbose)
@@ -4734,8 +4734,8 @@ listExtendedStats(const char *pattern)
 	if (pset.sversion >= 140000)
 		appendPQExpBuffer(&buf,
 						  "pg_catalog.format('%%s FROM %%s', \n"
-						  "  pg_get_statisticsobjdef_columns(es.oid), \n"
-						  "  es.stxrelid::regclass) AS \"%s\"",
+						  "  pg_catalog.pg_get_statisticsobjdef_columns(es.oid), \n"
+						  "  es.stxrelid::pg_catalog.regclass) AS \"%s\"",
 						  gettext_noop("Definition"));
 	else
 		appendPQExpBuffer(&buf,
@@ -4746,7 +4746,7 @@ listExtendedStats(const char *pattern)
 						  "   ON (es.stxrelid = a.attrelid \n"
 						  "   AND a.attnum = s.attnum \n"
 						  "   AND NOT a.attisdropped)), \n"
-						  "es.stxrelid::regclass) AS \"%s\"",
+						  "es.stxrelid::pg_catalog.regclass) AS \"%s\"",
 						  gettext_noop("Definition"));
 
 	appendPQExpBuffer(&buf,
@@ -4774,7 +4774,7 @@ listExtendedStats(const char *pattern)
 	processSQLNamePattern(pset.db, &buf, pattern,
 						  false, false,
 						  "es.stxnamespace::pg_catalog.regnamespace::text", "es.stxname",
-						  NULL, NULL);
+						  NULL, "pg_catalog.pg_statistics_obj_is_visible(es.oid)");
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1, 2;");
 

@@ -25,6 +25,7 @@
 #include "postgres.h"
 
 #include "access/sysattr.h"
+#include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
@@ -50,6 +51,7 @@
 #include "utils/guc.h"
 #include "utils/queryjumble.h"
 #include "utils/rel.h"
+#include "utils/syscache.h"
 
 
 /* Hook for plugins to get control at end of parse analysis */
@@ -1850,9 +1852,12 @@ transformSetOperationStmt(ParseState *pstate, SelectStmt *stmt)
 
 /*
  * Make a SortGroupClause node for a SetOperationStmt's groupClauses
+ *
+ * If require_hash is true, the caller is indicating that they need hash
+ * support or they will fail.  So look extra hard for hash support.
  */
 SortGroupClause *
-makeSortGroupClauseForSetOp(Oid rescoltype)
+makeSortGroupClauseForSetOp(Oid rescoltype, bool require_hash)
 {
 	SortGroupClause *grpcl = makeNode(SortGroupClause);
 	Oid			sortop;
@@ -1864,6 +1869,15 @@ makeSortGroupClauseForSetOp(Oid rescoltype)
 							 false, true, false,
 							 &sortop, &eqop, NULL,
 							 &hashable);
+
+	/*
+	 * The type cache doesn't believe that record is hashable (see
+	 * cache_record_field_properties()), but if the caller really needs hash
+	 * support, we can assume it does.  Worst case, if any components of the
+	 * record don't support hashing, we will fail at execution.
+	 */
+	if (require_hash && (rescoltype == RECORDOID || rescoltype == RECORDARRAYOID))
+		hashable = true;
 
 	/* we don't have a tlist yet, so can't assign sortgrouprefs */
 	grpcl->tleSortGroupRef = 0;
@@ -2025,6 +2039,8 @@ transformSetOperationTree(ParseState *pstate, SelectStmt *stmt,
 		ListCell   *ltl;
 		ListCell   *rtl;
 		const char *context;
+		bool recursive = (pstate->p_parent_cte &&
+						  pstate->p_parent_cte->cterecursive);
 
 		context = (stmt->op == SETOP_UNION ? "UNION" :
 				   (stmt->op == SETOP_INTERSECT ? "INTERSECT" :
@@ -2046,9 +2062,7 @@ transformSetOperationTree(ParseState *pstate, SelectStmt *stmt,
 		 * containing CTE as having those result columns.  We should do this
 		 * only at the topmost setop of the CTE, of course.
 		 */
-		if (isTopLevel &&
-			pstate->p_parent_cte &&
-			pstate->p_parent_cte->cterecursive)
+		if (isTopLevel && recursive)
 			determineRecursiveColTypes(pstate, op->larg, ltargetlist);
 
 		/*
@@ -2180,8 +2194,9 @@ transformSetOperationTree(ParseState *pstate, SelectStmt *stmt,
 				setup_parser_errposition_callback(&pcbstate, pstate,
 												  bestlocation);
 
+				/* If it's a recursive union, we need to require hashing support. */
 				op->groupClauses = lappend(op->groupClauses,
-										   makeSortGroupClauseForSetOp(rescoltype));
+										   makeSortGroupClauseForSetOp(rescoltype, recursive));
 
 				cancel_parser_errposition_callback(&pcbstate);
 			}
@@ -2933,8 +2948,6 @@ transformCreateTableAsStmt(ParseState *pstate, CreateTableAsStmt *stmt)
 
 /*
  * transform a CallStmt
- *
- * We need to do parse analysis on the procedure call and its arguments.
  */
 static Query *
 transformCallStmt(ParseState *pstate, CallStmt *stmt)
@@ -2942,8 +2955,17 @@ transformCallStmt(ParseState *pstate, CallStmt *stmt)
 	List	   *targs;
 	ListCell   *lc;
 	Node	   *node;
+	FuncExpr   *fexpr;
+	HeapTuple	proctup;
+	Datum		proargmodes;
+	bool		isNull;
+	List	   *outargs = NIL;
 	Query	   *result;
 
+	/*
+	 * First, do standard parse analysis on the procedure call and its
+	 * arguments, allowing us to identify the called procedure.
+	 */
 	targs = NIL;
 	foreach(lc, stmt->funccall->args)
 	{
@@ -2962,8 +2984,85 @@ transformCallStmt(ParseState *pstate, CallStmt *stmt)
 
 	assign_expr_collations(pstate, node);
 
-	stmt->funcexpr = castNode(FuncExpr, node);
+	fexpr = castNode(FuncExpr, node);
 
+	proctup = SearchSysCache1(PROCOID, ObjectIdGetDatum(fexpr->funcid));
+	if (!HeapTupleIsValid(proctup))
+		elog(ERROR, "cache lookup failed for function %u", fexpr->funcid);
+
+	/*
+	 * Expand the argument list to deal with named-argument notation and
+	 * default arguments.  For ordinary FuncExprs this'd be done during
+	 * planning, but a CallStmt doesn't go through planning, and there seems
+	 * no good reason not to do it here.
+	 */
+	fexpr->args = expand_function_arguments(fexpr->args,
+											true,
+											fexpr->funcresulttype,
+											proctup);
+
+	/* Fetch proargmodes; if it's null, there are no output args */
+	proargmodes = SysCacheGetAttr(PROCOID, proctup,
+								  Anum_pg_proc_proargmodes,
+								  &isNull);
+	if (!isNull)
+	{
+		/*
+		 * Split the list into input arguments in fexpr->args and output
+		 * arguments in stmt->outargs.  INOUT arguments appear in both lists.
+		 */
+		ArrayType  *arr;
+		int			numargs;
+		char	   *argmodes;
+		List	   *inargs;
+		int			i;
+
+		arr = DatumGetArrayTypeP(proargmodes);	/* ensure not toasted */
+		numargs = list_length(fexpr->args);
+		if (ARR_NDIM(arr) != 1 ||
+			ARR_DIMS(arr)[0] != numargs ||
+			ARR_HASNULL(arr) ||
+			ARR_ELEMTYPE(arr) != CHAROID)
+			elog(ERROR, "proargmodes is not a 1-D char array of length %d or it contains nulls",
+				 numargs);
+		argmodes = (char *) ARR_DATA_PTR(arr);
+
+		inargs = NIL;
+		i = 0;
+		foreach(lc, fexpr->args)
+		{
+			Node	   *n = lfirst(lc);
+
+			switch (argmodes[i])
+			{
+				case PROARGMODE_IN:
+				case PROARGMODE_VARIADIC:
+					inargs = lappend(inargs, n);
+					break;
+				case PROARGMODE_OUT:
+					outargs = lappend(outargs, n);
+					break;
+				case PROARGMODE_INOUT:
+					inargs = lappend(inargs, n);
+					outargs = lappend(outargs, copyObject(n));
+					break;
+				default:
+					/* note we don't support PROARGMODE_TABLE */
+					elog(ERROR, "invalid argmode %c for procedure",
+						 argmodes[i]);
+					break;
+			}
+			i++;
+		}
+		fexpr->args = inargs;
+	}
+
+	stmt->funcexpr = fexpr;
+	stmt->outargs = outargs;
+
+	ReleaseSysCache(proctup);
+
+	/* represent the command as a utility Query */
 	result = makeNode(Query);
 	result->commandType = CMD_UTILITY;
 	result->utilityStmt = (Node *) stmt;
@@ -3019,7 +3118,7 @@ CheckSelectLocking(Query *qry, LockClauseStrength strength)
 		  translator: %s is a SQL row locking clause such as FOR UPDATE */
 				 errmsg("%s is not allowed with DISTINCT clause",
 						LCS_asString(strength))));
-	if (qry->groupClause != NIL)
+	if (qry->groupClause != NIL || qry->groupingSets != NIL)
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 		/*------
@@ -3084,13 +3183,22 @@ transformLockingClause(ParseState *pstate, Query *qry, LockingClause *lc,
 
 	if (lockedRels == NIL)
 	{
-		/* all regular tables used in query */
+		/*
+		 * Lock all regular tables used in query and its subqueries.  We
+		 * examine inFromCl to exclude auto-added RTEs, particularly NEW/OLD
+		 * in rules.  This is a bit of an abuse of a mostly-obsolete flag, but
+		 * it's convenient.  We can't rely on the namespace mechanism that has
+		 * largely replaced inFromCl, since for example we need to lock
+		 * base-relation RTEs even if they are masked by upper joins.
+		 */
 		i = 0;
 		foreach(rt, qry->rtable)
 		{
 			RangeTblEntry *rte = (RangeTblEntry *) lfirst(rt);
 
 			++i;
+			if (!rte->inFromCl)
+				continue;
 			switch (rte->rtekind)
 			{
 				case RTE_RELATION:
@@ -3120,7 +3228,11 @@ transformLockingClause(ParseState *pstate, Query *qry, LockingClause *lc,
 	}
 	else
 	{
-		/* just the named tables */
+		/*
+		 * Lock just the named tables.  As above, we allow locking any base
+		 * relation regardless of alias-visibility rules, so we need to
+		 * examine inFromCl to exclude OLD/NEW.
+		 */
 		foreach(l, lockedRels)
 		{
 			RangeVar   *thisrel = (RangeVar *) lfirst(l);
@@ -3141,6 +3253,8 @@ transformLockingClause(ParseState *pstate, Query *qry, LockingClause *lc,
 				RangeTblEntry *rte = (RangeTblEntry *) lfirst(rt);
 
 				++i;
+				if (!rte->inFromCl)
+					continue;
 				if (strcmp(rte->eref->aliasname, thisrel->relname) == 0)
 				{
 					switch (rte->rtekind)

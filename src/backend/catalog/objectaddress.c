@@ -2571,7 +2571,8 @@ check_object_ownership(Oid roleid, ObjectType objtype, ObjectAddress address,
 			break;
 		case OBJECT_STATISTIC_EXT:
 			if (!pg_statistics_object_ownercheck(address.objectId, roleid))
-				aclcheck_error_type(ACLCHECK_NOT_OWNER, address.objectId);
+				aclcheck_error(ACLCHECK_NOT_OWNER, objtype,
+							   NameListToString(castNode(List, object)));
 			break;
 		default:
 			elog(ERROR, "unrecognized object type: %d",
@@ -4278,7 +4279,7 @@ pg_identify_object_as_address(PG_FUNCTION_ARGS)
 
 	tupdesc = BlessTupleDesc(tupdesc);
 
-	/* object type */
+	/* object type, which can never be NULL */
 	values[0] = CStringGetTextDatum(getObjectTypeDescription(&address, true));
 	nulls[0] = false;
 
@@ -4490,9 +4491,8 @@ getObjectTypeDescription(const ObjectAddress *object, bool missing_ok)
 			 */
 	}
 
-	/* an empty string is equivalent to no object found */
-	if (buffer.len == 0)
-		return NULL;
+	/* the result can never be empty */
+	Assert(buffer.len > 0);
 
 	return buffer.data;
 }

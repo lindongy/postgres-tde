@@ -30,7 +30,7 @@ extern IndexBulkDeleteResult *lazy_cleanup_one_index(Relation indrel,
 													 double reltuples,
 													 bool estimated_count,
 													 LVRelState *vacrel);
-extern bool should_attempt_truncation(LVRelState *vacrel, VacuumParams *params);
+extern bool should_attempt_truncation(LVRelState *vacrel);
 extern void lazy_truncate_heap(LVRelState *vacrel);
 extern void lazy_record_dead_tuple(LVDeadTuples *dead_tuples, ItemPointer itemptr);
 extern void do_parallel_vacuum_or_cleanup(LVRelState *vacrel, int nworkers);

@@ -627,13 +627,8 @@ check_agg_arguments(ParseState *pstate,
 	context.min_agglevel = -1;
 	context.sublevels_up = 0;
 
-	(void) expression_tree_walker((Node *) args,
-								  check_agg_arguments_walker,
-								  (void *) &context);
-
-	(void) expression_tree_walker((Node *) filter,
-								  check_agg_arguments_walker,
-								  (void *) &context);
+	(void) check_agg_arguments_walker((Node *) args, &context);
+	(void) check_agg_arguments_walker((Node *) filter, &context);
 
 	/*
 	 * If we found no vars nor aggs at all, it's a level-zero aggregate;
@@ -680,9 +675,7 @@ check_agg_arguments(ParseState *pstate,
 	{
 		context.min_varlevel = -1;
 		context.min_agglevel = -1;
-		(void) expression_tree_walker((Node *) directargs,
-									  check_agg_arguments_walker,
-									  (void *) &context);
+		(void) check_agg_arguments_walker((Node *) directargs, &context);
 		if (context.min_varlevel >= 0 && context.min_varlevel < agglevel)
 			ereport(ERROR,
 					(errcode(ERRCODE_GROUPING_ERROR),
@@ -1855,7 +1848,7 @@ expand_grouping_sets(List *groupingSets, bool groupDistinct, int limit)
 		list_sort(result, cmp_list_len_contents_asc);
 
 		/* Finally, remove duplicates */
-		prev = linitial_node(List, result);
+		prev = linitial(result);
 		for_each_from(cell, result, 1)
 		{
 			if (equal(lfirst(cell), prev))

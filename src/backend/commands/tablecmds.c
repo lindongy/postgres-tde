@@ -335,7 +335,6 @@ typedef struct ForeignTruncateInfo
 static void truncate_check_rel(Oid relid, Form_pg_class reltuple);
 static void truncate_check_perms(Oid relid, Form_pg_class reltuple);
 static void truncate_check_activity(Relation rel);
-static void truncate_update_partedrel_stats(List *parted_rels);
 static void RangeVarCallbackForTruncate(const RangeVar *relation,
 										Oid relId, Oid oldRelId, void *arg);
 static List *MergeAttributes(List *schema, List *supers, char relpersistence,
@@ -601,7 +600,7 @@ static void refuseDupeIndexAttach(Relation parentIdx, Relation partIdx,
 								  Relation partitionTbl);
 static List *GetParentedForeignKeyRefs(Relation partition);
 static void ATDetachCheckNoForeignKeyRefs(Relation partition);
-static char GetAttributeCompression(Form_pg_attribute att, char *compression);
+static char GetAttributeCompression(Oid atttypid, char *compression);
 
 
 /* ----------------------------------------------------------------
@@ -897,17 +896,9 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 		if (colDef->generated)
 			attr->attgenerated = colDef->generated;
 
-		/*
-		 * lookup attribute's compression method and store it in the
-		 * attr->attcompression.
-		 */
-		if (relkind == RELKIND_RELATION ||
-			relkind == RELKIND_PARTITIONED_TABLE ||
-			relkind == RELKIND_MATVIEW)
-			attr->attcompression =
-				GetAttributeCompression(attr, colDef->compression);
-		else
-			attr->attcompression = InvalidCompressionMethod;
+		if (colDef->compression)
+			attr->attcompression = GetAttributeCompression(attr->atttypid,
+														   colDef->compression);
 	}
 
 	/*
@@ -1747,7 +1738,6 @@ ExecuteTruncateGuts(List *explicit_rels,
 {
 	List	   *rels;
 	List	   *seq_relids = NIL;
-	List	   *parted_rels = NIL;
 	HTAB	   *ft_htab = NULL;
 	EState	   *estate;
 	ResultRelInfo *resultRelInfos;
@@ -1896,15 +1886,9 @@ ExecuteTruncateGuts(List *explicit_rels,
 	{
 		Relation	rel = (Relation) lfirst(cell);
 
-		/*
-		 * Save OID of partitioned tables for later; nothing else to do for
-		 * them here.
-		 */
+		/* Skip partitioned tables as there is nothing to do */
 		if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
-		{
-			parted_rels = lappend_oid(parted_rels, RelationGetRelid(rel));
 			continue;
-		}
 
 		/*
 		 * Build the lists of foreign tables belonging to each foreign server
@@ -2052,9 +2036,6 @@ ExecuteTruncateGuts(List *explicit_rels,
 		ResetSequence(seq_relid);
 	}
 
-	/* Reset partitioned tables' pg_class.reltuples */
-	truncate_update_partedrel_stats(parted_rels);
-
 	/*
 	 * Write a WAL record to allow this set of actions to be logically
 	 * decoded.
@@ -2199,40 +2180,6 @@ truncate_check_activity(Relation rel)
 	 * including open scans and pending AFTER trigger events.
 	 */
 	CheckTableNotInUse(rel, "TRUNCATE");
-}
-
-/*
- * Update pg_class.reltuples for all the given partitioned tables to 0.
- */
-static void
-truncate_update_partedrel_stats(List *parted_rels)
-{
-	Relation	pg_class;
-	ListCell   *lc;
-
-	pg_class = table_open(RelationRelationId, RowExclusiveLock);
-
-	foreach(lc, parted_rels)
-	{
-		Oid			relid = lfirst_oid(lc);
-		HeapTuple	tuple;
-		Form_pg_class rd_rel;
-
-		tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(relid));
-		if (!HeapTupleIsValid(tuple))
-			elog(ERROR, "could not find tuple for relation %u", relid);
-		rd_rel = (Form_pg_class) GETSTRUCT(tuple);
-		if (rd_rel->reltuples != (float4) 0)
-		{
-			rd_rel->reltuples = (float4) 0;
-
-			heap_inplace_update(pg_class, tuple);
-		}
-
-		heap_freetuple(tuple);
-	}
-
-	table_close(pg_class, RowExclusiveLock);
 }
 
 /*
@@ -2640,8 +2587,8 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 				def->constraints = NIL;
 				def->location = -1;
 				if (CompressionMethodIsValid(attribute->attcompression))
-					def->compression = pstrdup(GetCompressionMethodName(
-																		attribute->attcompression));
+					def->compression =
+						pstrdup(GetCompressionMethodName(attribute->attcompression));
 				else
 					def->compression = NULL;
 				inhSchema = lappend(inhSchema, def);
@@ -3786,7 +3733,7 @@ RenameConstraint(RenameStmt *stmt)
 ObjectAddress
 RenameRelation(RenameStmt *stmt)
 {
-	bool		is_index = stmt->renameType == OBJECT_INDEX;
+	bool		is_index_stmt = stmt->renameType == OBJECT_INDEX;
 	Oid			relid;
 	ObjectAddress address;
 
@@ -3796,24 +3743,48 @@ RenameRelation(RenameStmt *stmt)
 	 * end of transaction.
 	 *
 	 * Lock level used here should match RenameRelationInternal, to avoid lock
-	 * escalation.
+	 * escalation.  However, because ALTER INDEX can be used with any relation
+	 * type, we mustn't believe without verification.
 	 */
-	relid = RangeVarGetRelidExtended(stmt->relation,
-									 is_index ? ShareUpdateExclusiveLock : AccessExclusiveLock,
-									 stmt->missing_ok ? RVR_MISSING_OK : 0,
-									 RangeVarCallbackForAlterRelation,
-									 (void *) stmt);
-
-	if (!OidIsValid(relid))
+	for (;;)
 	{
-		ereport(NOTICE,
-				(errmsg("relation \"%s\" does not exist, skipping",
-						stmt->relation->relname)));
-		return InvalidObjectAddress;
+		LOCKMODE	lockmode;
+		char		relkind;
+		bool		obj_is_index;
+
+		lockmode = is_index_stmt ? ShareUpdateExclusiveLock : AccessExclusiveLock;
+
+		relid = RangeVarGetRelidExtended(stmt->relation, lockmode,
+										 stmt->missing_ok ? RVR_MISSING_OK : 0,
+										 RangeVarCallbackForAlterRelation,
+										 (void *) stmt);
+
+		if (!OidIsValid(relid))
+		{
+			ereport(NOTICE,
+					(errmsg("relation \"%s\" does not exist, skipping",
+							stmt->relation->relname)));
+			return InvalidObjectAddress;
+		}
+
+		/*
+		 * We allow mismatched statement and object types (e.g., ALTER INDEX
+		 * to rename a table), but we might've used the wrong lock level.  If
+		 * that happens, retry with the correct lock level.  We don't bother
+		 * if we already acquired AccessExclusiveLock with an index, however.
+		 */
+		relkind = get_rel_relkind(relid);
+		obj_is_index = (relkind == RELKIND_INDEX ||
+						relkind == RELKIND_PARTITIONED_INDEX);
+		if (obj_is_index || is_index_stmt == obj_is_index)
+			break;
+
+		UnlockRelationOid(relid, lockmode);
+		is_index_stmt = obj_is_index;
 	}
 
 	/* Do the work */
-	RenameRelationInternal(relid, stmt->newname, false, is_index);
+	RenameRelationInternal(relid, stmt->newname, false, is_index_stmt);
 
 	ObjectAddressSet(address, RelationRelationId, relid);
 
@@ -3862,6 +3833,16 @@ RenameRelationInternal(Oid myrelid, const char *newrelname, bool is_internal, bo
 						newrelname)));
 
 	/*
+	 * RenameRelation is careful not to believe the caller's idea of the
+	 * relation kind being handled.  We don't have to worry about this, but
+	 * let's not be totally oblivious to it.  We can process an index as
+	 * not-an-index, but not the other way around.
+	 */
+	Assert(!is_index ||
+		   is_index == (targetrelation->rd_rel->relkind == RELKIND_INDEX ||
+						targetrelation->rd_rel->relkind == RELKIND_PARTITIONED_INDEX));
+
+	/*
 	 * Update pg_class tuple with new relname.  (Scribbling on reltup is OK
 	 * because it's a copy...)
 	 */
@@ -3898,6 +3879,37 @@ RenameRelationInternal(Oid myrelid, const char *newrelname, bool is_internal, bo
 	 * Close rel, but keep lock!
 	 */
 	relation_close(targetrelation, NoLock);
+}
+
+/*
+ *		ResetRelRewrite - reset relrewrite
+ */
+void
+ResetRelRewrite(Oid myrelid)
+{
+	Relation	relrelation;	/* for RELATION relation */
+	HeapTuple	reltup;
+	Form_pg_class relform;
+
+	/*
+	 * Find relation's pg_class tuple.
+	 */
+	relrelation = table_open(RelationRelationId, RowExclusiveLock);
+
+	reltup = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(myrelid));
+	if (!HeapTupleIsValid(reltup))	/* shouldn't happen */
+		elog(ERROR, "cache lookup failed for relation %u", myrelid);
+	relform = (Form_pg_class) GETSTRUCT(reltup);
+
+	/*
+	 * Update pg_class tuple.
+	 */
+	relform->relrewrite = InvalidOid;
+
+	CatalogTupleUpdate(relrelation, &reltup->t_self, reltup);
+
+	heap_freetuple(reltup);
+	table_close(relrelation, RowExclusiveLock);
 }
 
 /*
@@ -4416,8 +4428,7 @@ ATPrepCmd(List **wqueue, Relation rel, AlterTableCmd *cmd,
 	 * Copy the original subcommand for each table.  This avoids conflicts
 	 * when different child tables need to make different parse
 	 * transformations (for example, the same column may have different column
-	 * numbers in different children).  It also ensures that we don't corrupt
-	 * the original parse tree, in case it is saved in plancache.
+	 * numbers in different children).
 	 */
 	cmd = copyObject(cmd);
 
@@ -4514,7 +4525,7 @@ ATPrepCmd(List **wqueue, Relation rel, AlterTableCmd *cmd,
 			break;
 		case AT_SetOptions:		/* ALTER COLUMN SET ( options ) */
 		case AT_ResetOptions:	/* ALTER COLUMN RESET ( options ) */
-			ATSimplePermissions(rel, ATT_TABLE | ATT_MATVIEW | ATT_INDEX | ATT_FOREIGN_TABLE);
+			ATSimplePermissions(rel, ATT_TABLE | ATT_MATVIEW | ATT_FOREIGN_TABLE);
 			/* This command never recurses */
 			pass = AT_PASS_MISC;
 			break;
@@ -5762,6 +5773,14 @@ ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap, LOCKMODE lockmode)
 					newslot->tts_isnull[lfirst_int(lc)] = true;
 
 				/*
+				 * Constraints and GENERATED expressions might reference the
+				 * tableoid column, so fill tts_tableOid with the desired
+				 * value.  (We must do this each time, because it gets
+				 * overwritten with newrel's OID during storing.)
+				 */
+				newslot->tts_tableOid = RelationGetRelid(oldrel);
+
+				/*
 				 * Process supplied expressions to replace selected columns.
 				 *
 				 * First, evaluate expressions whose inputs come from the old
@@ -5804,11 +5823,6 @@ ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap, LOCKMODE lockmode)
 									   &newslot->tts_isnull[ex->attnum - 1]);
 				}
 
-				/*
-				 * Constraints might reference the tableoid column, so
-				 * initialize t_tableOid before evaluating them.
-				 */
-				newslot->tts_tableOid = RelationGetRelid(oldrel);
 				insertslot = newslot;
 			}
 			else
@@ -6035,6 +6049,12 @@ ATWrongRelkindError(Relation rel, int allowed_targets)
 		case ATT_TABLE | ATT_MATVIEW | ATT_INDEX:
 			msg = _("\"%s\" is not a table, materialized view, or index");
 			break;
+		case ATT_TABLE | ATT_MATVIEW | ATT_INDEX | ATT_PARTITIONED_INDEX:
+			msg = _("\"%s\" is not a table, materialized view, index, or partitioned index");
+			break;
+		case ATT_TABLE | ATT_MATVIEW | ATT_INDEX | ATT_PARTITIONED_INDEX | ATT_FOREIGN_TABLE:
+			msg = _("\"%s\" is not a table, materialized view, index, partitioned index, or foreign table");
+			break;
 		case ATT_TABLE | ATT_MATVIEW | ATT_FOREIGN_TABLE:
 			msg = _("\"%s\" is not a table, materialized view, or foreign table");
 			break;
@@ -6046,6 +6066,9 @@ ATWrongRelkindError(Relation rel, int allowed_targets)
 			break;
 		case ATT_TABLE | ATT_MATVIEW | ATT_INDEX | ATT_FOREIGN_TABLE:
 			msg = _("\"%s\" is not a table, materialized view, index, or foreign table");
+			break;
+		case ATT_TABLE | ATT_PARTITIONED_INDEX:
+			msg = _("\"%s\" is not a table or partitioned index");
 			break;
 		case ATT_VIEW:
 			msg = _("\"%s\" is not a view");
@@ -6593,12 +6616,14 @@ ATExecAddColumn(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	attribute.atttypid = typeOid;
 	attribute.attstattarget = (newattnum > 0) ? -1 : 0;
 	attribute.attlen = tform->typlen;
-	attribute.atttypmod = typmod;
 	attribute.attnum = newattnum;
-	attribute.attbyval = tform->typbyval;
 	attribute.attndims = list_length(colDef->typeName->arrayBounds);
-	attribute.attstorage = tform->typstorage;
+	attribute.atttypmod = typmod;
+	attribute.attbyval = tform->typbyval;
 	attribute.attalign = tform->typalign;
+	attribute.attstorage = tform->typstorage;
+	attribute.attcompression = GetAttributeCompression(typeOid,
+													   colDef->compression);
 	attribute.attnotnull = colDef->is_not_null;
 	attribute.atthasdef = false;
 	attribute.atthasmissing = false;
@@ -6608,17 +6633,6 @@ ATExecAddColumn(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	attribute.attislocal = colDef->is_local;
 	attribute.attinhcount = colDef->inhcount;
 	attribute.attcollation = collOid;
-
-	/*
-	 * lookup attribute's compression method and store it in the
-	 * attr->attcompression.
-	 */
-	if (rel->rd_rel->relkind == RELKIND_RELATION ||
-		rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
-		attribute.attcompression = GetAttributeCompression(&attribute,
-														   colDef->compression);
-	else
-		attribute.attcompression = InvalidCompressionMethod;
 
 	/* attribute.attacl is handled by InsertPgAttributeTuples() */
 
@@ -7996,23 +8010,24 @@ ATExecSetOptions(Relation rel, const char *colName, Node *options,
 /*
  * Helper function for ATExecSetStorage and ATExecSetCompression
  *
- * Set the attcompression and/or attstorage for the respective index attribute
- * if the respective input values are valid.
+ * Set the attstorage and/or attcompression fields for index columns
+ * associated with the specified table column.
  */
 static void
 SetIndexStorageProperties(Relation rel, Relation attrelation,
-						  AttrNumber attnum, char newcompression,
-						  char newstorage, LOCKMODE lockmode)
+						  AttrNumber attnum,
+						  bool setstorage, char newstorage,
+						  bool setcompression, char newcompression,
+						  LOCKMODE lockmode)
 {
-	HeapTuple	tuple;
 	ListCell   *lc;
-	Form_pg_attribute attrtuple;
 
 	foreach(lc, RelationGetIndexList(rel))
 	{
 		Oid			indexoid = lfirst_oid(lc);
 		Relation	indrel;
 		AttrNumber	indattnum = 0;
+		HeapTuple	tuple;
 
 		indrel = index_open(indexoid, lockmode);
 
@@ -8035,13 +8050,13 @@ SetIndexStorageProperties(Relation rel, Relation attrelation,
 
 		if (HeapTupleIsValid(tuple))
 		{
-			attrtuple = (Form_pg_attribute) GETSTRUCT(tuple);
+			Form_pg_attribute attrtuple = (Form_pg_attribute) GETSTRUCT(tuple);
 
-			if (CompressionMethodIsValid(newcompression))
-				attrtuple->attcompression = newcompression;
-
-			if (newstorage != '\0')
+			if (setstorage)
 				attrtuple->attstorage = newstorage;
+
+			if (setcompression)
+				attrtuple->attcompression = newcompression;
 
 			CatalogTupleUpdate(attrelation, &tuple->t_self, tuple);
 
@@ -8135,8 +8150,9 @@ ATExecSetStorage(Relation rel, const char *colName, Node *newValue, LOCKMODE loc
 	 * matching behavior of index.c ConstructTupleDescriptor()).
 	 */
 	SetIndexStorageProperties(rel, attrelation, attnum,
-							  InvalidCompressionMethod,
-							  newstorage, lockmode);
+							  true, newstorage,
+							  false, 0,
+							  lockmode);
 
 	table_close(attrelation, RowExclusiveLock);
 
@@ -12300,23 +12316,7 @@ ATExecAlterColumnType(AlteredTableInfo *tab, Relation rel,
 	attTup->attbyval = tform->typbyval;
 	attTup->attalign = tform->typalign;
 	attTup->attstorage = tform->typstorage;
-
-	/* Setup attribute compression */
-	if (rel->rd_rel->relkind == RELKIND_RELATION ||
-		rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
-	{
-		/*
-		 * No compression for plain/external storage, otherwise, default
-		 * compression method if it is not already set, refer comments atop
-		 * attcompression parameter in pg_attribute.h.
-		 */
-		if (!IsStorageCompressible(tform->typstorage))
-			attTup->attcompression = InvalidCompressionMethod;
-		else if (!CompressionMethodIsValid(attTup->attcompression))
-			attTup->attcompression = GetDefaultToastCompression();
-	}
-	else
-		attTup->attcompression = InvalidCompressionMethod;
+	attTup->attcompression = InvalidCompressionMethod;
 
 	ReleaseSysCache(typeTuple);
 
@@ -12499,13 +12499,13 @@ RememberStatisticsForRebuilding(Oid stxoid, AlteredTableInfo *tab)
 	/*
 	 * This de-duplication check is critical for two independent reasons: we
 	 * mustn't try to recreate the same statistics object twice, and if the
-	 * statistics depends on more than one column whose type is to be altered,
-	 * we must capture its definition string before applying any of the type
-	 * changes. ruleutils.c will get confused if we ask again later.
+	 * statistics object depends on more than one column whose type is to be
+	 * altered, we must capture its definition string before applying any of
+	 * the type changes. ruleutils.c will get confused if we ask again later.
 	 */
 	if (!list_member_oid(tab->changedStatisticsOids, stxoid))
 	{
-		/* OK, capture the index's existing definition string */
+		/* OK, capture the statistics object's existing definition string */
 		char	   *defstring = pg_get_statisticsobjdef_string(stxoid);
 
 		tab->changedStatisticsOids = lappend_oid(tab->changedStatisticsOids,
@@ -14802,7 +14802,7 @@ MarkInheritDetached(Relation child_rel, Relation parent_rel)
 						   get_rel_name(inhForm->inhrelid),
 						   get_namespace_name(parent_rel->rd_rel->relnamespace),
 						   RelationGetRelationName(parent_rel)),
-					errhint("Use ALTER TABLE ... DETACH PARTITION ... FINALIZE to complete the detach operation."));
+					errhint("Use ALTER TABLE ... DETACH PARTITION ... FINALIZE to complete the pending detach operation."));
 
 		if (inhForm->inhrelid == RelationGetRelid(child_rel))
 		{
@@ -15614,7 +15614,6 @@ ATExecSetCompression(AlteredTableInfo *tab,
 	Form_pg_attribute atttableform;
 	AttrNumber	attnum;
 	char	   *compression;
-	char		typstorage;
 	char		cmethod;
 	ObjectAddress address;
 
@@ -15639,17 +15638,11 @@ ATExecSetCompression(AlteredTableInfo *tab,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("cannot alter system column \"%s\"", column)));
 
-	typstorage = get_typstorage(atttableform->atttypid);
-
-	/* prevent from setting compression methods for uncompressible type */
-	if (!IsStorageCompressible(typstorage))
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("column data type %s does not support compression",
-						format_type_be(atttableform->atttypid))));
-
-	/* get the attribute compression method. */
-	cmethod = GetAttributeCompression(atttableform, compression);
+	/*
+	 * Check that column type is compressible, then get the attribute
+	 * compression method code
+	 */
+	cmethod = GetAttributeCompression(atttableform->atttypid, compression);
 
 	/* update pg_attribute entry */
 	atttableform->attcompression = cmethod;
@@ -15663,7 +15656,10 @@ ATExecSetCompression(AlteredTableInfo *tab,
 	 * Apply the change to indexes as well (only for simple index columns,
 	 * matching behavior of index.c ConstructTupleDescriptor()).
 	 */
-	SetIndexStorageProperties(rel, attrel, attnum, cmethod, '\0', lockmode);
+	SetIndexStorageProperties(rel, attrel, attnum,
+							  false, 0,
+							  true, cmethod,
+							  lockmode);
 
 	heap_freetuple(tuple);
 
@@ -17345,6 +17341,22 @@ ATExecAttachPartition(List **wqueue, Relation rel, PartitionCmd *cmd,
 
 	ObjectAddressSet(address, RelationRelationId, RelationGetRelid(attachrel));
 
+	/*
+	 * If the partition we just attached is partitioned itself, invalidate
+	 * relcache for all descendent partitions too to ensure that their
+	 * rd_partcheck expression trees are rebuilt; partitions already locked
+	 * at the beginning of this function.
+	 */
+	if (attachrel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+	{
+		ListCell *l;
+
+		foreach(l, attachrel_children)
+		{
+			CacheInvalidateRelcacheByRelid(lfirst_oid(l));
+		}
+	}
+
 	/* keep our lock until commit */
 	table_close(attachrel, NoLock);
 
@@ -17665,10 +17677,10 @@ CloneRowTriggersToPartition(Relation parent, Relation partition)
 		trigStmt->initdeferred = trigForm->tginitdeferred;
 		trigStmt->constrrel = NULL; /* passed separately */
 
-		CreateTrigger(trigStmt, NULL, RelationGetRelid(partition),
-					  trigForm->tgconstrrelid, InvalidOid, InvalidOid,
-					  trigForm->tgfoid, trigForm->oid, qual,
-					  false, true);
+		CreateTriggerFiringOn(trigStmt, NULL, RelationGetRelid(partition),
+							  trigForm->tgconstrrelid, InvalidOid, InvalidOid,
+							  trigForm->tgfoid, trigForm->oid, qual,
+							  false, true, trigForm->tgenabled);
 
 		MemoryContextSwitchTo(oldcxt);
 		MemoryContextReset(perTupCxt);
@@ -18035,6 +18047,25 @@ DetachPartitionFinalize(Relation rel, Relation partRel, bool concurrent,
 	 * included in its partition descriptor.
 	 */
 	CacheInvalidateRelcache(rel);
+
+	/*
+	 * If the partition we just detached is partitioned itself, invalidate
+	 * relcache for all descendent partitions too to ensure that their
+	 * rd_partcheck expression trees are rebuilt; must lock partitions
+	 * before doing so, using the same lockmode as what partRel has been
+	 * locked with by the caller.
+	 */
+	if (partRel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+	{
+		List   *children;
+
+		children = find_all_inheritors(RelationGetRelid(partRel),
+									   AccessExclusiveLock, NULL);
+		foreach(cell, children)
+		{
+			CacheInvalidateRelcacheByRelid(lfirst_oid(cell));
+		}
+	}
 }
 
 /*
@@ -18613,29 +18644,30 @@ ATDetachCheckNoForeignKeyRefs(Relation partition)
  * resolve column compression specification to compression method.
  */
 static char
-GetAttributeCompression(Form_pg_attribute att, char *compression)
+GetAttributeCompression(Oid atttypid, char *compression)
 {
-	char		typstorage = get_typstorage(att->atttypid);
 	char		cmethod;
 
-	/*
-	 * No compression for plain/external storage, refer comments atop
-	 * attcompression parameter in pg_attribute.h
-	 */
-	if (!IsStorageCompressible(typstorage))
-	{
-		if (compression == NULL)
-			return InvalidCompressionMethod;
+	if (compression == NULL || strcmp(compression, "default") == 0)
+		return InvalidCompressionMethod;
 
+	/*
+	 * To specify a nondefault method, the column data type must be toastable.
+	 * Note this says nothing about whether the column's attstorage setting
+	 * permits compression; we intentionally allow attstorage and
+	 * attcompression to be independent.  But with a non-toastable type,
+	 * attstorage could not be set to a value that would permit compression.
+	 *
+	 * We don't actually need to enforce this, since nothing bad would happen
+	 * if attcompression were non-default; it would never be consulted.  But
+	 * it seems more user-friendly to complain about a certainly-useless
+	 * attempt to set the property.
+	 */
+	if (!TypeIsToastable(atttypid))
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("column data type %s does not support compression",
-						format_type_be(att->atttypid))));
-	}
-
-	/* fallback to default compression if it's not specified */
-	if (compression == NULL)
-		return GetDefaultToastCompression();
+						format_type_be(atttypid))));
 
 	cmethod = CompressionNameToMethod(compression);
 	if (!CompressionMethodIsValid(cmethod))

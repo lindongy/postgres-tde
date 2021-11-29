@@ -2384,8 +2384,9 @@ TPDPageGetTransactionSlotInfo(Buffer heapbuf, int trans_slot,
 	{
 		SMgrRelation smgr;
 		BlockNumber lastblock;
+		SmgrId	smgrid;
 
-		BufferGetTag(heapbuf, SMGR_MD, &rnode, &forknum, &heapblk);
+		BufferGetTag(heapbuf, &smgrid, &rnode, &forknum, &heapblk);
 
 		if (InRecovery)
 			relpersistence = RELPERSISTENCE_PERMANENT;
@@ -2397,6 +2398,7 @@ TPDPageGetTransactionSlotInfo(Buffer heapbuf, int trans_slot,
 			relpersistence = get_rel_persistence(reloid);
 		}
 
+		Assert(smgrid == SMGR_MD);
 		smgr = smgropen(SMGR_MD,
 						rnode,
 						relpersistence == RELPERSISTENCE_TEMP ?

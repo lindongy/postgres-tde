@@ -158,6 +158,10 @@ ALTER INDEX attmp_idx ALTER COLUMN 2 SET STATISTICS -1;
 
 DROP TABLE attmp;
 
+-- fails with incorrect object type
+CREATE VIEW at_v1 AS SELECT 1 as a;
+ALTER TABLE at_v1 ALTER COLUMN a SET STATISTICS 0;
+DROP VIEW at_v1;
 
 --
 -- rename - check on both non-temp and temp tables
@@ -226,6 +230,37 @@ ALTER INDEX attmp_onek_unique1 RENAME TO onek_unique1;
 SET ROLE regress_alter_table_user1;
 ALTER INDEX onek_unique1 RENAME TO fail;  -- permission denied
 RESET ROLE;
+
+-- rename statements with mismatching statement and object types
+CREATE TABLE alter_idx_rename_test (a INT);
+CREATE INDEX alter_idx_rename_test_idx ON alter_idx_rename_test (a);
+CREATE TABLE alter_idx_rename_test_parted (a INT) PARTITION BY LIST (a);
+CREATE INDEX alter_idx_rename_test_parted_idx ON alter_idx_rename_test_parted (a);
+BEGIN;
+ALTER INDEX alter_idx_rename_test RENAME TO alter_idx_rename_test_2;
+ALTER INDEX alter_idx_rename_test_parted RENAME TO alter_idx_rename_test_parted_2;
+SELECT relation::regclass, mode FROM pg_locks
+WHERE pid = pg_backend_pid() AND locktype = 'relation'
+  AND relation::regclass::text LIKE 'alter\_idx%'
+ORDER BY relation::regclass::text COLLATE "C";
+COMMIT;
+BEGIN;
+ALTER INDEX alter_idx_rename_test_idx RENAME TO alter_idx_rename_test_idx_2;
+ALTER INDEX alter_idx_rename_test_parted_idx RENAME TO alter_idx_rename_test_parted_idx_2;
+SELECT relation::regclass, mode FROM pg_locks
+WHERE pid = pg_backend_pid() AND locktype = 'relation'
+  AND relation::regclass::text LIKE 'alter\_idx%'
+ORDER BY relation::regclass::text COLLATE "C";
+COMMIT;
+BEGIN;
+ALTER TABLE alter_idx_rename_test_idx_2 RENAME TO alter_idx_rename_test_idx_3;
+ALTER TABLE alter_idx_rename_test_parted_idx_2 RENAME TO alter_idx_rename_test_parted_idx_3;
+SELECT relation::regclass, mode FROM pg_locks
+WHERE pid = pg_backend_pid() AND locktype = 'relation'
+  AND relation::regclass::text LIKE 'alter\_idx%'
+ORDER BY relation::regclass::text COLLATE "C";
+COMMIT;
+DROP TABLE alter_idx_rename_test_2;
 
 -- renaming views
 CREATE VIEW attmp_view (unique1) AS SELECT unique1 FROM tenk1;
@@ -2640,6 +2675,11 @@ ALTER TABLE hash_parted ATTACH PARTITION fail_part FOR VALUES WITH (MODULUS 8, R
 ALTER TABLE hash_parted ATTACH PARTITION fail_part FOR VALUES WITH (MODULUS 3, REMAINDER 2);
 DROP TABLE fail_part;
 
+-- fails with incorrect object type
+CREATE VIEW at_v1 AS SELECT 1 as a;
+ALTER TABLE at_v1 ATTACH PARTITION dummy default;
+DROP VIEW at_v1;
+
 --
 -- DETACH PARTITION
 --
@@ -2940,3 +2980,22 @@ select indexrelid::regclass, indisclustered from pg_index
   where indrelid = 'alttype_cluster'::regclass
   order by indexrelid::regclass::text;
 drop table alttype_cluster;
+
+--
+-- Check that attaching or detaching a partitioned partition correctly leads
+-- to its partitions' constraint being updated to reflect the parent's
+-- newly added/removed constraint
+create table target_parted (a int, b int) partition by list (a);
+create table attach_parted (a int, b int) partition by list (b);
+create table attach_parted_part1 partition of attach_parted for values in (1);
+-- insert a row directly into the leaf partition so that its partition
+-- constraint is built and stored in the relcache
+insert into attach_parted_part1 values (1, 1);
+-- the following better invalidate the partition constraint of the leaf
+-- partition too...
+alter table target_parted attach partition attach_parted for values in (1);
+-- ...such that the following insert fails
+insert into attach_parted_part1 values (2, 1);
+-- ...and doesn't when the partition is detached along with its own partition
+alter table target_parted detach partition attach_parted;
+insert into attach_parted_part1 values (2, 1);

@@ -219,6 +219,15 @@ static XLogRecPtr flushedUpto = 0;
 static TimeLineID receiveTLI = 0;
 
 /*
+ * abortedRecPtr is the start pointer of a broken record at end of WAL when
+ * recovery completes; missingContrecPtr is the location of the first
+ * contrecord that went missing.  See CreateOverwriteContrecordRecord for
+ * details.
+ */
+static XLogRecPtr abortedRecPtr;
+static XLogRecPtr missingContrecPtr;
+
+/*
  * During recovery, lastFullPageWrites keeps track of full_page_writes that
  * the replayed WAL records indicate. It's initialized with full_page_writes
  * that the recovery starting checkpoint record indicates, and then updated
@@ -812,11 +821,9 @@ static XLogSegNo openLogSegNo = 0;
 
 /*
  * These variables are used similarly to the ones above, but for reading
- * the XLOG.  Note, however, that readOff generally represents the offset
- * of the page just read, not the seek position of the FD itself, which
- * will be just past that page. readLen indicates how much of the current
- * page has been read into readBuf, and readSource indicates where we got
- * the currently open file from.
+ * the XLOG.  readOff is the offset of the page just read, readLen
+ * indicates how much of it has been read into readBuf, and readSource
+ * indicates where we got the currently open file from.
  * Note: we could use Reserve/ReleaseExternalFD to track consumption of
  * this FD too; but it doesn't currently seem worthwhile, since the XLOG is
  * not read by general-purpose sessions.
@@ -908,8 +915,11 @@ static void CheckRequiredParameterValues(void);
 static void XLogReportParameters(void);
 static void checkTimeLineSwitch(XLogRecPtr lsn, TimeLineID newTLI,
 								TimeLineID prevTLI);
+static void VerifyOverwriteContrecord(xl_overwrite_contrecord *xlrec,
+									  XLogReaderState *state);
 static void LocalSetXLogInsertAllowed(void);
 static void CreateEndOfRecoveryRecord(void);
+static XLogRecPtr CreateOverwriteContrecordRecord(XLogRecPtr aborted_lsn);
 static void CheckPointGuts(XLogRecPtr checkPointRedo, int flags);
 static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo);
 static XLogRecPtr XLogGetReplicationSlotMinimumLSN(void);
@@ -2263,6 +2273,18 @@ AdvanceXLInsertBuffer(XLogRecPtr upto, bool opportunistic)
 		 */
 		if (!Insert->forcePageWrites)
 			NewPage->xlp_info |= XLP_BKP_REMOVABLE;
+
+		/*
+		 * If a record was found to be broken at the end of recovery, and
+		 * we're going to write on the page where its first contrecord was
+		 * lost, set the XLP_FIRST_IS_OVERWRITE_CONTRECORD flag on the page
+		 * header.  See CreateOverwriteContrecordRecord().
+		 */
+		if (missingContrecPtr == NewPageBeginPtr)
+		{
+			NewPage->xlp_info |= XLP_FIRST_IS_OVERWRITE_CONTRECORD;
+			missingContrecPtr = InvalidXLogRecPtr;
+		}
 
 		/*
 		 * If first page of an XLOG segment file, make it a long header.
@@ -4397,6 +4419,19 @@ ReadRecord(XLogReaderState *xlogreader, int emode,
 		EndRecPtr = xlogreader->EndRecPtr;
 		if (record == NULL)
 		{
+			/*
+			 * When not in standby mode we find that WAL ends in an incomplete
+			 * record, keep track of that record.  After recovery is done,
+			 * we'll write a record to indicate downstream WAL readers that
+			 * that portion is to be ignored.
+			 */
+			if (!StandbyMode &&
+				!XLogRecPtrIsInvalid(xlogreader->abortedRecPtr))
+			{
+				abortedRecPtr = xlogreader->abortedRecPtr;
+				missingContrecPtr = xlogreader->missingContrecPtr;
+			}
+
 			if (readFile >= 0)
 			{
 				close(readFile);
@@ -5816,7 +5851,7 @@ recoveryStopsBefore(XLogReaderState *record)
 		xl_xact_abort *xlrec = (xl_xact_abort *) XLogRecGetData(record);
 		xl_xact_parsed_abort parsed;
 
-		isCommit = true;
+		isCommit = false;
 		ParseAbortRecord(XLogRecGetInfo(record),
 						 xlrec,
 						 &parsed);
@@ -6213,14 +6248,23 @@ recoveryApplyDelay(XLogReaderState *record)
 	{
 		ResetLatch(&XLogCtl->recoveryWakeupLatch);
 
-		/* might change the trigger file's location */
+		/*
+		 * This might change recovery_min_apply_delay or the trigger file's
+		 * location.
+		 */
 		HandleStartupProcInterrupts();
 
 		if (CheckForStandbyTrigger())
 			break;
 
 		/*
-		 * Wait for difference between GetCurrentTimestamp() and delayUntil
+		 * Recalculate delayUntil as recovery_min_apply_delay could have
+		 * changed while waiting in this loop.
+		 */
+		delayUntil = TimestampTzPlusMilliseconds(xtime, recovery_min_apply_delay);
+
+		/*
+		 * Wait for difference between GetCurrentTimestamp() and delayUntil.
 		 */
 		msecs = TimestampDifferenceMilliseconds(GetCurrentTimestamp(),
 												delayUntil);
@@ -7033,6 +7077,12 @@ StartupXLOG(void)
 	}
 
 	/*
+	 * Start recovery assuming that the final record isn't lost.
+	 */
+	abortedRecPtr = InvalidXLogRecPtr;
+	missingContrecPtr = InvalidXLogRecPtr;
+
+	/*
 	 * Recover undo log meta data corresponding to this checkpoint.  We must
 	 * do this after setting the correct value of InRecovery.
 	 */
@@ -7634,8 +7684,9 @@ StartupXLOG(void)
 
 	/*
 	 * Kill WAL receiver, if it's still running, before we continue to write
-	 * the startup checkpoint record. It will trump over the checkpoint and
-	 * subsequent records if it's still alive when we start writing WAL.
+	 * the startup checkpoint and aborted-contrecord records. It will trump
+	 * over these records and subsequent ones if it's still alive when we
+	 * start writing WAL.
 	 */
 	ShutdownWalRcv();
 
@@ -7682,8 +7733,12 @@ StartupXLOG(void)
 	StandbyMode = false;
 
 	/*
-	 * Re-fetch the last valid or last applied record, so we can identify the
-	 * exact endpoint of what we consider the valid portion of WAL.
+	 * Determine where to start writing WAL next.
+	 *
+	 * When recovery ended in an incomplete record, write a WAL record about
+	 * that and continue after it.  In all other cases, re-fetch the last
+	 * valid or last applied record, so we can identify the exact endpoint of
+	 * what we consider the valid portion of WAL.
 	 */
 	XLogBeginRead(xlogreader, LastRec);
 	record = ReadRecord(xlogreader, PANIC, false);
@@ -7833,6 +7888,18 @@ StartupXLOG(void)
 	XLogCtl->PrevTimeLineID = PrevTimeLineID;
 
 	/*
+	 * Actually, if WAL ended in an incomplete record, skip the parts that
+	 * made it through and start writing after the portion that persisted.
+	 * (It's critical to first write an OVERWRITE_CONTRECORD message, which
+	 * we'll do as soon as we're open for writing new WAL.)
+	 */
+	if (!XLogRecPtrIsInvalid(missingContrecPtr))
+	{
+		Assert(!XLogRecPtrIsInvalid(abortedRecPtr));
+		EndOfLog = missingContrecPtr;
+	}
+
+	/*
 	 * Prepare to write WAL starting at EndOfLog location, and init xlog
 	 * buffer cache using the block containing the last record from the
 	 * previous incarnation.
@@ -7884,13 +7951,23 @@ StartupXLOG(void)
 	XLogCtl->LogwrtRqst.Write = EndOfLog;
 	XLogCtl->LogwrtRqst.Flush = EndOfLog;
 
+	LocalSetXLogInsertAllowed();
+
+	/* If necessary, write overwrite-contrecord before doing anything else */
+	if (!XLogRecPtrIsInvalid(abortedRecPtr))
+	{
+		Assert(!XLogRecPtrIsInvalid(missingContrecPtr));
+		CreateOverwriteContrecordRecord(abortedRecPtr);
+		abortedRecPtr = InvalidXLogRecPtr;
+		missingContrecPtr = InvalidXLogRecPtr;
+	}
+
 	/*
 	 * Update full_page_writes in shared memory and write an XLOG_FPW_CHANGE
 	 * record before resource manager writes cleanup WAL records or checkpoint
 	 * record is written.
 	 */
 	Insert->fullPageWrites = lastFullPageWrites;
-	LocalSetXLogInsertAllowed();
 	UpdateFullPageWrites();
 	LocalXLogInsertAllowed = -1;
 
@@ -8066,13 +8143,6 @@ StartupXLOG(void)
 	/* Reload shared-memory state for prepared transactions */
 	RecoverPreparedTransactions();
 
-	/*
-	 * Shutdown the recovery environment. This must occur after
-	 * RecoverPreparedTransactions(), see notes for lock_twophase_recover()
-	 */
-	if (standbyState != STANDBY_DISABLED)
-		ShutdownRecoveryTransactionEnvironment();
-
 	/* Shut down xlogreader */
 	if (readFile >= 0)
 	{
@@ -8132,6 +8202,18 @@ StartupXLOG(void)
 
 	UpdateControlFile();
 	LWLockRelease(ControlFileLock);
+
+	/*
+	 * Shutdown the recovery environment.  This must occur after
+	 * RecoverPreparedTransactions() (see notes in lock_twophase_recover())
+	 * and after switching SharedRecoveryState to RECOVERY_STATE_DONE so as
+	 * any session building a snapshot will not rely on KnownAssignedXids as
+	 * RecoveryInProgress() would return false at this stage.  This is
+	 * particularly critical for prepared 2PC transactions, that would still
+	 * need to be included in snapshots once recovery has ended.
+	 */
+	if (standbyState != STANDBY_DISABLED)
+		ShutdownRecoveryTransactionEnvironment();
 
 	/*
 	 * If there were cascading standby servers connected to us, nudge any wal
@@ -9313,7 +9395,15 @@ CreateCheckPoint(int flags)
 	 */
 	XLByteToSeg(RedoRecPtr, _logSegNo, wal_segment_size);
 	KeepLogSeg(recptr, &_logSegNo);
-	InvalidateObsoleteReplicationSlots(_logSegNo);
+	if (InvalidateObsoleteReplicationSlots(_logSegNo))
+	{
+		/*
+		 * Some slots have been invalidated; recalculate the old-segment
+		 * horizon, starting again from RedoRecPtr.
+		 */
+		XLByteToSeg(RedoRecPtr, _logSegNo, wal_segment_size);
+		KeepLogSeg(recptr, &_logSegNo);
+	}
 	_logSegNo--;
 	RemoveOldXlogFiles(_logSegNo, RedoRecPtr, recptr);
 
@@ -9334,7 +9424,7 @@ CreateCheckPoint(int flags)
 	if (!RecoveryInProgress())
 		TruncateSUBTRANS(GetOldestTransactionIdConsideredRunning());
 
-	/* Real work is done, but log and update stats before releasing lock. */
+	/* Real work is done; log and update stats. */
 	LogCheckpointEnd(false);
 
 	/* Reset the process title */
@@ -9396,6 +9486,53 @@ CreateEndOfRecoveryRecord(void)
 	END_CRIT_SECTION();
 
 	LocalXLogInsertAllowed = -1;	/* return to "check" state */
+}
+
+/*
+ * Write an OVERWRITE_CONTRECORD message.
+ *
+ * When on WAL replay we expect a continuation record at the start of a page
+ * that is not there, recovery ends and WAL writing resumes at that point.
+ * But it's wrong to resume writing new WAL back at the start of the record
+ * that was broken, because downstream consumers of that WAL (physical
+ * replicas) are not prepared to "rewind".  So the first action after
+ * finishing replay of all valid WAL must be to write a record of this type
+ * at the point where the contrecord was missing; to support xlogreader
+ * detecting the special case, XLP_FIRST_IS_OVERWRITE_CONTRECORD is also added
+ * to the page header where the record occurs.  xlogreader has an ad-hoc
+ * mechanism to report metadata about the broken record, which is what we
+ * use here.
+ *
+ * At replay time, XLP_FIRST_IS_OVERWRITE_CONTRECORD instructs xlogreader to
+ * skip the record it was reading, and pass back the LSN of the skipped
+ * record, so that its caller can verify (on "replay" of that record) that the
+ * XLOG_OVERWRITE_CONTRECORD matches what was effectively overwritten.
+ */
+static XLogRecPtr
+CreateOverwriteContrecordRecord(XLogRecPtr aborted_lsn)
+{
+	xl_overwrite_contrecord xlrec;
+	XLogRecPtr	recptr;
+
+	/* sanity check */
+	if (!RecoveryInProgress())
+		elog(ERROR, "can only be used at end of recovery");
+
+	xlrec.overwritten_lsn = aborted_lsn;
+	xlrec.overwrite_time = GetCurrentTimestamp();
+
+	START_CRIT_SECTION();
+
+	XLogBeginInsert();
+	XLogRegisterData((char *) &xlrec, sizeof(xl_overwrite_contrecord));
+
+	recptr = XLogInsert(RM_XLOG_ID, XLOG_OVERWRITE_CONTRECORD);
+
+	XLogFlush(recptr);
+
+	END_CRIT_SECTION();
+
+	return recptr;
 }
 
 /*
@@ -9654,7 +9791,15 @@ CreateRestartPoint(int flags)
 	replayPtr = GetXLogReplayRecPtr(&replayTLI);
 	endptr = (receivePtr < replayPtr) ? replayPtr : receivePtr;
 	KeepLogSeg(endptr, &_logSegNo);
-	InvalidateObsoleteReplicationSlots(_logSegNo);
+	if (InvalidateObsoleteReplicationSlots(_logSegNo))
+	{
+		/*
+		 * Some slots have been invalidated; recalculate the old-segment
+		 * horizon, starting again from RedoRecPtr.
+		 */
+		XLByteToSeg(RedoRecPtr, _logSegNo, wal_segment_size);
+		KeepLogSeg(endptr, &_logSegNo);
+	}
 	_logSegNo--;
 
 	/*
@@ -9700,7 +9845,7 @@ CreateRestartPoint(int flags)
 	if (EnableHotStandby)
 		TruncateSUBTRANS(GetOldestTransactionIdConsideredRunning());
 
-	/* Real work is done, but log and update before releasing lock. */
+	/* Real work is done; log and update stats. */
 	LogCheckpointEnd(true);
 
 	/* Reset the process title */
@@ -9823,6 +9968,12 @@ GetWALAvailability(XLogRecPtr targetLSN)
  * requirement of replication slots.  For the latter criterion we do consider
  * the effects of max_slot_wal_keep_size: reserve at most that much space back
  * from recptr.
+ *
+ * Note about replication slots: if this function calculates a value
+ * that's further ahead than what slots need reserved, then affected
+ * slots need to be invalidated and this function invoked again.
+ * XXX it might be a good idea to rewrite this function so that
+ * invalidation is optionally done here, instead.
  */
 static void
 KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo)
@@ -10321,6 +10472,13 @@ xlog_redo(XLogReaderState *record)
 
 		RecoveryRestartPoint(&checkPoint);
 	}
+	else if (info == XLOG_OVERWRITE_CONTRECORD)
+	{
+		xl_overwrite_contrecord xlrec;
+
+		memcpy(&xlrec, XLogRecGetData(record), sizeof(xl_overwrite_contrecord));
+		VerifyOverwriteContrecord(&xlrec, record);
+	}
 	else if (info == XLOG_END_OF_RECOVERY)
 	{
 		xl_end_of_recovery xlrec;
@@ -10479,6 +10637,26 @@ xlog_redo(XLogReaderState *record)
 		/* Keep track of full_page_writes */
 		lastFullPageWrites = fpw;
 	}
+}
+
+/*
+ * Verify the payload of a XLOG_OVERWRITE_CONTRECORD record.
+ */
+static void
+VerifyOverwriteContrecord(xl_overwrite_contrecord *xlrec, XLogReaderState *state)
+{
+	if (xlrec->overwritten_lsn != state->overwrittenRecPtr)
+		elog(FATAL, "mismatching overwritten LSN %X/%X -> %X/%X",
+			 LSN_FORMAT_ARGS(xlrec->overwritten_lsn),
+			 LSN_FORMAT_ARGS(state->overwrittenRecPtr));
+
+	ereport(LOG,
+			(errmsg("successfully skipped missing contrecord at %X/%X, overwritten at %s",
+					LSN_FORMAT_ARGS(xlrec->overwritten_lsn),
+					timestamptz_to_str(xlrec->overwrite_time))));
+
+	/* Verifying the record should only happen once */
+	state->overwrittenRecPtr = InvalidXLogRecPtr;
 }
 
 #ifdef WAL_DEBUG
@@ -12717,11 +12895,19 @@ WaitForWALToBecomeAvailable(XLogRecPtr RecPtr, bool randAccess,
 						 * pg_wal by now.  Use XLOG_FROM_STREAM so that source
 						 * info is set correctly and XLogReceiptTime isn't
 						 * changed.
+						 *
+						 * NB: We must set readTimeLineHistory based on
+						 * recoveryTargetTLI, not receiveTLI. Normally they'll
+						 * be the same, but if recovery_target_timeline is
+						 * 'latest' and archiving is configured, then it's
+						 * possible that we managed to retrieve one or more
+						 * new timeline history files from the archive,
+						 * updating recoveryTargetTLI.
 						 */
 						if (readFile < 0)
 						{
 							if (!expectedTLEs)
-								expectedTLEs = readTimeLineHistory(receiveTLI);
+								expectedTLEs = readTimeLineHistory(recoveryTargetTLI);
 							readFile = XLogFileRead(readSegNo, PANIC,
 													receiveTLI,
 													XLOG_FROM_STREAM, false);

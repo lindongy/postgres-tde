@@ -367,6 +367,7 @@ tpd_xlog_free_page(XLogReaderState *record)
 {
 	XLogRecPtr	lsn = record->EndRecPtr;
 	RelFileNode rnode;
+	SmgrId	smgrid;
 	xl_tpd_free_page *xlrec = (xl_tpd_free_page *) XLogRecGetData(record);
 	Buffer		buffer = InvalidBuffer,
 				prevbuf = InvalidBuffer,
@@ -399,7 +400,8 @@ tpd_xlog_free_page(XLogReaderState *record)
 		}
 	}
 
-	XLogRecGetBlockTag(record, 1, SMGR_MD, &rnode, NULL, &blkno);
+	XLogRecGetBlockTag(record, 1, &smgrid, &rnode, NULL, &blkno);
+	Assert(smgrid == SMGR_MD);
 	action = XLogReadBufferForRedo(record, 1, &buffer);
 
 	/*

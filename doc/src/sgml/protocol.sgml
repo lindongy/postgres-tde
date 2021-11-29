@@ -349,7 +349,7 @@
       <term>AuthenticationSSPI</term>
       <listitem>
        <para>
-        The frontend must now initiate a SSPI negotiation. The frontend
+        The frontend must now initiate an SSPI negotiation. The frontend
         will send a GSSResponse with the first part of the SSPI
         data stream in response to this. If further messages are needed,
         the server will respond with AuthenticationGSSContinue.
@@ -1478,6 +1478,20 @@ SELCT 1/0;<!-- this typo is intentional -->
    </para>
 
    <para>
+    When <acronym>SSL</acronym> encryption can be performed, the server
+    is expected to send only the single <literal>S</literal> byte and then
+    wait for the frontend to initiate an <acronym>SSL</acronym> handshake.
+    If additional bytes are available to read at this point, it likely
+    means that a man-in-the-middle is attempting to perform a
+    buffer-stuffing attack
+    (<ulink url="https://www.postgresql.org/support/security/CVE-2021-23222/">CVE-2021-23222</ulink>).
+    Frontends should be coded either to read exactly one byte from the
+    socket before turning the socket over to their SSL library, or to
+    treat it as a protocol violation if they find they have read additional
+    bytes.
+   </para>
+
+   <para>
     An initial SSLRequest can also be used in a connection that is being
     opened to send a CancelRequest message.
    </para>
@@ -1537,6 +1551,20 @@ SELCT 1/0;<!-- this typo is intentional -->
     connection must be closed, but the frontend might choose to open a fresh
     connection and proceed without requesting <acronym>GSSAPI</acronym>
     encryption.
+   </para>
+
+   <para>
+    When <acronym>GSSAPI</acronym> encryption can be performed, the server
+    is expected to send only the single <literal>G</literal> byte and then
+    wait for the frontend to initiate a <acronym>GSSAPI</acronym> handshake.
+    If additional bytes are available to read at this point, it likely
+    means that a man-in-the-middle is attempting to perform a
+    buffer-stuffing attack
+    (<ulink url="https://www.postgresql.org/support/security/CVE-2021-23222/">CVE-2021-23222</ulink>).
+    Frontends should be coded either to read exactly one byte from the
+    socket before turning the socket over to their GSSAPI library, or to
+    treat it as a protocol violation if they find they have read additional
+    bytes.
    </para>
 
    <para>
@@ -1605,7 +1633,7 @@ more details on SCRAM-SHA-256 and SCRAM-SHA-256-PLUS.
 <para>
   One or more server-challenge and client-response message will follow. Each
   server-challenge is sent in an AuthenticationSASLContinue message, followed
-  by a response from client in an SASLResponse message. The particulars of
+  by a response from client in a SASLResponse message. The particulars of
   the messages are mechanism specific.
 </para>
 </step>
@@ -6226,7 +6254,7 @@ message.
 <listitem>
 <para>
         Internal query: the text of a failed internally-generated command.
-        This could be, for example, a SQL query issued by a PL/pgSQL function.
+        This could be, for example, an SQL query issued by a PL/pgSQL function.
 </para>
 </listitem>
 </varlistentry>
@@ -6498,6 +6526,18 @@ Message
 </para>
 </listitem>
 </varlistentry>
+
+<varlistentry>
+<term>
+        Int32
+</term>
+<listitem>
+<para>
+                Length of the content.
+</para>
+</listitem>
+</varlistentry>
+
 <varlistentry>
 <term>
         Byte<replaceable>n</replaceable>
@@ -7166,7 +7206,7 @@ Truncate
 
 <para>
 
-The following messages (Stream Start, Stream End, Stream Commit, and
+The following messages (Stream Start, Stream Stop, Stream Commit, and
 Stream Abort) are available since protocol version 2.
 
 </para>
@@ -7430,6 +7470,19 @@ TupleData
 </para>
 </listitem>
 </varlistentry>
+</variablelist>
+        Or
+<variablelist>
+<varlistentry>
+<term>
+        Byte1('b')
+</term>
+<listitem>
+<para>
+                Identifies the data as binary formatted value.
+</para>
+</listitem>
+</varlistentry>
 <varlistentry>
 <term>
         Int32
@@ -7446,8 +7499,8 @@ TupleData
 </term>
 <listitem>
 <para>
-                The value of the column, in text format.  (A future release
-                might support additional formats.)
+                The value of the column, either in binary or in text format.
+                (As specified in the preceding format byte).
                 <replaceable>n</replaceable> is the above length.
 
 </para>

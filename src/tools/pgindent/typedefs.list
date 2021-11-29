@@ -113,6 +113,7 @@ Append
 AppendPath
 AppendRelInfo
 AppendState
+ApplyExecutionData
 ApplySubXactData
 Archive
 ArchiveEntryPtrType
@@ -1090,6 +1091,7 @@ ImportForeignSchemaStmt
 ImportForeignSchemaType
 ImportForeignSchema_function
 ImportQual
+InProgressEnt
 IncludeWal
 InclusionOpaque
 IncrementVarSublevelsUp_context
@@ -1163,6 +1165,7 @@ IpcSemaphoreKey
 IsForeignPathAsyncCapable_function
 IsForeignRelUpdatable_function
 IsForeignScanParallelSafe_function
+IsoConnInfo
 IspellDict
 Item
 ItemId
@@ -1419,6 +1422,13 @@ Material
 MaterialPath
 MaterialState
 MdfdVec
+Memoize
+MemoizeEntry
+MemoizeInstrumentation
+MemoizeKey
+MemoizePath
+MemoizeState
+MemoizeTuple
 MemoryContext
 MemoryContextCallback
 MemoryContextCallbackFunction
@@ -1683,7 +1693,6 @@ PLpgSQL_stmt_return
 PLpgSQL_stmt_return_next
 PLpgSQL_stmt_return_query
 PLpgSQL_stmt_rollback
-PLpgSQL_stmt_set
 PLpgSQL_stmt_type
 PLpgSQL_stmt_while
 PLpgSQL_trigtype
@@ -1872,6 +1881,9 @@ PerlInterpreter
 Perl_check_t
 Perl_ppaddr_t
 Permutation
+PermutationStep
+PermutationStepBlocker
+PermutationStepBlockerType
 PgArchData
 PgBackendGSSStatus
 PgBackendSSLStatus
@@ -1907,8 +1919,9 @@ PgStat_MsgArchiver
 PgStat_MsgAutovacStart
 PgStat_MsgBgWriter
 PgStat_MsgChecksumFailure
-PgStat_MsgConn
+PgStat_MsgConnect
 PgStat_MsgDeadlock
+PgStat_MsgDisconnect
 PgStat_MsgDropdb
 PgStat_MsgDummy
 PgStat_MsgFuncpurge
@@ -2218,13 +2231,6 @@ RestoreOptions
 RestorePass
 RestrictInfo
 Result
-ResultCache
-ResultCacheEntry
-ResultCacheInstrumentation
-ResultCacheKey
-ResultCachePath
-ResultCacheState
-ResultCacheTuple
 ResultRelInfo
 ResultState
 ReturnSetInfo
@@ -2380,10 +2386,10 @@ SharedInvalSmgrMsg
 SharedInvalSnapshotMsg
 SharedInvalidationMessage
 SharedJitInstrumentation
+SharedMemoizeInfo
 SharedRecordTableEntry
 SharedRecordTableKey
 SharedRecordTypmodRegistry
-SharedResultCacheInfo
 SharedSortInfo
 SharedTuplestore
 SharedTuplestoreAccessor
@@ -2416,7 +2422,6 @@ SlabBlock
 SlabChunk
 SlabContext
 SlabSlot
-SlotAcquireBehavior
 SlotErrCallbackArg
 SlotNumber
 SlruCtl
@@ -2496,6 +2501,7 @@ StatsData
 StatsElem
 StatsExtInfo
 StdAnalyzeData
+StdRdOptIndexCleanup
 StdRdOptions
 Step
 StopList
@@ -2777,7 +2783,7 @@ UserOpts
 VacAttrStats
 VacAttrStatsP
 VacErrPhase
-VacOptTernaryValue
+VacOptValue
 VacuumParams
 VacuumRelation
 VacuumStmt
@@ -3266,6 +3272,8 @@ mbcharacter_incrementer
 mbdisplaylen_converter
 mblen_converter
 mbstr_verifier
+memoize_hash
+memoize_iterator
 metastring
 mix_data_t
 mixedStruct
@@ -3470,8 +3478,6 @@ remoteDep
 rendezvousHashEntry
 replace_rte_variables_callback
 replace_rte_variables_context
-resultcache_hash
-resultcache_iterator
 ret_type
 rewind_source
 rewrite_event
@@ -3697,6 +3703,7 @@ xl_logical_message
 xl_multi_insert_tuple
 xl_multixact_create
 xl_multixact_truncate
+xl_overwrite_contrecord
 xl_parameter_change
 xl_relmap_update
 xl_replorigin_drop

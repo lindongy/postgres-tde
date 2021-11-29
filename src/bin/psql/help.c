@@ -166,7 +166,7 @@ slashUsage(unsigned short int pager)
 	 * Use "psql --help=commands | wc" to count correctly.  It's okay to count
 	 * the USE_READLINE line even in builds without that.
 	 */
-	output = PageOutput(135, pager ? &(pset.popt.topt) : NULL);
+	output = PageOutput(136, pager ? &(pset.popt.topt) : NULL);
 
 	fprintf(output, _("General\n"));
 	fprintf(output, _("  \\copyright             show PostgreSQL usage and distribution terms\n"));
@@ -228,7 +228,7 @@ slashUsage(unsigned short int pager)
 	fprintf(output, _("  \\dAc[+] [AMPTRN [TYPEPTRN]]  list operator classes\n"));
 	fprintf(output, _("  \\dAf[+] [AMPTRN [TYPEPTRN]]  list operator families\n"));
 	fprintf(output, _("  \\dAo[+] [AMPTRN [OPFPTRN]]   list operators of operator families\n"));
-	fprintf(output, _("  \\dAp    [AMPTRN [OPFPTRN]]   list support functions of operator families\n"));
+	fprintf(output, _("  \\dAp[+] [AMPTRN [OPFPTRN]]   list support functions of operator families\n"));
 	fprintf(output, _("  \\db[+]  [PATTERN]      list tablespaces\n"));
 	fprintf(output, _("  \\dc[S+] [PATTERN]      list conversions\n"));
 	fprintf(output, _("  \\dC[+]  [PATTERN]      list casts\n"));
@@ -236,8 +236,8 @@ slashUsage(unsigned short int pager)
 	fprintf(output, _("  \\dD[S+] [PATTERN]      list domains\n"));
 	fprintf(output, _("  \\ddp    [PATTERN]      list default privileges\n"));
 	fprintf(output, _("  \\dE[S+] [PATTERN]      list foreign tables\n"));
-	fprintf(output, _("  \\det[+] [PATTERN]      list foreign tables\n"));
 	fprintf(output, _("  \\des[+] [PATTERN]      list foreign servers\n"));
+	fprintf(output, _("  \\det[+] [PATTERN]      list foreign tables\n"));
 	fprintf(output, _("  \\deu[+] [PATTERN]      list user mappings\n"));
 	fprintf(output, _("  \\dew[+] [PATTERN]      list foreign-data wrappers\n"));
 	fprintf(output, _("  \\df[anptw][S+] [FUNCPTRN [TYPEPTRN ...]]\n"
@@ -252,12 +252,12 @@ slashUsage(unsigned short int pager)
 	fprintf(output, _("  \\dL[S+] [PATTERN]      list procedural languages\n"));
 	fprintf(output, _("  \\dm[S+] [PATTERN]      list materialized views\n"));
 	fprintf(output, _("  \\dn[S+] [PATTERN]      list schemas\n"));
-	fprintf(output, _("  \\do[S]  [OPPTRN [TYPEPTRN [TYPEPTRN]]]\n"
+	fprintf(output, _("  \\do[S+] [OPPTRN [TYPEPTRN [TYPEPTRN]]]\n"
 					  "                         list operators\n"));
 	fprintf(output, _("  \\dO[S+] [PATTERN]      list collations\n"));
 	fprintf(output, _("  \\dp     [PATTERN]      list table, view, and sequence access privileges\n"));
 	fprintf(output, _("  \\dP[itn+] [PATTERN]    list [only index/table] partitioned relations [n=nested]\n"));
-	fprintf(output, _("  \\drds [PATRN1 [PATRN2]] list per-database role settings\n"));
+	fprintf(output, _("  \\drds [ROLEPTRN [DBPTRN]] list per-database role settings\n"));
 	fprintf(output, _("  \\dRp[+] [PATTERN]      list replication publications\n"));
 	fprintf(output, _("  \\dRs[+] [PATTERN]      list replication subscriptions\n"));
 	fprintf(output, _("  \\ds[S+] [PATTERN]      list sequences\n"));
@@ -267,7 +267,7 @@ slashUsage(unsigned short int pager)
 	fprintf(output, _("  \\dv[S+] [PATTERN]      list views\n"));
 	fprintf(output, _("  \\dx[+]  [PATTERN]      list extensions\n"));
 	fprintf(output, _("  \\dX     [PATTERN]      list extended statistics\n"));
-	fprintf(output, _("  \\dy     [PATTERN]      list event triggers\n"));
+	fprintf(output, _("  \\dy[+]  [PATTERN]      list event triggers\n"));
 	fprintf(output, _("  \\l[+]   [PATTERN]      list databases\n"));
 	fprintf(output, _("  \\sf[+]  FUNCNAME       show a function's definition\n"));
 	fprintf(output, _("  \\sv[+]  VIEWNAME       show a view's definition\n"));
@@ -347,7 +347,7 @@ helpVariables(unsigned short int pager)
 	 * Windows builds currently print one more line than non-Windows builds.
 	 * Using the larger number is fine.
 	 */
-	output = PageOutput(158, pager ? &(pset.popt.topt) : NULL);
+	output = PageOutput(160, pager ? &(pset.popt.topt) : NULL);
 
 	fprintf(output, _("List of specially treated variables\n\n"));
 
@@ -374,10 +374,10 @@ helpVariables(unsigned short int pager)
 					  "    true if last query failed, else false\n"));
 	fprintf(output, _("  FETCH_COUNT\n"
 					  "    the number of result rows to fetch and display at a time (0 = unlimited)\n"));
-	fprintf(output, _("  HIDE_TOAST_COMPRESSION\n"
-					  "    if set, compression methods are not displayed\n"));
 	fprintf(output, _("  HIDE_TABLEAM\n"
 					  "    if set, table access methods are not displayed\n"));
+	fprintf(output, _("  HIDE_TOAST_COMPRESSION\n"
+					  "    if set, compression methods are not displayed\n"));
 	fprintf(output, _("  HISTCONTROL\n"
 					  "    controls command history [ignorespace, ignoredups, ignoreboth]\n"));
 	fprintf(output, _("  HISTFILE\n"
@@ -489,10 +489,10 @@ helpVariables(unsigned short int pager)
 					  "    same as the dbname connection parameter\n"));
 	fprintf(output, _("  PGHOST\n"
 					  "    same as the host connection parameter\n"));
-	fprintf(output, _("  PGPASSWORD\n"
-					  "    connection password (not recommended)\n"));
 	fprintf(output, _("  PGPASSFILE\n"
 					  "    password file name\n"));
+	fprintf(output, _("  PGPASSWORD\n"
+					  "    connection password (not recommended)\n"));
 	fprintf(output, _("  PGPORT\n"
 					  "    same as the port connection parameter\n"));
 	fprintf(output, _("  PGUSER\n"

@@ -64,13 +64,14 @@ static int	elevel = -1;
 
 static int	compute_parallel_vacuum_workers(LVRelState *vacrel,
 											int nrequested,
-											bool *can_parallel_vacuum);
+											bool *will_parallel_vacuum);
 static LVParallelState *begin_parallel_vacuum(LVRelState *vacrel,
 											  BlockNumber nblocks,
 											  int nrequested);
 static bool lazy_tid_reaped(ItemPointer itemptr, void *state);
 static int	vac_cmp_itemptr(const void *left, const void *right);
-static BlockNumber count_nondeletable_pages(LVRelState *vacrel);
+static BlockNumber count_nondeletable_pages(LVRelState *vacrel,
+											bool *lock_waiter_detected);
 static long compute_max_dead_tuples(BlockNumber relblocks, bool hasindex,
 									bool is_heap);
 static void do_parallel_lazy_cleanup_all_indexes(LVRelState *vacrel);;
@@ -143,7 +144,7 @@ begin_parallel_vacuum(LVRelState *vacrel, BlockNumber nblocks,
 	LVDeadTuples *dead_tuples;
 	BufferUsage *buffer_usage;
 	WalUsage   *wal_usage;
-	bool	   *can_parallel_vacuum;
+	bool	   *will_parallel_vacuum;
 	long		maxtuples;
 	Size		est_shared;
 	Size		est_deadtuples;
@@ -161,15 +162,15 @@ begin_parallel_vacuum(LVRelState *vacrel, BlockNumber nblocks,
 	/*
 	 * Compute the number of parallel vacuum workers to launch
 	 */
-	can_parallel_vacuum = (bool *) palloc0(sizeof(bool) * nindexes);
+	will_parallel_vacuum = (bool *) palloc0(sizeof(bool) * nindexes);
 	parallel_workers = compute_parallel_vacuum_workers(vacrel,
 													   nrequested,
-													   can_parallel_vacuum);
+													   will_parallel_vacuum);
 
 	/* Can't perform vacuum in parallel */
 	if (parallel_workers <= 0)
 	{
-		pfree(can_parallel_vacuum);
+		pfree(will_parallel_vacuum);
 		return lps;
 	}
 
@@ -197,7 +198,7 @@ begin_parallel_vacuum(LVRelState *vacrel, BlockNumber nblocks,
 		Assert(vacoptions <= VACUUM_OPTION_MAX_VALID_VALUE);
 
 		/* Skip indexes that don't participate in parallel vacuum */
-		if (!can_parallel_vacuum[idx])
+		if (!will_parallel_vacuum[idx])
 			continue;
 
 		if (indrel->rd_indam->amusemaintenanceworkmem)
@@ -275,7 +276,7 @@ begin_parallel_vacuum(LVRelState *vacrel, BlockNumber nblocks,
 	memset(shared->bitmap, 0x00, BITMAPLEN(nindexes));
 	for (int idx = 0; idx < nindexes; idx++)
 	{
-		if (!can_parallel_vacuum[idx])
+		if (!will_parallel_vacuum[idx])
 			continue;
 
 		/* Set NOT NULL as this index does support parallelism */
@@ -318,7 +319,7 @@ begin_parallel_vacuum(LVRelState *vacrel, BlockNumber nblocks,
 					   PARALLEL_VACUUM_KEY_QUERY_TEXT, sharedquery);
 	}
 
-	pfree(can_parallel_vacuum);
+	pfree(will_parallel_vacuum);
 	return lps;
 }
 
@@ -332,12 +333,12 @@ begin_parallel_vacuum(LVRelState *vacrel, BlockNumber nblocks,
  * nrequested is the number of parallel workers that user requested.  If
  * nrequested is 0, we compute the parallel degree based on nindexes, that is
  * the number of indexes that support parallel vacuum.  This function also
- * sets can_parallel_vacuum to remember indexes that participate in parallel
+ * sets will_parallel_vacuum to remember indexes that participate in parallel
  * vacuum.
  */
 static int
 compute_parallel_vacuum_workers(LVRelState *vacrel, int nrequested,
-								bool *can_parallel_vacuum)
+								bool *will_parallel_vacuum)
 {
 	int			nindexes_parallel = 0;
 	int			nindexes_parallel_bulkdel = 0;
@@ -363,7 +364,7 @@ compute_parallel_vacuum_workers(LVRelState *vacrel, int nrequested,
 			RelationGetNumberOfBlocks(indrel) < min_parallel_index_scan_size)
 			continue;
 
-		can_parallel_vacuum[idx] = true;
+		will_parallel_vacuum[idx] = true;
 
 		if ((vacoptions & VACUUM_OPTION_PARALLEL_BULKDEL) != 0)
 			nindexes_parallel_bulkdel++;
@@ -575,14 +576,11 @@ lazy_cleanup_one_index(Relation indrel, IndexBulkDeleteResult *istat,
  * careful to depend only on fields that lazy_scan_heap updates on-the-fly.
  */
 bool
-should_attempt_truncation(LVRelState *vacrel, VacuumParams *params)
+should_attempt_truncation(LVRelState *vacrel)
 {
 	BlockNumber possibly_freeable;
 
-	if (params->truncate == VACOPT_TERNARY_DISABLED)
-		return false;
-
-	if (vacrel->do_failsafe)
+	if (!vacrel->do_rel_truncate || vacrel->failsafe_active)
 		return false;
 
 	possibly_freeable = vacrel->rel_pages - vacrel->nonempty_pages;
@@ -603,6 +601,7 @@ lazy_truncate_heap(LVRelState *vacrel)
 {
 	BlockNumber old_rel_pages = vacrel->rel_pages;
 	BlockNumber new_rel_pages;
+	bool	lock_waiter_detected;
 	int			lock_retry;
 
 	/* Report that we are now truncating */
@@ -625,7 +624,7 @@ lazy_truncate_heap(LVRelState *vacrel)
 		 * (which is quite possible considering we already hold a lower-grade
 		 * lock).
 		 */
-		vacrel->lock_waiter_detected = false;
+		lock_waiter_detected = false;
 		lock_retry = 0;
 		while (true)
 		{
@@ -645,7 +644,6 @@ lazy_truncate_heap(LVRelState *vacrel)
 				 * We failed to establish the lock in the specified number of
 				 * retries. This means we give up truncating.
 				 */
-				vacrel->lock_waiter_detected = true;
 				ereport(elevel,
 						(errmsg("\"%s\": stopping truncate due to conflicting lock request",
 								vacrel->relname)));
@@ -680,7 +678,7 @@ lazy_truncate_heap(LVRelState *vacrel)
 		 * other backends could have added tuples to these pages whilst we
 		 * were vacuuming.
 		 */
-		new_rel_pages = count_nondeletable_pages(vacrel);
+		new_rel_pages = count_nondeletable_pages(vacrel, &lock_waiter_detected);
 		vacrel->blkno = new_rel_pages;
 
 		if (new_rel_pages >= old_rel_pages)
@@ -713,14 +711,13 @@ lazy_truncate_heap(LVRelState *vacrel)
 		vacrel->rel_pages = new_rel_pages;
 
 		ereport(elevel,
-				(errmsg("\"%s\": truncated %u to %u pages",
+				(errmsg("table \"%s\": truncated %u to %u pages",
 						vacrel->relname,
 						old_rel_pages, new_rel_pages),
 				 errdetail_internal("%s",
 									pg_rusage_show(&ru0))));
 		old_rel_pages = new_rel_pages;
-	} while (new_rel_pages > vacrel->nonempty_pages &&
-			 vacrel->lock_waiter_detected);
+	} while (new_rel_pages > vacrel->nonempty_pages && lock_waiter_detected);
 }
 
 /*
@@ -817,7 +814,7 @@ vac_cmp_itemptr(const void *left, const void *right)
  * Returns number of nondeletable pages (last nonempty page + 1).
  */
 static BlockNumber
-count_nondeletable_pages(LVRelState *vacrel)
+count_nondeletable_pages(LVRelState *vacrel, bool *lock_waiter_detected)
 {
 	BlockNumber blkno;
 	BlockNumber prefetchedUntil;
@@ -866,10 +863,10 @@ count_nondeletable_pages(LVRelState *vacrel)
 				if (LockHasWaitersRelation(vacrel->rel, AccessExclusiveLock))
 				{
 					ereport(elevel,
-							(errmsg("\"%s\": suspending truncate due to conflicting lock request",
+							(errmsg("table \"%s\": suspending truncate due to conflicting lock request",
 									vacrel->relname)));
 
-					vacrel->lock_waiter_detected = true;
+					*lock_waiter_detected = true;
 					return blkno;
 				}
 				starttime = currenttime;
@@ -926,9 +923,8 @@ count_nondeletable_pages(LVRelState *vacrel)
 
 			/*
 			 * Note: any non-unused item should be taken as a reason to keep
-			 * this page.  We formerly thought that DEAD tuples could be
-			 * thrown away, but that's not so, because we'd not have cleaned
-			 * out their index entries.
+			 * this page.  Even an LP_DEAD item makes truncation unsafe, since
+			 * we must not have cleaned out its index entries.
 			 */
 			if (ItemIdIsUsed(itemid))
 			{
@@ -1069,7 +1065,7 @@ vacuum_error_callback(void *arg)
 			if (BlockNumberIsValid(errinfo->blkno))
 			{
 				if (OffsetNumberIsValid(errinfo->offnum))
-					errcontext("while scanning block %u and offset %u of relation \"%s.%s\"",
+					errcontext("while scanning block %u offset %u of relation \"%s.%s\"",
 							   errinfo->blkno, errinfo->offnum, errinfo->relnamespace, errinfo->relname);
 				else
 					errcontext("while scanning block %u of relation \"%s.%s\"",
@@ -1084,7 +1080,7 @@ vacuum_error_callback(void *arg)
 			if (BlockNumberIsValid(errinfo->blkno))
 			{
 				if (OffsetNumberIsValid(errinfo->offnum))
-					errcontext("while vacuuming block %u and offset %u of relation \"%s.%s\"",
+					errcontext("while vacuuming block %u offset %u of relation \"%s.%s\"",
 							   errinfo->blkno, errinfo->offnum, errinfo->relnamespace, errinfo->relname);
 				else
 					errcontext("while vacuuming block %u of relation \"%s.%s\"",

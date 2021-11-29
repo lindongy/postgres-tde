@@ -298,9 +298,25 @@ verify_heapam(PG_FUNCTION_ARGS)
 	rsinfo->setDesc = ctx.tupdesc;
 	MemoryContextSwitchTo(old_context);
 
-	/* Open relation, check relkind and access method, and check privileges */
+	/* Open relation, check relkind and access method */
 	ctx.rel = relation_open(relid, AccessShareLock);
 	sanity_check_relation(ctx.rel);
+
+	/*
+	 * Early exit for unlogged relations during recovery.  These will have no
+	 * relation fork, so there won't be anything to check.  We behave as if
+	 * the relation is empty.
+	 */
+	if (ctx.rel->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED &&
+		RecoveryInProgress())
+	{
+		ereport(DEBUG1,
+				(errcode(ERRCODE_READ_ONLY_SQL_TRANSACTION),
+				 errmsg("cannot verify unlogged relation \"%s\" during recovery, skipping",
+						RelationGetRelationName(ctx.rel))));
+		relation_close(ctx.rel, AccessShareLock);
+		PG_RETURN_NULL();
+	}
 
 	/* Early exit if the relation is empty */
 	nblocks = RelationGetNumberOfBlocks(ctx.rel);
@@ -379,6 +395,8 @@ verify_heapam(PG_FUNCTION_ARGS)
 	for (ctx.blkno = first_block; ctx.blkno <= last_block; ctx.blkno++)
 	{
 		OffsetNumber maxoff;
+
+		CHECK_FOR_INTERRUPTS();
 
 		/* Optionally skip over all-frozen or all-visible blocks */
 		if (skip_option != SKIP_PAGES_NONE)
@@ -524,8 +542,7 @@ verify_heapam(PG_FUNCTION_ARGS)
 }
 
 /*
- * Check that a relation's relkind and access method are both supported,
- * and that the caller has select privilege on the relation.
+ * Check that a relation's relkind and access method are both supported.
  */
 static void
 sanity_check_relation(Relation rel)

@@ -526,7 +526,7 @@ ERROR:  could not serialize access due to concurrent update
     transaction sees a completely stable view of the database.  However,
     this view will not necessarily always be consistent with some serial
     (one at a time) execution of concurrent transactions of the same level.
-    For example, even a read only transaction at this level may see a
+    For example, even a read-only transaction at this level may see a
     control record updated to show that a batch has been completed but
     <emphasis>not</emphasis> see one of the detail records which is logically
     part of the batch because it read an earlier revision of the control
@@ -703,7 +703,7 @@ ERROR:  could not serialize access due to read/write dependencies among transact
     transactions might do, or it will not successfully commit.  It is
     important that an environment which uses this technique have a
     generalized way of handling serialization failures (which always return
-    with a SQLSTATE value of '40001'), because it will be very hard to
+    with an SQLSTATE value of '40001'), because it will be very hard to
     predict exactly which transactions might contribute to the read/write
     dependencies and need to be rolled back to prevent serialization
     anomalies.  The monitoring of read/write dependencies has a cost, as does

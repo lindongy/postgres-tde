@@ -31,9 +31,9 @@ PostgresNode - class representing PostgreSQL server instance
   # as well as the psql exit code. Pass some extra psql
   # options. If there's an error from psql raise an exception.
   my ($stdout, $stderr, $timed_out);
-  my $cmdret = $node->psql('postgres', 'SELECT pg_sleep(60)',
+  my $cmdret = $node->psql('postgres', 'SELECT pg_sleep(600)',
 	  stdout => \$stdout, stderr => \$stderr,
-	  timeout => 30, timed_out => \$timed_out,
+	  timeout => 180, timed_out => \$timed_out,
 	  extra_params => ['--single-transaction'],
 	  on_error_die => 1)
   print "Sleep timed out" if $timed_out;
@@ -1237,9 +1237,10 @@ sub _set_pg_version
 		# complain about that, too.
 		$pg_config = "$inst/bin/pg_config";
 		BAIL_OUT("pg_config not found: $pg_config")
-		  unless -e $pg_config;
+		  unless -e $pg_config
+		  or ($TestLib::windows_os and -e "$pg_config.exe");
 		BAIL_OUT("pg_config not executable: $pg_config")
-		  unless -x $pg_config;
+		  unless $TestLib::windows_os or -x $pg_config;
 
 		# Leave $pg_config install_path qualified, to be sure we get the right
 		# version information, below, or die trying
@@ -1613,9 +1614,9 @@ If given, it must be an array reference containing additional parameters to B<ps
 e.g.
 
 	my ($stdout, $stderr, $timed_out);
-	my $cmdret = $node->psql('postgres', 'SELECT pg_sleep(60)',
+	my $cmdret = $node->psql('postgres', 'SELECT pg_sleep(600)',
 		stdout => \$stdout, stderr => \$stderr,
-		timeout => 30, timed_out => \$timed_out,
+		timeout => 180, timed_out => \$timed_out,
 		extra_params => ['--single-transaction'])
 
 will set $cmdret to undef and $timed_out to a true value.
@@ -1944,6 +1945,92 @@ sub interactive_psql
 	return $harness;
 }
 
+# Common sub of pgbench-invoking interfaces.  Makes any requested script files
+# and returns pgbench command-line options causing use of those files.
+sub _pgbench_make_files
+{
+	my ($self, $files) = @_;
+	my @file_opts;
+
+	if (defined $files)
+	{
+
+		# note: files are ordered for determinism
+		for my $fn (sort keys %$files)
+		{
+			my $filename = $self->basedir . '/' . $fn;
+			push @file_opts, '-f', $filename;
+
+			# cleanup file weight
+			$filename =~ s/\@\d+$//;
+
+			#push @filenames, $filename;
+			# filenames are expected to be unique on a test
+			if (-e $filename)
+			{
+				ok(0, "$filename must not already exist");
+				unlink $filename or die "cannot unlink $filename: $!";
+			}
+			TestLib::append_to_file($filename, $$files{$fn});
+		}
+	}
+
+	return @file_opts;
+}
+
+=pod
+
+=item $node->pgbench($opts, $stat, $out, $err, $name, $files, @args)
+
+Invoke B<pgbench>, with parameters and files.
+
+=over
+
+=item $opts
+
+Options as a string to be split on spaces.
+
+=item $stat
+
+Expected exit status.
+
+=item $out
+
+Reference to a regexp list that must match stdout.
+
+=item $err
+
+Reference to a regexp list that must match stderr.
+
+=item $name
+
+Name of test for error messages.
+
+=item $files
+
+Reference to filename/contents dictionary.
+
+=item @args
+
+Further raw options or arguments.
+
+=back
+
+=cut
+
+sub pgbench
+{
+	local $Test::Builder::Level = $Test::Builder::Level + 1;
+
+	my ($self, $opts, $stat, $out, $err, $name, $files, @args) = @_;
+	my @cmd = (
+		'pgbench',
+		split(/\s+/, $opts),
+		$self->_pgbench_make_files($files), @args);
+
+	$self->command_checks_all(\@cmd, $stat, $out, $err, $name);
+}
+
 =pod
 
 =item $node->connect_ok($connstr, $test_name, %params)
@@ -2126,8 +2213,8 @@ sub poll_query_until
 	$expected = 't' unless defined($expected);    # default value
 
 	my $cmd = [
-		$self->installed_command('psql'),
-		'-XAt', '-c', $query, '-d', $self->connstr($dbname)
+		$self->installed_command('psql'), '-XAt',
+		'-d',                             $self->connstr($dbname)
 	];
 	my ($stdout, $stderr);
 	my $max_attempts = 180 * 10;
@@ -2135,12 +2222,15 @@ sub poll_query_until
 
 	while ($attempts < $max_attempts)
 	{
-		my $result = IPC::Run::run $cmd, '>', \$stdout, '2>', \$stderr;
+		my $result = IPC::Run::run $cmd, '<', \$query,
+		  '>', \$stdout, '2>', \$stderr;
 
 		$stdout =~ s/\r\n/\n/g if $Config{osname} eq 'msys';
 		chomp($stdout);
+		$stderr =~ s/\r\n/\n/g if $Config{osname} eq 'msys';
+		chomp($stderr);
 
-		if ($stdout eq $expected)
+		if ($stdout eq $expected && $stderr eq '')
 		{
 			return 1;
 		}
@@ -2153,8 +2243,6 @@ sub poll_query_until
 
 	# The query result didn't change in 180 seconds. Give up. Print the
 	# output from the last attempt, hopefully that's useful for debugging.
-	$stderr =~ s/\r\n/\n/g if $Config{osname} eq 'msys';
-	chomp($stderr);
 	diag qq(poll_query_until timed out executing this query:
 $query
 expecting this output:

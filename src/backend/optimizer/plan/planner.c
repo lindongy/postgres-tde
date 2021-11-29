@@ -1078,8 +1078,10 @@ preprocess_expression(PlannerInfo *root, Node *expr, int kind)
 
 	/*
 	 * Simplify constant expressions.  For function RTEs, this was already
-	 * done by preprocess_function_rtes ... but we have to do it again if the
-	 * RTE is LATERAL and might have contained join alias variables.
+	 * done by preprocess_function_rtes.  (But note we must do it again for
+	 * EXPRKIND_RTFUNC_LATERAL, because those might by now contain
+	 * un-simplified subexpressions inserted by flattening of subqueries or
+	 * join alias variables.)
 	 *
 	 * Note: an essential effect of this is to convert named-argument function
 	 * calls to positional notation and insert the current actual values of
@@ -1093,8 +1095,7 @@ preprocess_expression(PlannerInfo *root, Node *expr, int kind)
 	 * careful to maintain AND/OR flatness --- that is, do not generate a tree
 	 * with AND directly under AND, nor OR directly under OR.
 	 */
-	if (!(kind == EXPRKIND_RTFUNC ||
-		  (kind == EXPRKIND_RTFUNC_LATERAL && !root->hasJoinRTEs)))
+	if (kind != EXPRKIND_RTFUNC)
 		expr = eval_const_expressions(root, expr);
 
 	/*
@@ -3668,7 +3669,7 @@ consider_groupingsets_paths(PlannerInfo *root,
 							double dNumGroups)
 {
 	Query	   *parse = root->parse;
-	int			hash_mem = get_hash_mem();
+	Size		hash_mem_limit = get_hash_memory_limit();
 
 	/*
 	 * If we're not being offered sorted input, then only consider plans that
@@ -3734,7 +3735,7 @@ consider_groupingsets_paths(PlannerInfo *root,
 		 * with.  Override hash_mem in that case; otherwise, we'll rely on the
 		 * sorted-input case to generate usable mixed paths.
 		 */
-		if (hashsize > hash_mem * 1024L && gd->rollups)
+		if (hashsize > hash_mem_limit && gd->rollups)
 			return;				/* nope, won't fit */
 
 		/*
@@ -3853,7 +3854,7 @@ consider_groupingsets_paths(PlannerInfo *root,
 	{
 		List	   *rollups = NIL;
 		List	   *hash_sets = list_copy(gd->unsortable_sets);
-		double		availspace = (hash_mem * 1024.0);
+		double		availspace = hash_mem_limit;
 		ListCell   *lc;
 
 		/*

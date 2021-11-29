@@ -44,7 +44,7 @@
 
 /*
  * bulkdelete can be performed in parallel.  This option can be used by
- * IndexAm's that need to scan the index to delete the tuples.
+ * index AMs that need to scan indexes to delete tuples.
  */
 #define VACUUM_OPTION_PARALLEL_BULKDEL		(1 << 0)
 
@@ -201,17 +201,20 @@ typedef enum VacuumOption
 } VacuumOption;
 
 /*
- * A ternary value used by vacuum parameters.
+ * Values used by index_cleanup and truncate params.
  *
- * DEFAULT value is used to determine the value based on other
- * configurations, e.g. reloptions.
+ * VACOPTVALUE_UNSPECIFIED is used as an initial placeholder when VACUUM
+ * command has no explicit value.  When that happens the final usable value
+ * comes from the corresponding reloption (though the reloption default is
+ * usually used).
  */
-typedef enum VacOptTernaryValue
+typedef enum VacOptValue
 {
-	VACOPT_TERNARY_DEFAULT = 0,
-	VACOPT_TERNARY_DISABLED,
-	VACOPT_TERNARY_ENABLED,
-} VacOptTernaryValue;
+	VACOPTVALUE_UNSPECIFIED = 0,
+	VACOPTVALUE_AUTO,
+	VACOPTVALUE_DISABLED,
+	VACOPTVALUE_ENABLED,
+} VacOptValue;
 
 /* Phases of vacuum during which we report error context. */
 typedef enum
@@ -251,10 +254,8 @@ typedef struct VacuumParams
 	int			log_min_duration;	/* minimum execution threshold in ms at
 									 * which  verbose logs are activated, -1
 									 * to use default */
-	VacOptTernaryValue index_cleanup;	/* Do index vacuum and cleanup,
-										 * default value depends on reloptions */
-	VacOptTernaryValue truncate;	/* Truncate empty pages at the end,
-									 * default value depends on reloptions */
+	VacOptValue index_cleanup;	/* Do index vacuum and cleanup */
+	VacOptValue truncate;		/* Truncate empty pages at the end */
 
 	/*
 	 * The number of parallel vacuum workers.  0 by default which means choose
@@ -420,10 +421,16 @@ typedef struct LVRelState
 	Relation   *indrels;
 	int			nindexes;
 	/* Do index vacuuming/cleanup? */
+
+	/* Wraparound failsafe has been triggered? */
+	bool		failsafe_active;
+	/* Consider index vacuuming bypass optimization? */
+	bool		consider_bypass_optimization;
+
+	/* Doing index vacuuming, index cleanup, rel truncation? */
 	bool		do_index_vacuuming;
 	bool		do_index_cleanup;
-	/* Wraparound failsafe in effect? (implies !do_index_vacuuming) */
-	bool		do_failsafe;
+	bool		do_rel_truncate;
 
 	/* Buffer access strategy and parallel state */
 	BufferAccessStrategy bstrategy;
@@ -462,7 +469,6 @@ typedef struct LVRelState
 	BlockNumber pages_removed;	/* pages remove by truncation */
 	BlockNumber lpdead_item_pages;	/* # pages with LP_DEAD items */
 	BlockNumber nonempty_pages; /* actually, last nonempty page + 1 */
-	bool		lock_waiter_detected;
 
 	/* Statistics output by us, for table */
 	double		new_rel_tuples; /* new estimated total # of tuples */

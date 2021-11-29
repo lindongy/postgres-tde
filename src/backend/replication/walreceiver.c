@@ -125,6 +125,7 @@ static void WalRcvDie(int code, Datum arg);
 static void XLogWalRcvProcessMsg(unsigned char type, char *buf, Size len);
 static void XLogWalRcvWrite(char *buf, Size nbytes, XLogRecPtr recptr);
 static void XLogWalRcvFlush(bool dying);
+static void XLogWalRcvClose(XLogRecPtr recptr);
 static void XLogWalRcvSendReply(bool force, bool requestReply);
 static void XLogWalRcvSendHSFeedback(bool immed);
 static void ProcessWalSndrMessage(XLogRecPtr walEnd, TimestampTz sendTime);
@@ -279,10 +280,13 @@ WalReceiverMain(void)
 	PG_SETMASK(&UnBlockSig);
 
 	/* Establish the connection to the primary for XLOG streaming */
-	wrconn = walrcv_connect(conninfo, false, cluster_name[0] ? cluster_name : "walreceiver", &err);
+	wrconn = walrcv_connect(conninfo, false,
+							cluster_name[0] ? cluster_name : "walreceiver",
+							&err);
 	if (!wrconn)
 		ereport(ERROR,
-				(errmsg("could not connect to the primary server: %s", err)));
+				(errcode(ERRCODE_CONNECTION_FAILURE),
+				 errmsg("could not connect to the primary server: %s", err)));
 
 	/*
 	 * Save user-visible connection string.  This clobbers the original
@@ -328,7 +332,8 @@ WalReceiverMain(void)
 		if (strcmp(primary_sysid, standby_sysid) != 0)
 		{
 			ereport(ERROR,
-					(errmsg("database system identifier differs between the primary and standby"),
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("database system identifier differs between the primary and standby"),
 					 errdetail("The primary's identifier is %s, the standby's identifier is %s.",
 							   primary_sysid, standby_sysid)));
 		}
@@ -339,7 +344,8 @@ WalReceiverMain(void)
 		 */
 		if (primaryTLI < startpointTLI)
 			ereport(ERROR,
-					(errmsg("highest timeline %u of the primary is behind recovery timeline %u",
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("highest timeline %u of the primary is behind recovery timeline %u",
 							primaryTLI, startpointTLI)));
 
 		/*
@@ -425,7 +431,8 @@ WalReceiverMain(void)
 				 */
 				if (!RecoveryInProgress())
 					ereport(FATAL,
-							(errmsg("cannot continue WAL streaming, recovery has already ended")));
+							(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+							 errmsg("cannot continue WAL streaming, recovery has already ended")));
 
 				/* Process any requests or signals received recently */
 				ProcessWalRcvInterrupts();
@@ -551,7 +558,8 @@ WalReceiverMain(void)
 
 						if (now >= timeout)
 							ereport(ERROR,
-									(errmsg("terminating walreceiver due to timeout")));
+									(errcode(ERRCODE_CONNECTION_FAILURE),
+									 errmsg("terminating walreceiver due to timeout")));
 
 						/*
 						 * We didn't receive anything new, for half of
@@ -876,47 +884,16 @@ XLogWalRcvWrite(char *buf, Size nbytes, XLogRecPtr recptr)
 	{
 		int			segbytes;
 
-		if (recvFile < 0 || !XLByteInSeg(recptr, recvSegNo, wal_segment_size))
+		/* Close the current segment if it's completed */
+		if (recvFile >= 0 && !XLByteInSeg(recptr, recvSegNo, wal_segment_size))
+			XLogWalRcvClose(recptr);
+
+		if (recvFile < 0)
 		{
-			bool		use_existent;
-
-			/*
-			 * fsync() and close current file before we switch to next one. We
-			 * would otherwise have to reopen this file to fsync it later
-			 */
-			if (recvFile >= 0)
-			{
-				char		xlogfname[MAXFNAMELEN];
-
-				XLogWalRcvFlush(false);
-
-				XLogFileName(xlogfname, recvFileTLI, recvSegNo, wal_segment_size);
-
-				/*
-				 * XLOG segment files will be re-read by recovery in startup
-				 * process soon, so we don't advise the OS to release cache
-				 * pages associated with the file like XLogFileClose() does.
-				 */
-				if (close(recvFile) != 0)
-					ereport(PANIC,
-							(errcode_for_file_access(),
-							 errmsg("could not close log segment %s: %m",
-									xlogfname)));
-
-				/*
-				 * Create .done file forcibly to prevent the streamed segment
-				 * from being archived later.
-				 */
-				if (XLogArchiveMode != ARCHIVE_MODE_ALWAYS)
-					XLogArchiveForceDone(xlogfname);
-				else
-					XLogArchiveNotify(xlogfname);
-			}
-			recvFile = -1;
+			bool		use_existent = true;
 
 			/* Create/use new log file */
 			XLByteToSeg(recptr, recvSegNo, wal_segment_size);
-			use_existent = true;
 			recvFile = XLogFileInit(recvSegNo, &use_existent, true);
 			recvFileTLI = ThisTimeLineID;
 		}
@@ -963,6 +940,15 @@ XLogWalRcvWrite(char *buf, Size nbytes, XLogRecPtr recptr)
 
 	/* Update shared-memory status */
 	pg_atomic_write_u64(&WalRcv->writtenUpto, LogstreamResult.Write);
+
+	/*
+	 * Close the current segment if it's fully written up in the last cycle of
+	 * the loop, to create its archive notification file soon. Otherwise WAL
+	 * archiving of the segment will be delayed until any data in the next
+	 * segment is received and written.
+	 */
+	if (recvFile >= 0 && !XLByteInSeg(recptr, recvSegNo, wal_segment_size))
+		XLogWalRcvClose(recptr);
 }
 
 /*
@@ -1014,6 +1000,52 @@ XLogWalRcvFlush(bool dying)
 			XLogWalRcvSendHSFeedback(false);
 		}
 	}
+}
+
+/*
+ * Close the current segment.
+ *
+ * Flush the segment to disk before closing it. Otherwise we have to
+ * reopen and fsync it later.
+ *
+ * Create an archive notification file since the segment is known completed.
+ */
+static void
+XLogWalRcvClose(XLogRecPtr recptr)
+{
+	char		xlogfname[MAXFNAMELEN];
+
+	Assert(recvFile >= 0 && !XLByteInSeg(recptr, recvSegNo, wal_segment_size));
+
+	/*
+	 * fsync() and close current file before we switch to next one. We would
+	 * otherwise have to reopen this file to fsync it later
+	 */
+	XLogWalRcvFlush(false);
+
+	XLogFileName(xlogfname, recvFileTLI, recvSegNo, wal_segment_size);
+
+	/*
+	 * XLOG segment files will be re-read by recovery in startup process soon,
+	 * so we don't advise the OS to release cache pages associated with the
+	 * file like XLogFileClose() does.
+	 */
+	if (close(recvFile) != 0)
+		ereport(PANIC,
+				(errcode_for_file_access(),
+				 errmsg("could not close log segment %s: %m",
+						xlogfname)));
+
+	/*
+	 * Create .done file forcibly to prevent the streamed segment from being
+	 * archived later.
+	 */
+	if (XLogArchiveMode != ARCHIVE_MODE_ALWAYS)
+		XLogArchiveForceDone(xlogfname);
+	else
+		XLogArchiveNotify(xlogfname);
+
+	recvFile = -1;
 }
 
 /*

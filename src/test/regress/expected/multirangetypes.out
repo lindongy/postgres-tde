@@ -7,12 +7,17 @@ select ''::textmultirange;
 ERROR:  malformed multirange literal: ""
 LINE 1: select ''::textmultirange;
                ^
-DETAIL:  Missing left bracket.
+DETAIL:  Missing left brace.
 select '{,}'::textmultirange;
 ERROR:  malformed multirange literal: "{,}"
 LINE 1: select '{,}'::textmultirange;
                ^
 DETAIL:  Expected range start.
+select '{(,)}.'::textmultirange;
+ERROR:  malformed multirange literal: "{(,)}."
+LINE 1: select '{(,)}.'::textmultirange;
+               ^
+DETAIL:  Junk after closing right brace.
 select '{[a,c),}'::textmultirange;
 ERROR:  malformed multirange literal: "{[a,c),}"
 LINE 1: select '{[a,c),}'::textmultirange;
@@ -340,6 +345,23 @@ select textrange(null, null)::textmultirange;
 -----------
  {(,)}
 (1 row)
+
+--
+-- test unnest(multirange) function
+--
+select unnest(int4multirange(int4range('5', '6'), int4range('1', '2')));
+ unnest 
+--------
+ [1,2)
+ [5,6)
+(2 rows)
+
+select unnest(textmultirange(textrange('a', 'b'), textrange('d', 'e')));
+ unnest 
+--------
+ [a,b)
+ [d,e)
+(2 rows)
 
 --
 -- create some test data and test the operators
@@ -2236,10 +2258,112 @@ analyze test_multirange_gist;
 SET enable_seqscan    = t;
 SET enable_indexscan  = f;
 SET enable_bitmapscan = f;
+select count(*) from test_multirange_gist where mr = '{}'::int4multirange;
+ count 
+-------
+   500
+(1 row)
+
 select count(*) from test_multirange_gist where mr @> 'empty'::int4range;
  count 
 -------
   3700
+(1 row)
+
+select count(*) from test_multirange_gist where mr && 'empty'::int4range;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from test_multirange_gist where mr <@ 'empty'::int4range;
+ count 
+-------
+   500
+(1 row)
+
+select count(*) from test_multirange_gist where mr << 'empty'::int4range;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from test_multirange_gist where mr >> 'empty'::int4range;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from test_multirange_gist where mr &< 'empty'::int4range;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from test_multirange_gist where mr &> 'empty'::int4range;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from test_multirange_gist where mr -|- 'empty'::int4range;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from test_multirange_gist where mr @> '{}'::int4multirange;
+ count 
+-------
+  3700
+(1 row)
+
+select count(*) from test_multirange_gist where mr @> '{}'::int4multirange;
+ count 
+-------
+  3700
+(1 row)
+
+select count(*) from test_multirange_gist where mr && '{}'::int4multirange;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from test_multirange_gist where mr <@ '{}'::int4multirange;
+ count 
+-------
+   500
+(1 row)
+
+select count(*) from test_multirange_gist where mr << '{}'::int4multirange;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from test_multirange_gist where mr >> '{}'::int4multirange;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from test_multirange_gist where mr &< '{}'::int4multirange;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from test_multirange_gist where mr &> '{}'::int4multirange;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from test_multirange_gist where mr -|- '{}'::int4multirange;
+ count 
+-------
+     0
 (1 row)
 
 select count(*) from test_multirange_gist where mr = int4multirange(int4range(10,20), int4range(30,40), int4range(50,60));
@@ -2360,6 +2484,114 @@ select count(*) from test_multirange_gist where mr -|- int4multirange(int4range(
 SET enable_seqscan    = f;
 SET enable_indexscan  = t;
 SET enable_bitmapscan = f;
+select count(*) from test_multirange_gist where mr = '{}'::int4multirange;
+ count 
+-------
+   500
+(1 row)
+
+select count(*) from test_multirange_gist where mr @> 'empty'::int4range;
+ count 
+-------
+  3700
+(1 row)
+
+select count(*) from test_multirange_gist where mr && 'empty'::int4range;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from test_multirange_gist where mr <@ 'empty'::int4range;
+ count 
+-------
+   500
+(1 row)
+
+select count(*) from test_multirange_gist where mr << 'empty'::int4range;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from test_multirange_gist where mr >> 'empty'::int4range;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from test_multirange_gist where mr &< 'empty'::int4range;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from test_multirange_gist where mr &> 'empty'::int4range;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from test_multirange_gist where mr -|- 'empty'::int4range;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from test_multirange_gist where mr @> '{}'::int4multirange;
+ count 
+-------
+  3700
+(1 row)
+
+select count(*) from test_multirange_gist where mr @> '{}'::int4multirange;
+ count 
+-------
+  3700
+(1 row)
+
+select count(*) from test_multirange_gist where mr && '{}'::int4multirange;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from test_multirange_gist where mr <@ '{}'::int4multirange;
+ count 
+-------
+   500
+(1 row)
+
+select count(*) from test_multirange_gist where mr << '{}'::int4multirange;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from test_multirange_gist where mr >> '{}'::int4multirange;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from test_multirange_gist where mr &< '{}'::int4multirange;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from test_multirange_gist where mr &> '{}'::int4multirange;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from test_multirange_gist where mr -|- '{}'::int4multirange;
+ count 
+-------
+     0
+(1 row)
+
 select count(*) from test_multirange_gist where mr @> 'empty'::int4range;
  count 
 -------
@@ -2697,13 +2929,13 @@ create type intmultirange as (x int, y int);
 create type intrange as range(subtype=int); -- should fail
 ERROR:  type "intmultirange" already exists
 DETAIL:  Failed while creating a multirange type for type "intrange".
-HINT:  You can manually specify a multirange type name using the "multirange_type_name" attribute
+HINT:  You can manually specify a multirange type name using the "multirange_type_name" attribute.
 drop type intmultirange;
 create type intr_multirange as (x int, y int);
 create type intr as range(subtype=int); -- should fail
 ERROR:  type "intr_multirange" already exists
 DETAIL:  Failed while creating a multirange type for type "intr".
-HINT:  You can manually specify a multirange type name using the "multirange_type_name" attribute
+HINT:  You can manually specify a multirange type name using the "multirange_type_name" attribute.
 drop type intr_multirange;
 --
 -- Test multiple multirange types over the same subtype and manual naming of
@@ -2723,6 +2955,13 @@ LINE 1: select multirange_of_text(textrange2('a','Z'));
 HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 select multirange_of_text(textrange1('a','Z')) @> 'b'::text;
 ERROR:  range lower bound must be less than or equal to range upper bound
+select unnest(multirange_of_text(textrange1('a','b'), textrange1('d','e')));
+ unnest 
+--------
+ [a,b)
+ [d,e)
+(2 rows)
+
 select _textrange1(textrange2('a','z')) @> 'b'::text;
  ?column? 
 ----------

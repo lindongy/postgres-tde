@@ -251,6 +251,16 @@ be_tls_init(bool isServerStart)
 	/* disallow SSL compression */
 	SSL_CTX_set_options(context, SSL_OP_NO_COMPRESSION);
 
+#ifdef SSL_OP_NO_RENEGOTIATION
+
+	/*
+	 * Disallow SSL renegotiation, option available since 1.1.0h.  This
+	 * concerns only TLSv1.2 and older protocol versions, as TLSv1.3 has no
+	 * support for renegotiation.
+	 */
+	SSL_CTX_set_options(context, SSL_OP_NO_RENEGOTIATION);
+#endif
+
 	/* set up ephemeral DH and ECDH keys */
 	if (!initialize_dh(context, isServerStart))
 		goto error;
@@ -873,6 +883,7 @@ my_BIO_s_socket(void)
 		my_bio_index = BIO_get_new_index();
 		if (my_bio_index == -1)
 			return NULL;
+		my_bio_index |= (BIO_TYPE_DESCRIPTOR | BIO_TYPE_SOURCE_SINK);
 		my_bio_methods = BIO_meth_new(my_bio_index, "PostgreSQL backend socket");
 		if (!my_bio_methods)
 			return NULL;
@@ -1381,7 +1392,7 @@ X509_NAME_to_cstring(X509_NAME *name)
 	if (membuf == NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_OUT_OF_MEMORY),
-				 errmsg("failed to create BIO")));
+				 errmsg("could not create BIO")));
 
 	(void) BIO_set_close(membuf, BIO_CLOSE);
 	for (i = 0; i < count; i++)
