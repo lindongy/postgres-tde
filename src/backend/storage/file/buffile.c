@@ -1375,13 +1375,9 @@ BufFileAppend(BufFile *target, BufFile *source)
  * Open TransientBufFile at given path or create one if it does not
  * exist. User will be allowed either to write to the file or to read from it,
  * according to fileFlags, but not both.
- *
- * tweak_base should contain the first eight bytes of the encryption tweak
- * that is common to all buffers of the file.
  */
 TransientBufFile *
-BufFileOpenTransient(const char *path, int fileFlags,
-					 char tweak_base[TWEAK_BASE_SIZE])
+BufFileOpenTransient(const char *path, int fileFlags)
 {
 	bool		readOnly;
 	bool		append = false;

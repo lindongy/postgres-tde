@@ -310,8 +310,6 @@ NON_EXEC_STATIC void PgstatCollectorMain(int argc, char *argv[]) pg_attribute_no
 static PgStat_StatDBEntry *pgstat_get_db_entry(Oid databaseid, bool create);
 static PgStat_StatTabEntry *pgstat_get_tab_entry(PgStat_StatDBEntry *dbentry,
 												 Oid tableoid, bool create);
-static void pgstat_tweak_base(bool permanent, bool global, Oid database,
-							  char tweak_base[TWEAK_BASE_SIZE]);
 static void pgstat_write_statsfiles(bool permanent, bool allDbs);
 static void pgstat_write_db_statsfile(PgStat_StatDBEntry *dbentry, bool permanent);
 static void pgstat_write_bytes(TransientBufFile *file, void *ptr, size_t size,
@@ -3606,27 +3604,6 @@ pgstat_get_tab_entry(PgStat_StatDBEntry *dbentry, Oid tableoid, bool create)
 	return result;
 }
 
-/*
- * Initialize the common part of the encryption tweak.
- */
-static void
-pgstat_tweak_base(bool permanent, bool global, Oid database,
-				  char tweak_base[TWEAK_BASE_SIZE])
-{
-	char	*c = tweak_base;
-
-	StaticAssertStmt(3 + sizeof(Oid) <= TWEAK_BASE_SIZE,
-					 "tweak components do not fit into TWEAK_BASE_SIZE");
-	memset(tweak_base, 0, TWEAK_BASE_SIZE);
-	*c = TRANS_BUF_FILE_PGSTATS;
-	c++;
-	*c = permanent;
-	c++;
-	*c = global;
-	c++;
-	memcpy(c, &database, sizeof(Oid));
-}
-
 /* ----------
  * pgstat_write_statsfiles() -
  *		Write the global statistics file, as well as requested DB files.
@@ -3652,18 +3629,14 @@ pgstat_write_statsfiles(bool permanent, bool allDbs)
 	const char *tmpfile = permanent ? PGSTAT_STAT_PERMANENT_TMPFILE : pgstat_stat_tmpname;
 	const char *statfile = permanent ? PGSTAT_STAT_PERMANENT_FILENAME : pgstat_stat_filename;
 	bool	failed = false;
-	char tweak_base[TWEAK_BASE_SIZE];
 
 	elog(DEBUG2, "writing stats file \"%s\"", statfile);
 
 	/*
 	 * Open the statistics temp file to write out the current values.
 	 */
-	if (data_encrypted)
-		pgstat_tweak_base(permanent, true, InvalidOid, tweak_base);
 	fpout = BufFileOpenTransient(tmpfile,
-								 O_CREAT | O_WRONLY | O_APPEND | PG_BINARY,
-								 tweak_base);
+								 O_CREAT | O_WRONLY | O_APPEND | PG_BINARY);
 	if (fpout == NULL)
 	{
 		ereport(LOG,
@@ -3844,7 +3817,6 @@ pgstat_write_db_statsfile(PgStat_StatDBEntry *dbentry, bool permanent)
 	char		tmpfile[MAXPGPATH];
 	char		statfile[MAXPGPATH];
 	bool	failed = false;
-	char tweak_base[TWEAK_BASE_SIZE];
 
 	get_dbstat_filename(permanent, true, dbid, tmpfile, MAXPGPATH);
 	get_dbstat_filename(permanent, false, dbid, statfile, MAXPGPATH);
@@ -3854,11 +3826,8 @@ pgstat_write_db_statsfile(PgStat_StatDBEntry *dbentry, bool permanent)
 	/*
 	 * Open the statistics temp file to write out the current values.
 	 */
-	if (data_encrypted)
-		pgstat_tweak_base(permanent, false, dbid, tweak_base);
 	fpout = BufFileOpenTransient(tmpfile,
-								 O_CREAT | O_WRONLY | O_APPEND | PG_BINARY,
-								 tweak_base);
+								 O_CREAT | O_WRONLY | O_APPEND | PG_BINARY);
 	if (fpout == NULL)
 	{
 		ereport(LOG,
@@ -4008,7 +3977,6 @@ pgstat_read_statsfiles(Oid onlydb, bool permanent, bool deep)
 	bool		found;
 	const char *statfile = permanent ? PGSTAT_STAT_PERMANENT_FILENAME : pgstat_stat_filename;
 	bool	failed = false;
-	char tweak_base[TWEAK_BASE_SIZE];
 	int			i;
 
 	/*
@@ -4057,11 +4025,8 @@ pgstat_read_statsfiles(Oid onlydb, bool permanent, bool deep)
 	 * not yet written the stats file the first time.  Any other failure
 	 * condition is suspicious.
 	 */
-	if (data_encrypted)
-		pgstat_tweak_base(permanent, true, InvalidOid, tweak_base);
 	if ((fpin = BufFileOpenTransient(statfile,
-									 O_RDONLY | PG_BINARY,
-									 tweak_base)) == NULL)
+									 O_RDONLY | PG_BINARY)) == NULL)
 	{
 		if (errno != ENOENT)
 			ereport(pgStatRunningInCollector ? LOG : WARNING,
@@ -4329,7 +4294,6 @@ pgstat_read_db_statsfile(Oid databaseid, HTAB *tabhash, HTAB *funchash,
 	bool		found;
 	char		statfile[MAXPGPATH];
 	bool	failed = false;
-	char tweak_base[TWEAK_BASE_SIZE];
 
 	get_dbstat_filename(permanent, false, databaseid, statfile, MAXPGPATH);
 
@@ -4342,11 +4306,8 @@ pgstat_read_db_statsfile(Oid databaseid, HTAB *tabhash, HTAB *funchash,
 	 * not yet written the stats file the first time.  Any other failure
 	 * condition is suspicious.
 	 */
-	if (data_encrypted)
-		pgstat_tweak_base(permanent, false, databaseid, tweak_base);
 	if ((fpin = BufFileOpenTransient(statfile,
-									 O_RDONLY | PG_BINARY,
-									 tweak_base)) == NULL)
+									 O_RDONLY | PG_BINARY)) == NULL)
 	{
 		if (errno != ENOENT)
 			ereport(pgStatRunningInCollector ? LOG : WARNING,
@@ -4507,17 +4468,13 @@ pgstat_read_db_statsfile_timestamp(Oid databaseid, bool permanent,
 	int32		format_id;
 	const char *statfile = permanent ? PGSTAT_STAT_PERMANENT_FILENAME : pgstat_stat_filename;
 	bool	failed = false;
-	char tweak_base[TWEAK_BASE_SIZE];
 
 	/*
 	 * Try to open the stats file.  As above, anything but ENOENT is worthy of
 	 * complaining about.
 	 */
-	if (data_encrypted)
-		pgstat_tweak_base(permanent, true, InvalidOid, tweak_base);
 	if ((fpin = BufFileOpenTransient(statfile,
-									 O_RDONLY | PG_BINARY,
-									 tweak_base)) == NULL)
+									 O_RDONLY | PG_BINARY)) == NULL)
 	{
 		if (errno != ENOENT)
 			ereport(pgStatRunningInCollector ? LOG : WARNING,
