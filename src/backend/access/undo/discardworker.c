@@ -51,7 +51,7 @@ void
 DiscardWorkerMain(Datum main_arg)
 {
 	TimestampTz last_check_time = 0;
-	bool	first = true;
+	bool		first = true;
 
 	/*
 	 * TODO Set handler for SIGHUP (SignalHandlerForConfigReload) if the
@@ -68,8 +68,9 @@ DiscardWorkerMain(Datum main_arg)
 
 	for (;;)
 	{
-		TimestampTz	next_check_time, now;
-		long	wait_time;
+		TimestampTz next_check_time,
+					now;
+		long		wait_time;
 
 		CHECK_FOR_INTERRUPTS();
 
@@ -82,7 +83,7 @@ DiscardWorkerMain(Datum main_arg)
 		if (TimestampDifferenceExceeds(last_check_time, now,
 									   DISCARD_WORKER_NAPTIME))
 		{
-			bool	do_process = false;
+			bool		do_process = false;
 
 			/*
 			 * Save the time before the processing starts so that there is a
@@ -97,11 +98,12 @@ DiscardWorkerMain(Datum main_arg)
 			 */
 			if (!first)
 			{
-				UndoLogSlot	*slot = NULL;
+				UndoLogSlot *slot = NULL;
 
 				while ((slot = UndoLogGetNextSlot(slot)))
 				{
-					UndoLogOffset discard, insert;
+					UndoLogOffset discard,
+								insert;
 
 					LWLockAcquire(&slot->meta_lock, LW_SHARED);
 					discard = slot->meta.discard;
@@ -156,6 +158,7 @@ DiscardWorkerMain(Datum main_arg)
 				 */
 				wait_time = DISCARD_WORKER_NAPTIME;
 			}
+
 			/*
 			 * XXX Is it o.k. to neglect the check time, or should we distract
 			 * it from wait_time (unless wait_time is already zero)?
@@ -171,7 +174,7 @@ DiscardWorkerMain(Datum main_arg)
 
 		if (wait_time > 0)
 		{
-			int	rc;
+			int			rc;
 
 			rc = WaitLatch(MyLatch,
 						   WL_LATCH_SET | WL_TIMEOUT | WL_EXIT_ON_PM_DEATH,

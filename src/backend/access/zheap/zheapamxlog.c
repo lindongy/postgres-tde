@@ -36,7 +36,7 @@ zheap_xlog_insert(XLogReaderState *record)
 	XLogRecPtr	lsn = record->EndRecPtr;
 	xl_zheap_insert *xlrec = (xl_zheap_insert *) XLogRecGetData(record);
 	xl_undo_header xlundohdr;
-	char	*c = (char *) xlrec + SizeOfZHeapInsert;
+	char	   *c = (char *) xlrec + SizeOfZHeapInsert;
 	Buffer		buffer;
 	Page		page;
 	union
@@ -53,7 +53,7 @@ zheap_xlog_insert(XLogReaderState *record)
 	BlockNumber blkno;
 	ItemPointerData target_tid;
 	XLogRedoAction action;
-	char		   *tpd_trans_slot_id_ptr = NULL;
+	char	   *tpd_trans_slot_id_ptr = NULL;
 	FullTransactionId fxid = XLogRecGetFullXid(record);
 	bool		skip_undo;
 	ZHeapPrepareUndoInfo zh_undo_info;
@@ -101,7 +101,7 @@ zheap_xlog_insert(XLogReaderState *record)
 
 	if (!skip_undo)
 	{
-		UndoRecData	*rdt;
+		UndoRecData *rdt;
 		StringInfo	buf;
 
 		/*
@@ -200,7 +200,7 @@ zheap_xlog_insert(XLogReaderState *record)
 		if (!skip_undo)
 		{
 			if (tpd_trans_slot_id_ptr)
-				memcpy(&trans_slot_id , tpd_trans_slot_id_ptr,
+				memcpy(&trans_slot_id, tpd_trans_slot_id_ptr,
 					   sizeof(trans_slot_id));
 			else
 				trans_slot_id = ZHeapTupleHeaderGetXactSlot(zhtup);
@@ -230,7 +230,7 @@ zheap_xlog_insert(XLogReaderState *record)
 		{
 			int			trans_slot_id;
 
-			memcpy(&trans_slot_id , tpd_trans_slot_id_ptr,
+			memcpy(&trans_slot_id, tpd_trans_slot_id_ptr,
 				   sizeof(trans_slot_id));
 
 			TPDPageSetUndo(buffer,
@@ -256,7 +256,7 @@ zheap_xlog_delete(XLogReaderState *record)
 	xl_undo_header *xlundohdr = (xl_undo_header *) XLogRecGetData(record);
 	Size		recordlen = XLogRecGetDataLen(record);
 	xl_zheap_delete xlrec;
-	char	*data;
+	char	   *data;
 	Buffer		buffer;
 	Page		page;
 	ZHeapTupleData zheaptup;
@@ -271,8 +271,8 @@ zheap_xlog_delete(XLogReaderState *record)
 	ItemId		lp = NULL;
 	FullTransactionId fxid = XLogRecGetFullXid(record);
 	SubTransactionId dummy_subXactToken = InvalidSubTransactionId;
-	int		tpd_trans_slot_id = InvalidXactSlotId;
-	UndoRecData	*rdt;
+	int			tpd_trans_slot_id = InvalidXactSlotId;
+	UndoRecData *rdt;
 	StringInfo	buf;
 
 	data = (char *) xlundohdr + SizeOfUndoHeader;
@@ -331,7 +331,7 @@ zheap_xlog_delete(XLogReaderState *record)
 	 */
 	if (xlrec.flags & XLZ_DELETE_CONTAINS_OLD_KEYS_EXT)
 	{
-		uint32	old_keys_ext_size;
+		uint32		old_keys_ext_size;
 
 		memcpy(&old_keys_ext_size, data, sizeof(old_keys_ext_size));
 		Assert(old_keys_ext_size > 0);
@@ -391,11 +391,11 @@ zheap_xlog_delete(XLogReaderState *record)
 	zh_undo_info.fxid = fxid;
 	zh_undo_info.cid = FirstCommandId;
 	zheap_prepare_undodelete(&zh_undo_info,
-									   &zheaptup,
-									   xlrec.prevxid,
-									   tpd_trans_slot_id,
-									   dummy_subXactToken,
-									   &undorecord, record);
+							 &zheaptup,
+							 xlrec.prevxid,
+							 tpd_trans_slot_id,
+							 dummy_subXactToken,
+							 &undorecord, record);
 	/* Serialize the record. */
 	rdt = PrepareZHeapUndoRecord(&undorecord);
 	buf = makeStringInfo();
@@ -460,12 +460,12 @@ zheap_xlog_update(XLogReaderState *record)
 	XLogRecPtr	lsn = record->EndRecPtr;
 	xl_undo_header *xlundohdr;
 	xl_undo_header xlnewundohdr;
-	bool	have_newundohdr = false;
+	bool		have_newundohdr = false;
 	xl_zheap_header xlhdr;
 	Size		recordlen;
 	Size		freespace = 0;
-	xl_zheap_update	xlrec;
-	char	*data;
+	xl_zheap_update xlrec;
+	char	   *data;
 	Size		datalen;
 	Buffer		oldbuffer,
 				newbuffer;
@@ -492,17 +492,17 @@ zheap_xlog_update(XLogReaderState *record)
 	Relation	reln;
 	ItemId		lp = NULL;
 	FullTransactionId fxid = XLogRecGetFullXid(record);
-	int		old_tup_trans_slot_id = InvalidXactSlotId;
-	int		new_trans_slot_id = InvalidXactSlotId;
-	bool	have_new_slot = false;
+	int			old_tup_trans_slot_id = InvalidXactSlotId;
+	int			new_trans_slot_id = InvalidXactSlotId;
+	bool		have_new_slot = false;
 	int			trans_slot_id;
 	bool		inplace_update;
 	ZHeapPrepareUndoInfo gen_undo_info;
 	ZHeapPrepareUpdateUndoInfo zh_up_undo_info;
-	UndoRecData	*rdt;
+	UndoRecData *rdt;
 	StringInfo	buf;
-	uint8	undo_rec_type;
-	Size	undo_rec_size_old;
+	uint8		undo_rec_type;
+	Size		undo_rec_size_old;
 
 	recordlen = XLogRecGetDataLen(record);
 	xlundohdr = (xl_undo_header *) XLogRecGetData(record);
@@ -589,7 +589,7 @@ zheap_xlog_update(XLogReaderState *record)
 	 */
 	if (xlrec.flags & XLZ_UPDATE_CONTAINS_OLD_KEYS_EXT)
 	{
-		uint32	old_keys_ext_size;
+		uint32		old_keys_ext_size;
 
 		memcpy(&old_keys_ext_size, data, sizeof(old_keys_ext_size));
 		Assert(old_keys_ext_size > 0);
@@ -1173,7 +1173,7 @@ zheap_xlog_lock(XLogReaderState *record)
 	int			trans_slot = InvalidXactSlotId;
 	ZHeapPrepareUndoInfo zh_gen_undo_info;
 	ZHeapPrepareLockUndoInfo zh_lock_undo_info;
-	UndoRecData	*rdt;
+	UndoRecData *rdt;
 	StringInfo	buf;
 
 	xlrec = (xl_zheap_lock *) ((char *) xlundohdr + SizeOfUndoHeader);
@@ -1298,7 +1298,7 @@ zheap_xlog_multi_insert(XLogReaderState *record)
 {
 	XLogRecPtr	lsn = record->EndRecPtr;
 	xl_undo_header *xlundohdr;
-	char	*data;
+	char	   *data;
 	xl_zheap_multi_insert xlrec;
 	RelFileNode rnode;
 	BlockNumber blkno;
@@ -1389,6 +1389,7 @@ zheap_xlog_multi_insert(XLogReaderState *record)
 	 * We can skip inserting undo records if the tuples are to be marked as
 	 * frozen.
 	 */
+
 	/*
 	 * FIXME ranges_data should now be at the end of the data, the offsets
 	 * should probably be retrieved from zfree_offset_ranges. Another reason
@@ -1399,7 +1400,7 @@ zheap_xlog_multi_insert(XLogReaderState *record)
 	if (!skip_undo)
 	{
 		ZHeapPrepareUndoInfo zh_undo_info;
-		UndoRecData	*rdt;
+		UndoRecData *rdt;
 		StringInfo	buf;
 
 		/* Start UNDO prepare Stuff */
@@ -1428,7 +1429,7 @@ zheap_xlog_multi_insert(XLogReaderState *record)
 							   sizeof(int));
 		for (i = 0; i < nranges; i++)
 		{
-			int		pair_size = 2 * sizeof(OffsetNumber);
+			int			pair_size = 2 * sizeof(OffsetNumber);
 
 			appendBinaryStringInfo(&undorecord->uur_payload,
 								   (char *) ranges_data,
@@ -1808,7 +1809,7 @@ zheap_xlog_unused(XLogReaderState *record)
 	BlockNumber blkno;
 	XLogRedoAction action;
 	bool		unused_set = false;
-	UndoRecData	*rdt;
+	UndoRecData *rdt;
 	StringInfo	buf;
 
 	xlundohdr = (xl_undo_header *) XLogRecGetData(record);
@@ -1941,7 +1942,7 @@ zheap_xlog_unused(XLogReaderState *record)
 
 	if (BufferIsValid(buffer))
 		UnlockReleaseBuffer(buffer);
-	//UnlockReleaseUndoBuffers();
+	/* UnlockReleaseUndoBuffers(); */
 	UnlockReleaseTPDBuffers();
 
 	/*

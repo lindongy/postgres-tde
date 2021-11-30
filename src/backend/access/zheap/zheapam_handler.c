@@ -298,7 +298,8 @@ retry:
 						case LockWaitSkip:
 							if (!ConditionalSubXactLockTableWait(SnapshotDirty.xmax,
 																 SnapshotDirty.subxid))
-								return TM_WouldBlock;	/* skip instead of waiting */
+								return TM_WouldBlock;	/* skip instead of
+														 * waiting */
 							break;
 						case LockWaitError:
 							if (ConditionalSubXactLockTableWait(SnapshotDirty.xmax,
@@ -634,16 +635,16 @@ zheapam_index_fetch_tuple(struct IndexFetchTableData *scan,
  */
 static double
 zheapam_index_build_range_scan(Relation heapRelation,
-							  Relation indexRelation,
-							  IndexInfo *indexInfo,
-							  bool allow_sync,
-							  bool anyvisible,
-							  bool progress,
-							  BlockNumber start_blockno,
-							  BlockNumber numblocks,
-							  IndexBuildCallback callback,
-							  void *callback_state,
-							  TableScanDesc sscan)
+							   Relation indexRelation,
+							   IndexInfo *indexInfo,
+							   bool allow_sync,
+							   bool anyvisible,
+							   bool progress,
+							   BlockNumber start_blockno,
+							   BlockNumber numblocks,
+							   IndexBuildCallback callback,
+							   void *callback_state,
+							   TableScanDesc sscan)
 {
 	ZHeapScanDesc zscan;
 	ZHeapScanDesc scan = (ZHeapScanDesc) sscan;

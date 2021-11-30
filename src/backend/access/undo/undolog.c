@@ -538,7 +538,8 @@ UndoLogAdjustPhysicalRange(UndoLogNumber logno,
 	UndoLogOffset new_end = 0;
 	UndoLogOffset begin;
 	UndoLogOffset end;
-	UndoLogOffset insert, size;
+	UndoLogOffset insert,
+				size;
 	int			recycle = 0;
 
 	/*
@@ -2141,5 +2142,5 @@ GetUndoPersistenceLevel(char relpersistence)
 	if (relpersistence == RELPERSISTENCE_PERMANENT)
 		return UNDOPERSISTENCE_PERMANENT;
 	ereport(ERROR, (errmsg("unrecognized persistence '%c'",
-						relpersistence)));
+						   relpersistence)));
 }

@@ -58,10 +58,10 @@
  * Compute the size we need in the undo log.
  */
 Size
-GetUndoDataSize(UndoRecData *rdata)
+GetUndoDataSize(UndoRecData * rdata)
 {
-	UndoRecData     *rdata_tmp = rdata;
-	Size len_total = 0;
+	UndoRecData *rdata_tmp = rdata;
+	Size		len_total = 0;
 
 	while (rdata_tmp)
 	{
@@ -82,9 +82,9 @@ GetUndoDataSize(UndoRecData *rdata)
  */
 void
 SerializeUndoData(StringInfo buf, RmgrId rmid, uint8 rec_type,
-				  UndoRecData *rdata)
+				  UndoRecData * rdata)
 {
-	Size	len_total = GetUndoDataSize(rdata);
+	Size		len_total = GetUndoDataSize(rdata);
 
 
 	/* TODO: replace with actual serialization */
@@ -318,7 +318,7 @@ XactUndoReplay(XLogReaderState *xlog_record, RmgrId rmid, uint8 rec_type,
 			   void *rec_data, size_t rec_size)
 {
 	XactUndoContext ctx;
-	UndoRecData	rdata;
+	UndoRecData rdata;
 
 	/* Prepare serialized undo data. */
 	rdata.data = rec_data;
@@ -340,10 +340,10 @@ PerformUndoActionsRange(UndoRecPtr begin, UndoRecPtr end,
 						char relpersistence, int nestingLevel)
 {
 	UndoRSReaderState r;
-	Bitmapset	*rmids_used = NULL;
-	int	rmid;
+	Bitmapset  *rmids_used = NULL;
+	int			rmid;
 	const RmgrData *rmgr;
-	XactUndoRecordSetHeader	xact_hdr;
+	XactUndoRecordSetHeader xact_hdr;
 
 	UndoRSReaderInit(&r, begin, end, relpersistence, nestingLevel == 1);
 
@@ -416,7 +416,7 @@ PerformUndoActions(int nestingLevel)
 	{
 		UndoRecPtr	start_location;
 		UndoRecPtr	end_location;
-		char	relpersistence;
+		char		relpersistence;
 
 		/* XXX Do we need a separate function for this conversion? */
 		if (p == UNDOPERSISTENCE_TEMP)
@@ -450,8 +450,9 @@ PerformUndoActions(int nestingLevel)
 		 */
 		if (nestingLevel == 1)
 		{
-			UndoRecPtr	begin, end;
-			uint16	off;
+			UndoRecPtr	begin,
+						end;
+			uint16		off;
 
 			GetCurrentUndoRange(&begin, &end, p);
 
@@ -461,9 +462,9 @@ PerformUndoActions(int nestingLevel)
 
 			/*
 			 * UndoSetFlag() scans the chain of chunks backwards, so if we
-			 * pass the first chunk, the following ones will be
-			 * ignored. That's o.k. because only the first chunk contains the
-			 * type header.
+			 * pass the first chunk, the following ones will be ignored.
+			 * That's o.k. because only the first chunk contains the type
+			 * header.
 			 *
 			 * If this operation does not complete due to server crash,
 			 * ApplyPendingUndo() will do it during restart.

@@ -112,7 +112,7 @@ typedef struct IndexFetchZHeapData
 
 	Buffer		xs_cbuf;		/* current heap buffer in scan, if any */
 	/* NB: if xs_cbuf is not InvalidBuffer, we hold a pin on that buffer */
-}			IndexFetchZHeapData;
+} IndexFetchZHeapData;
 
 /*
  * We use the same IndexScanDescData structure for both amgettuple-based

@@ -35,7 +35,7 @@ typedef enum
 	ZHEAPTUPLE_INSERT_IN_PROGRESS,	/* inserting xact is still in progress */
 	ZHEAPTUPLE_DELETE_IN_PROGRESS,	/* deleting xact is still in progress */
 	ZHEAPTUPLE_ABORT_IN_PROGRESS	/* rollback is still pending */
-} ZHTSV_Result;
+}			ZHTSV_Result;
 
 extern void FetchTransInfoFromUndo(BlockNumber blocknum, OffsetNumber offnum,
 								   TransactionId xid, ZHeapTupleTransInfo *zinfo,
@@ -65,11 +65,11 @@ extern ZHTSV_Result ZHeapTupleSatisfiesOldestXmin(ZHeapTuple zhtup,
 												  TransactionId OldestXmin,
 												  Relation rel,
 												  Buffer buffer, bool resolve_abort_in_progress,
-												  ZHeapTuple *preabort_tuple,
+												  ZHeapTuple * preabort_tuple,
 												  TransactionId *xid, SubTransactionId *subxid);
 
 extern bool ZHeapTupleFetch(Relation rel, Buffer buffer, OffsetNumber offnum,
-							Snapshot snapshot, ZHeapTuple *visible_tuple,
+							Snapshot snapshot, ZHeapTuple * visible_tuple,
 							ItemPointer new_ctid, bool keep_tup);
 
 extern bool ZHeapTupleHasSerializableConflictOut(bool visible, Relation relation,

@@ -359,7 +359,7 @@ RelationPutZHeapTuple(Relation relation,
  */
 ZHeapFreeOffsetRanges *
 ZHeapGetUsableOffsetRanges(Buffer buffer,
-						   ZHeapTuple *tuples,
+						   ZHeapTuple * tuples,
 						   int ntuples,
 						   Size saveFreeSpace)
 {

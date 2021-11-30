@@ -210,7 +210,7 @@ extern TransactionId index_compute_xid_horizon_for_tuples(Relation irel,
 														  OffsetNumber *itemnos,
 														  int nitems);
 extern void index_delete_sort(TM_IndexDeleteOp *delstate);
-extern int bottomup_sort_and_shrink(TM_IndexDeleteOp *delstate);
+extern int	bottomup_sort_and_shrink(TM_IndexDeleteOp *delstate);
 
 #ifdef USE_PREFETCH
 /*

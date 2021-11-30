@@ -1648,7 +1648,7 @@ vac_truncate_clog(TransactionId frozenXID,
 				  MultiXactId lastSaneMinMulti)
 {
 	TransactionId nextXID = ReadNextTransactionId();
-	FullTransactionId	oldestFullXidHavingUndo;
+	FullTransactionId oldestFullXidHavingUndo;
 	TransactionId oldestXidHavingUndo;
 	Relation	relation;
 	TableScanDesc scan;

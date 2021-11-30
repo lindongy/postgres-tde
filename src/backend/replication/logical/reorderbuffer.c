@@ -615,14 +615,15 @@ ReorderBufferConvertZHeapTupleToHeapTuple(ReorderBufferChange *change,
 										  ReorderBuffer *rb,
 										  Relation relation)
 {
-	MemoryContext	oldcontext;
+	MemoryContext oldcontext;
 	TupleDesc	desc = RelationGetDescr(relation);
-	int	natts = desc->natts;
-	Datum	*values;
-	bool	*isnull;
+	int			natts = desc->natts;
+	Datum	   *values;
+	bool	   *isnull;
 	HeapTuple	tup;
-	HeapTupleHeader	t_data;
-	ReorderBufferTupleBuf	*tbuf, *result;
+	HeapTupleHeader t_data;
+	ReorderBufferTupleBuf *tbuf,
+			   *result;
 
 	/*
 	 * We're going to modify the size of the change, so to make sure the
@@ -639,7 +640,7 @@ ReorderBufferConvertZHeapTupleToHeapTuple(ReorderBufferChange *change,
 	isnull = (bool *) palloc(natts * sizeof(bool));
 
 	/* Perform the conversion. */
-	zheap_deform_tuple((ZHeapTuple) &tbuf->tuple, desc, values, isnull,
+	zheap_deform_tuple((ZHeapTuple) & tbuf->tuple, desc, values, isnull,
 					   natts);
 	tup = heap_form_tuple(desc, values, isnull);
 
@@ -693,15 +694,16 @@ SetupOldTupleIdentity(ReorderBuffer *rb, ReorderBufferChange *change,
 					  Relation relation)
 {
 	TupleDesc	desc = RelationGetDescr(relation);
-	int	i;
-	Datum	*values;
-	bool	*isnull;
+	int			i;
+	Datum	   *values;
+	bool	   *isnull;
 	Bitmapset  *id_attrs;
-	char	**value_bufs;
-	bool	found = false;
-	char *old_keys_ext = NULL;
-	HeapTuple	whole_tuple, key_tuple;
-	bool	copy;
+	char	  **value_bufs;
+	bool		found = false;
+	char	   *old_keys_ext = NULL;
+	HeapTuple	whole_tuple,
+				key_tuple;
+	bool		copy;
 
 	/*
 	 * We're going to modify the size of the change, so to make sure the
@@ -720,17 +722,16 @@ SetupOldTupleIdentity(ReorderBuffer *rb, ReorderBufferChange *change,
 	isnull = (bool *) palloc(desc->natts * sizeof(bool));
 
 	/*
-	 * The tuple should have been converted from zheap to heap format by
-	 * now.
+	 * The tuple should have been converted from zheap to heap format by now.
 	 */
 	heap_deform_tuple(&change->data.tp.oldtuple->tuple, desc, values,
-					   isnull);
+					  isnull);
 
 	id_attrs = RelationGetIndexAttrBitmap(relation, INDEX_ATTR_BITMAP_IDENTITY_KEY);
 	value_bufs = (char **) palloc0(desc->natts * sizeof(char *));
 	for (i = 0; i < desc->natts; i++)
 	{
-		Form_pg_attribute	att;
+		Form_pg_attribute att;
 
 		if (isnull[i])
 			continue;
@@ -745,13 +746,13 @@ SetupOldTupleIdentity(ReorderBuffer *rb, ReorderBufferChange *change,
 		if (relation->rd_rel->relreplident == REPLICA_IDENTITY_FULL ||
 			bms_is_member(att->attnum - FirstLowInvalidHeapAttributeNumber, id_attrs))
 		{
-			Pointer	value = DatumGetPointer(values[i]);
-			struct varlena	varhdr;
+			Pointer		value = DatumGetPointer(values[i]);
+			struct varlena varhdr;
 
 			if (VARATT_IS_EXTERNAL(value))
 			{
-				Size	val_size;
-				char	*value_buf;
+				Size		val_size;
+				char	   *value_buf;
 
 				/*
 				 * The old tuple should just have been read from WAL, so no
@@ -771,8 +772,7 @@ SetupOldTupleIdentity(ReorderBuffer *rb, ReorderBufferChange *change,
 				}
 
 				/*
-				 * Retrieve the data, but keep in mind that it's not
-				 * aligned.
+				 * Retrieve the data, but keep in mind that it's not aligned.
 				 */
 				memcpy(&varhdr, old_keys_ext, VARHDRSZ);
 				val_size = VARSIZE(&varhdr);
@@ -826,7 +826,7 @@ SetupOldTupleIdentity(ReorderBuffer *rb, ReorderBufferChange *change,
 	else
 	{
 		ReorderBufferTupleBuf *key_tup_buf;
-		HeapTupleHeader	t_data;
+		HeapTupleHeader t_data;
 
 		key_tup_buf = ReorderBufferGetTupleBuf(rb,
 											   key_tuple->t_len - SizeofHeapTupleHeader);
@@ -2544,6 +2544,7 @@ ReorderBufferProcessTXN(ReorderBuffer *rb, ReorderBufferTXN *txn,
 																		  true,
 																		  rb,
 																		  relation);
+
 							/*
 							 * Adjust the action type so the output plugin can
 							 * recognize it.
@@ -4664,7 +4665,8 @@ ReorderBufferRestoreChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 			 */
 			if (change->data.tp.oldtuple)
 			{
-				uint32		tuplelen, extra_data;
+				uint32		tuplelen,
+							extra_data;
 
 				memcpy(&extra_data, data, sizeof(extra_data));
 				data += sizeof(extra_data);
@@ -4705,7 +4707,8 @@ ReorderBufferRestoreChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 			if (change->data.tp.newtuple)
 			{
 				/* here, data might not be suitably aligned! */
-				uint32		tuplelen, extra_data;
+				uint32		tuplelen,
+							extra_data;
 
 				memcpy(&extra_data, data, sizeof(extra_data));
 				data += sizeof(extra_data);
@@ -5123,7 +5126,7 @@ ReorderBufferToastReplace(ReorderBuffer *rb, ReorderBufferTXN *txn,
 	if (!is_zheap)
 		heap_deform_tuple(&newtup->tuple, desc, attrs, isnull);
 	else
-		zheap_deform_tuple((ZHeapTuple) &newtup->tuple, desc, attrs, isnull,
+		zheap_deform_tuple((ZHeapTuple) & newtup->tuple, desc, attrs, isnull,
 						   desc->natts);
 
 	for (natt = 0; natt < desc->natts; natt++)

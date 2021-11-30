@@ -39,33 +39,33 @@ typedef struct UndoRecInfo
 	int			index;			/* Index of the element to make qsort stable. */
 	UndoRecPtr	urp;			/* undo recptr (undo record location). */
 	UnpackedUndoRecord *uur;	/* actual undo record. */
-} UndoRecInfo;
+}			UndoRecInfo;
 
-static int undo_record_comparator(const void *left, const void *right);
-static bool zheap_undo_actions(UndoRecInfo *urp_array, int first_idx,
+static int	undo_record_comparator(const void *left, const void *right);
+static bool zheap_undo_actions(UndoRecInfo * urp_array, int first_idx,
 							   int last_idx, Oid reloid,
 							   FullTransactionId full_xid, BlockNumber blkno,
 							   bool blk_chain_complete);
 static void log_zheap_undo_actions(ZHeapUndoActionWALInfo *wal_info);;
-static ZHeapTupleHeader RestoreTupleFromUndoRecord(UnpackedUndoRecord *urec,
+static ZHeapTupleHeader RestoreTupleFromUndoRecord(UnpackedUndoRecord * urec,
 												   Page page, ZHeapTupleHeader page_tup_hdr);
-static void RestoreXactFromUndoRecord(UnpackedUndoRecord *urec, Buffer buffer,
+static void RestoreXactFromUndoRecord(UnpackedUndoRecord * urec, Buffer buffer,
 									  ZHeapTupleHeader zhtup,
 									  bool tpd_offset_map,
 									  bool *is_tpd_map_updated);
-static int TransSlotFromUndoRecord(UnpackedUndoRecord *urec,
-								   ZHeapTupleHeader hdr, Page page);
-static UndoRecInfo *UndoRecordBulkFetchPage(UndoRecPtr *from_urecptr,
-											int undo_apply_size,
-											int *nrecords);
-//static void log_zheap_undo_actions(ZHeapUndoActionWALInfo *wal_info);
+static int	TransSlotFromUndoRecord(UnpackedUndoRecord * urec,
+									ZHeapTupleHeader hdr, Page page);
+static UndoRecInfo * UndoRecordBulkFetchPage(UndoRecPtr *from_urecptr,
+											 int undo_apply_size,
+											 int *nrecords);
+/* static void log_zheap_undo_actions(ZHeapUndoActionWALInfo *wal_info); */
 
 /*
  * Per-undorecord callback from UndoFetchRecord to check whether
  * an undorecord satisfies the given conditions.
  */
 bool
-ZHeapSatisfyUndoRecord(UnpackedUndoRecord *urec, BlockNumber blkno,
+ZHeapSatisfyUndoRecord(UnpackedUndoRecord * urec, BlockNumber blkno,
 					   OffsetNumber offset, TransactionId xid)
 {
 	Assert(urec != NULL);
@@ -79,8 +79,9 @@ ZHeapSatisfyUndoRecord(UnpackedUndoRecord *urec, BlockNumber blkno,
 	{
 		case UNDO_ZHEAP_MULTI_INSERT:
 			{
-				char	*data;
-				int		nranges, i;
+				char	   *data;
+				int			nranges,
+							i;
 				OffsetNumber start_offset;
 				OffsetNumber end_offset;
 
@@ -128,7 +129,7 @@ ZHeapSatisfyUndoRecord(UnpackedUndoRecord *urec, BlockNumber blkno,
  * undo record supplied by the caller.
  */
 int
-UpdateTupleHeaderFromUndoRecord(UnpackedUndoRecord *urec, ZHeapTupleHeader hdr,
+UpdateTupleHeaderFromUndoRecord(UnpackedUndoRecord * urec, ZHeapTupleHeader hdr,
 								Page page)
 {
 	if (urec->uur_type == UNDO_ZHEAP_INSERT)
@@ -171,7 +172,7 @@ UpdateTupleHeaderFromUndoRecord(UnpackedUndoRecord *urec, ZHeapTupleHeader hdr,
  * from the page itself.
  */
 static int
-TransSlotFromUndoRecord(UnpackedUndoRecord *urec, ZHeapTupleHeader hdr,
+TransSlotFromUndoRecord(UnpackedUndoRecord * urec, ZHeapTupleHeader hdr,
 						Page page)
 {
 	int			trans_slot_id;
@@ -464,13 +465,13 @@ zheap_exec_pending_rollback(Relation rel, Buffer buf, int trans_slot_id,
 		/*
 		 * If the transaction is aborted, apply undo actions. To check abort,
 		 * we can call TransactionIdDidAbort but always this will not give
-		 * proper status because if this transaction was running at the time of
-		 * crash, and after restart, status of this transaction will be as
-		 * aborted but still we should consider this transaction as aborted and
-		 * should apply the actions. So here, to identify all types of aborted
-		 * transaction, we will check that if this transaction is not committed
-		 * and not in-progress, it means this is aborted and we can apply
-		 * actions here.
+		 * proper status because if this transaction was running at the time
+		 * of crash, and after restart, status of this transaction will be as
+		 * aborted but still we should consider this transaction as aborted
+		 * and should apply the actions. So here, to identify all types of
+		 * aborted transaction, we will check that if this transaction is not
+		 * committed and not in-progress, it means this is aborted and we can
+		 * apply actions here.
 		 */
 		if (TransactionIdIsValid(xid) && !TransactionIdDidCommit(xid) &&
 			!TransactionIdIsInProgress(xid))
@@ -569,8 +570,8 @@ process_and_execute_undo_actions_page(UndoRecPtr from_urecptr, Relation rel,
 		else
 		{
 			/*
-			 * Actions are already applied so set urec ptr as invalid to
-			 * break loop.
+			 * Actions are already applied so set urec ptr as invalid to break
+			 * loop.
 			 */
 			urec_ptr = InvalidUndoRecPtr;
 		}
@@ -681,10 +682,10 @@ undo_action_insert(Relation rel, Page page, OffsetNumber off,
 	ZPageSetPrunable(page, xid);
 }
 
-static UndoRecInfo	*rec_array = NULL;
+static UndoRecInfo * rec_array = NULL;
 static int	rec_array_size = 1024;
 static int	undo_batch_items = 0;
-static Size	undo_batch_size = 0;
+static Size undo_batch_size = 0;
 
 /*
  * rm_undo() for the zheap AM.
@@ -698,7 +699,7 @@ zheap_undo(const WrittenUndoNode *record, FullTransactionId fxid)
 {
 	if (record)
 	{
-		UndoRecInfo		*item;
+		UndoRecInfo *item;
 
 		Assert(record->n.rmid == RM_ZHEAP_ID);
 
@@ -713,8 +714,8 @@ zheap_undo(const WrittenUndoNode *record, FullTransactionId fxid)
 
 			rec_array_size *= 2;
 			rec_array = (UndoRecInfo *) repalloc(rec_array,
-													 rec_array_size *
-													 sizeof(UndoRecInfo));
+												 rec_array_size *
+												 sizeof(UndoRecInfo));
 		}
 
 		/* Add the next record to the array. */
@@ -736,8 +737,8 @@ zheap_undo(const WrittenUndoNode *record, FullTransactionId fxid)
 	if ((record == NULL || (undo_batch_size >= maintenance_work_mem * 1024L))
 		&& undo_batch_items > 0)
 	{
-		int		next_batch_start = 0;
-		int		i;
+		int			next_batch_start = 0;
+		int			i;
 		ForkNumber	prev_fork = InvalidForkNumber;
 		BlockNumber prev_block = InvalidBlockNumber;
 		Oid			prev_reloid = InvalidOid;
@@ -775,10 +776,10 @@ zheap_undo(const WrittenUndoNode *record, FullTransactionId fxid)
 				 * whose records were fetched in the previous iterations are
 				 * not affected.
 				 *
-				 * What exactly happens when we don't clear the slot's xid?
-				 * If we cannot rely on freezing to make the slots available
-				 * soon enough, can't e.g. PageReserveTransactionSlot() check
-				 * if the xid is all-visible, and if so, set it invalid?
+				 * What exactly happens when we don't clear the slot's xid? If
+				 * we cannot rely on freezing to make the slots available soon
+				 * enough, can't e.g. PageReserveTransactionSlot() check if
+				 * the xid is all-visible, and if so, set it invalid?
 				 */
 				zheap_undo_actions(rec_array, next_batch_start, i - 1,
 								   prev_reloid, fxid, prev_block, false);
@@ -854,7 +855,7 @@ undo_record_comparator(const void *left, const void *right)
  *	returns true, if successfully applied the undo actions, otherwise, false.
  */
 static bool
-zheap_undo_actions(UndoRecInfo *urp_array, int first_idx, int last_idx,
+zheap_undo_actions(UndoRecInfo * urp_array, int first_idx, int last_idx,
 				   Oid reloid, FullTransactionId full_xid, BlockNumber blkno,
 				   bool blk_chain_complete)
 {
@@ -1065,8 +1066,8 @@ zheap_undo_actions(UndoRecInfo *urp_array, int first_idx, int last_idx,
 				break;
 			case UNDO_ZHEAP_MULTI_INSERT:
 				{
-					char	*data;
-					int		nranges;
+					char	   *data;
+					int			nranges;
 					int			i;
 
 					data = uur->uur_payload.data;
@@ -1079,7 +1080,7 @@ zheap_undo_actions(UndoRecInfo *urp_array, int first_idx, int last_idx,
 						OffsetNumber start_offset;
 						OffsetNumber end_offset;
 						OffsetNumber iter_offset;
-						int		nline;
+						int			nline;
 
 						memcpy(&start_offset, data, sizeof(OffsetNumber));
 						data += sizeof(OffsetNumber);
@@ -1097,7 +1098,7 @@ zheap_undo_actions(UndoRecInfo *urp_array, int first_idx, int last_idx,
 
 						if (need_init)
 						{
-							int	j;
+							int			j;
 							ItemId		lp;
 
 							for (j = FirstOffsetNumber; j <= nline; j++)
@@ -1406,7 +1407,7 @@ log_zheap_undo_actions(ZHeapUndoActionWALInfo *wal_info)
  * It also returns the old page tuple header to the caller.
  */
 static ZHeapTupleHeader
-RestoreTupleFromUndoRecord(UnpackedUndoRecord *urec, Page page,
+RestoreTupleFromUndoRecord(UnpackedUndoRecord * urec, Page page,
 						   ZHeapTupleHeader page_tup_hdr)
 {
 	ItemId		lp;
@@ -1495,7 +1496,7 @@ RestoreTupleFromUndoRecord(UnpackedUndoRecord *urec, Page page,
  * is_tpd_map_updated - true if tpd map is updated; false otherwise.
  */
 static void
-RestoreXactFromUndoRecord(UnpackedUndoRecord *urec, Buffer buffer,
+RestoreXactFromUndoRecord(UnpackedUndoRecord * urec, Buffer buffer,
 						  ZHeapTupleHeader zhtup,
 						  bool tpd_offset_map,
 						  bool *is_tpd_map_updated)
@@ -1678,8 +1679,8 @@ UndoRecordBulkFetchPage(UndoRecPtr *from_urecptr, int undo_apply_size,
 	int			urp_index = 0;
 	Size		total_size = 0;
 	TransactionId xid = InvalidTransactionId;
-	UndoRSReaderState	r;
-	bool	reader_inited = false;
+	UndoRSReaderState r;
+	bool		reader_inited = false;
 
 	/*
 	 * Allocate initial memory to hold the undo record info, we can expand it
@@ -1694,12 +1695,12 @@ UndoRecordBulkFetchPage(UndoRecPtr *from_urecptr, int undo_apply_size,
 	/* Read undo chain backward until we reach to the first undo record.  */
 	do
 	{
-		UndoLogNumber	logno;
-		UndoLogSlot		*slot;
+		UndoLogNumber logno;
+		UndoLogSlot *slot;
 		int			size;
-		bool	discarded = false;
-		UndoNode	*node;
-		char	persistence;
+		bool		discarded = false;
+		UndoNode   *node;
+		char		persistence;
 
 		logno = UndoRecPtrGetLogNo(urecptr);
 		slot = UndoLogGetSlot(logno, true);
@@ -1720,7 +1721,7 @@ UndoRecordBulkFetchPage(UndoRecPtr *from_urecptr, int undo_apply_size,
 				discarded = true;
 			else
 			{
-				UndoLogOffset	off;
+				UndoLogOffset off;
 
 				off = UndoRecPtrGetOffset(urecptr);
 				if (off < slot->meta.discard)
@@ -1840,10 +1841,10 @@ UndoFetchRecord(UndoRecPtr urp, BlockNumber blkno, OffsetNumber offset,
 				SatisfyUndoRecordCallback callback)
 {
 	UnpackedUndoRecord *urec = NULL;
-	UndoLogNumber	logno;
-	UndoLogSlot		*slot;
-	char	persistence;
-	UndoRSReaderState	r;
+	UndoLogNumber logno;
+	UndoLogSlot *slot;
+	char		persistence;
+	UndoRSReaderState r;
 
 	if (urec_ptr_out)
 		*urec_ptr_out = InvalidUndoRecPtr;
@@ -1871,7 +1872,7 @@ UndoFetchRecord(UndoRecPtr urp, BlockNumber blkno, OffsetNumber offset,
 	/* Find the undo record pointer we are interested in. */
 	while (true)
 	{
-		UndoNode	*node;
+		UndoNode   *node;
 
 		/* Fetch the current undo record. */
 		node = UndoReadOneRecord(&r, urp);

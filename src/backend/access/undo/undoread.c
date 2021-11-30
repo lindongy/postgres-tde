@@ -437,11 +437,11 @@ store_record_dist(UndoRSReaderState *r, UndoRecPtr rec_dist)
 	 */
 #define	MaxBytesPerValue	10
 
-	static char	encoded[MaxBytesPerValue];
+	static char encoded[MaxBytesPerValue];
 
-	char	*last = &encoded[MaxBytesPerValue - 1];
-	char *p = last;
-	int	nbytes;
+	char	   *last = &encoded[MaxBytesPerValue - 1];
+	char	   *p = last;
+	int			nbytes;
 
 	while (rec_dist > 0x7F)
 	{
@@ -462,10 +462,10 @@ store_record_dist(UndoRSReaderState *r, UndoRecPtr rec_dist)
 static UndoRecPtr
 get_next_record_dist(UndoRSReaderState *r)
 {
-	char	*p	= r->backward_cur;
-	Size	result = 0;
-	Size	i;
-	int	shift = 0;
+	char	   *p = r->backward_cur;
+	Size		result = 0;
+	Size		i;
+	int			shift = 0;
 
 	do
 	{
@@ -495,7 +495,7 @@ static UndoRecPtr
 read_node_remaining(UndoRSReaderState *r, UndoRecPtr urp, Size len,
 					bool allow_discarded)
 {
-	WrittenUndoNode	*node = &r->node;
+	WrittenUndoNode *node = &r->node;
 
 	/* rmid */
 	resetStringInfo(&r->buf);
@@ -569,7 +569,7 @@ UndoRSReaderInit(UndoRSReaderState *r,
 							 toplevel ? InvalidUndoRecPtr : end,
 							 &last_chunk->header);
 
-	elog(DEBUG1, "found chunk for end urp %lu at " UndoRecPtrFormat", len %lu, end at %lu, continuing from %lu",
+	elog(DEBUG1, "found chunk for end urp %lu at " UndoRecPtrFormat ", len %lu, end at %lu, continuing from %lu",
 		 end, last_chunk->urp_chunk_header, last_chunk->header.size, last_chunk->urp_chunk_header + last_chunk->header.size,
 		 last_chunk->header.previous_chunk);
 
@@ -615,7 +615,7 @@ bool
 UndoRSReaderReadOneForward(UndoRSReaderState *r, bool length_only)
 {
 	UndoRecordSetChunkListItem *curchunk;
-	Size	rec_len;
+	Size		rec_len;
 	UndoRecPtr	urp_content;
 	UndoRecPtr	next;
 
@@ -657,6 +657,7 @@ UndoRSReaderReadOneForward(UndoRSReaderState *r, bool length_only)
 	}
 
 	/* Read the URS record length, could be split over pages. */
+
 	/*
 	 * XXX: Right now we use a fixed width length encoding, but once this is
 	 * encoded as a variable length integer, there's no way around reading
@@ -669,8 +670,8 @@ UndoRSReaderReadOneForward(UndoRSReaderState *r, bool length_only)
 
 	if (length_only)
 	{
-		UndoLogNumber	next_logno;
-		UndoLogOffset	next_off;
+		UndoLogNumber next_logno;
+		UndoLogOffset next_off;
 
 		/*
 		 * Store the distance from the previous record, as it usually takes
@@ -758,8 +759,9 @@ UndoRSReaderReadOneBackward(UndoRSReaderState *r)
 
 	if (r->backward_cur > rl->data)
 	{
-		Size	rec_len;
-		UndoRecPtr	urp, urp_diff;
+		Size		rec_len;
+		UndoRecPtr	urp,
+					urp_diff;
 		WrittenUndoNode *node = &r->node;
 
 		urp_diff = get_next_record_dist(r);
@@ -798,7 +800,7 @@ UndoRSReaderReadOneBackward(UndoRSReaderState *r)
 void
 UndoRSReadXactHeader(UndoRSReaderState *r, XactUndoRecordSetHeader *hdr)
 {
-	UndoRecordSetChunkListItem	*first_chunk;
+	UndoRecordSetChunkListItem *first_chunk;
 	UndoRecPtr	xact_hdr_urp;
 
 	/* Retrieve the transaction header, as it contains the full XID. */
@@ -849,8 +851,8 @@ UndoRSReaderInitRandom(UndoRSReaderState *r, char relpersistence)
 UndoNode *
 UndoReadOneRecord(UndoRSReaderState *r, UndoRecPtr urp)
 {
-	int	len_size = sizeof(((UndoNode *) NULL)->length);
-	UndoNode	*node = &r->node.n;
+	int			len_size = sizeof(((UndoNode *) NULL)->length);
+	UndoNode   *node = &r->node.n;
 
 	resetStringInfo(&r->buf);
 

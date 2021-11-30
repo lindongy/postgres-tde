@@ -601,7 +601,7 @@ lazy_truncate_heap(LVRelState *vacrel)
 {
 	BlockNumber old_rel_pages = vacrel->rel_pages;
 	BlockNumber new_rel_pages;
-	bool	lock_waiter_detected;
+	bool		lock_waiter_detected;
 	int			lock_retry;
 
 	/* Report that we are now truncating */
@@ -962,7 +962,7 @@ compute_max_dead_tuples(BlockNumber relblocks, bool hasindex,
 
 	if (hasindex)
 	{
-		int	tuples_per_page;
+		int			tuples_per_page;
 
 		tuples_per_page = !is_zheap ? MaxHeapTuplesPerPage :
 			MaxZHeapTuplesPerPage;

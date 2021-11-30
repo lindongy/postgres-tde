@@ -373,7 +373,7 @@ zheapgetpage(TableScanDesc sscan, BlockNumber page)
 	bool		all_visible;
 	uint8		vmstatus;
 	Buffer		vmbuffer = InvalidBuffer;
-	MemoryContext	oldcxt;
+	MemoryContext oldcxt;
 
 	Assert(page < scan->rs_nblocks);
 
@@ -563,7 +563,7 @@ zheapgettup_pagemode(ZHeapScanDesc scan,
 				ParallelBlockTableScanDesc pbscan =
 				(ParallelBlockTableScanDesc) scan->rs_base.rs_parallel;
 				ParallelBlockTableScanWorker pbscanwork =
-					(ParallelBlockTableScanWorker) scan->rs_parallelworkerdata;
+				(ParallelBlockTableScanWorker) scan->rs_parallelworkerdata;
 
 				table_block_parallelscan_startblock_init(scan->rs_base.rs_rd,
 														 pbscanwork, pbscan);
@@ -710,7 +710,7 @@ get_next_page:
 			ParallelBlockTableScanDesc pbscan =
 			(ParallelBlockTableScanDesc) scan->rs_base.rs_parallel;
 			ParallelBlockTableScanWorker pbscanwork =
-				scan->rs_parallelworkerdata;
+			scan->rs_parallelworkerdata;
 
 			page = table_block_parallelscan_nextpage(scan->rs_base.rs_rd,
 													 pbscanwork, pbscan);
@@ -830,7 +830,7 @@ zheapgettup(ZHeapScanDesc scan,
 				ParallelBlockTableScanDesc pbscan =
 				(ParallelBlockTableScanDesc) scan->rs_base.rs_parallel;
 				ParallelBlockTableScanWorker pbscanwork =
-					scan->rs_parallelworkerdata;
+				scan->rs_parallelworkerdata;
 
 				table_block_parallelscan_startblock_init(scan->rs_base.rs_rd,
 														 pbscanwork, pbscan);
@@ -1023,7 +1023,7 @@ get_next_page:
 			ParallelBlockTableScanDesc pbscan =
 			(ParallelBlockTableScanDesc) scan->rs_base.rs_parallel;
 			ParallelBlockTableScanWorker pbscanwork =
-				scan->rs_parallelworkerdata;
+			scan->rs_parallelworkerdata;
 
 			page = table_block_parallelscan_nextpage(scan->rs_base.rs_rd,
 													 pbscanwork, pbscan);
@@ -1451,7 +1451,7 @@ bool
 zheap_fetch(Relation relation,
 			Snapshot snapshot,
 			ItemPointer tid,
-			ZHeapTuple *tuple,
+			ZHeapTuple * tuple,
 			Buffer *userbuf,
 			bool keep_buf,
 			bool keep_tup)
@@ -1575,11 +1575,10 @@ zheap_fetch(Relation relation,
 	}
 
 	/*
-	 * If caller needs the tuple, then don't free here still it is not
-	 * visible because for committed non-inplace updates, we have to follow
-	 * the chain.
+	 * If caller needs the tuple, then don't free here still it is not visible
+	 * because for committed non-inplace updates, we have to follow the chain.
 	 */
-	if(resulttup != NULL)
+	if (resulttup != NULL)
 		*tuple = resulttup;
 	else
 		*tuple = NULL;

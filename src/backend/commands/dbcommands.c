@@ -668,33 +668,32 @@ createdb(ParseState *pstate, const CreatedbStmt *stmt)
 	table_close(rel, AccessShareLock);
 
 	/*
-	 * We force a checkpoint before committing.  This effectively means
-	 * that committed XLOG_DBASE_CREATE operations will never need to be
-	 * replayed (at least not in ordinary crash recovery; we still have to
-	 * make the XLOG entry for the benefit of PITR operations). This
-	 * avoids two nasty scenarios:
+	 * We force a checkpoint before committing.  This effectively means that
+	 * committed XLOG_DBASE_CREATE operations will never need to be replayed
+	 * (at least not in ordinary crash recovery; we still have to make the
+	 * XLOG entry for the benefit of PITR operations). This avoids two nasty
+	 * scenarios:
 	 *
 	 * #1: When PITR is off, we don't XLOG the contents of newly created
-	 * indexes; therefore the drop-and-recreate-whole-directory behavior
-	 * of DBASE_CREATE replay would lose such indexes.
+	 * indexes; therefore the drop-and-recreate-whole-directory behavior of
+	 * DBASE_CREATE replay would lose such indexes.
 	 *
 	 * #2: Since we have to recopy the source database during DBASE_CREATE
-	 * replay, we run the risk of copying changes in it that were
-	 * committed after the original CREATE DATABASE command but before the
-	 * system crash that led to the replay.  This is at least unexpected
-	 * and at worst could lead to inconsistencies, eg duplicate table
-	 * names.
+	 * replay, we run the risk of copying changes in it that were committed
+	 * after the original CREATE DATABASE command but before the system crash
+	 * that led to the replay.  This is at least unexpected and at worst could
+	 * lead to inconsistencies, eg duplicate table names.
 	 *
 	 * (Both of these were real bugs in releases 8.0 through 8.0.3.)
 	 *
-	 * In PITR replay, the first of these isn't an issue, and the second
-	 * is only a risk if the CREATE DATABASE and subsequent template
-	 * database change both occur while a base backup is being taken.
-	 * There doesn't seem to be much we can do about that except document
-	 * it as a limitation.
+	 * In PITR replay, the first of these isn't an issue, and the second is
+	 * only a risk if the CREATE DATABASE and subsequent template database
+	 * change both occur while a base backup is being taken. There doesn't
+	 * seem to be much we can do about that except document it as a
+	 * limitation.
 	 *
-	 * Perhaps if we ever implement CREATE DATABASE in a less cheesy way,
-	 * we can avoid this.
+	 * Perhaps if we ever implement CREATE DATABASE in a less cheesy way, we
+	 * can avoid this.
 	 */
 	RequestCheckpoint(CHECKPOINT_IMMEDIATE | CHECKPOINT_FORCE | CHECKPOINT_WAIT);
 
@@ -704,10 +703,10 @@ createdb(ParseState *pstate, const CreatedbStmt *stmt)
 	table_close(pg_database_rel, NoLock);
 
 	/*
-	 * Force synchronous commit, thus minimizing the window between
-	 * creation of the database files and committal of the transaction. If
-	 * we crash before committing, we'll have a DB that's taking up disk
-	 * space but is not in pg_database, which is not good.
+	 * Force synchronous commit, thus minimizing the window between creation
+	 * of the database files and committal of the transaction. If we crash
+	 * before committing, we'll have a DB that's taking up disk space but is
+	 * not in pg_database, which is not good.
 	 *
 	 * TODO Consider if the undo log makes this unnecessary.
 	 */
@@ -1308,8 +1307,8 @@ movedb(const char *dbname, const char *tblspcname)
 	new_record_repl[Anum_pg_database_dattablespace - 1] = true;
 
 	newtuple = heap_modify_tuple(oldtuple, RelationGetDescr(pgdbrel),
-									 new_record,
-									 new_record_nulls, new_record_repl);
+								 new_record,
+								 new_record_nulls, new_record_repl);
 	CatalogTupleUpdate(pgdbrel, &oldtuple->t_self, newtuple);
 
 	InvokeObjectPostAlterHook(DatabaseRelationId, db_id, 0);
@@ -1958,7 +1957,7 @@ remove_dbtablespaces(Oid db_id)
 static bool
 remove_dbtablespace(Oid db_id, Oid tbspid)
 {
-	char	*path = GetDatabasePath(db_id, tbspid);
+	char	   *path = GetDatabasePath(db_id, tbspid);
 	struct stat st;
 
 	if (lstat(path, &st) < 0 || !S_ISDIR(st.st_mode))
@@ -2138,9 +2137,9 @@ log_undo_db_create(Oid db_id, Oid tablespace_id)
 {
 	XactUndoContext undo_context;
 	XLogRecPtr	lsn;
-	xu_dbase_create	undo_rec;
-	xl_dbase_precreate_rec	xlrec;
-	UndoRecData	rdata;
+	xu_dbase_create undo_rec;
+	xl_dbase_precreate_rec xlrec;
+	UndoRecData rdata;
 
 	undo_rec.db_id = db_id;
 	undo_rec.tablespace_id = tablespace_id;
@@ -2311,8 +2310,8 @@ dbase_undo(const WrittenUndoNode *record, FullTransactionId fxid)
 	xl_dbase_drop_dir_rec xlrec;
 
 	/*
-	 * The end of transaction or subtransaction is not interesting for
-	 * us. Should we process the records in batches?
+	 * The end of transaction or subtransaction is not interesting for us.
+	 * Should we process the records in batches?
 	 */
 	if (record == NULL)
 		return;

@@ -23,7 +23,7 @@ static UndoRecordPayload work_payload;
  * One item per the variable above + three extra ones for the payload and for
  * the tuple plus a common header for these, see PrepareZHeapUndoRecord().
  */
-static UndoRecData	work_chain[6];
+static UndoRecData work_chain[6];
 
 /*
  * Turn UnpackedUndoRecord into a chain of UndoRecData structures.
@@ -33,22 +33,23 @@ static UndoRecData	work_chain[6];
  * note that the result is only valid until the next call of the function.
  */
 UndoRecData *
-PrepareZHeapUndoRecord(UnpackedUndoRecord *uur)
+PrepareZHeapUndoRecord(UnpackedUndoRecord * uur)
 {
-	UndoRecData	*rdt_cur = &work_chain[0];
+	UndoRecData *rdt_cur = &work_chain[0];
 	UndoRecData *rdt_last = rdt_cur;
 
 	/*
 	 * Set uur_info for an UnpackedUndoRecord appropriately based on which
 	 * other fields are set.
 	 */
+
 	/*
 	 * A.H. Uncomment this if we can update individual fields w/o
 	 * reconstructing the whole chain. For this, the function should have a
 	 * boolean argument telling whether a new record is being constructed or
 	 * an existing is updated.
 	 */
-	//Assert(uur->uur_info == 0);
+	/* Assert(uur->uur_info == 0); */
 
 	if (uur->uur_fork != MAIN_FORKNUM)
 		uur->uur_info |= UREC_INFO_RELATION_DETAILS;
@@ -149,7 +150,7 @@ PrepareZHeapUndoRecord(UnpackedUndoRecord *uur)
  */
 void
 UnpackZHeapUndoRecord(char *readptr, bool header_only, bool copy,
-					  UnpackedUndoRecord *uur)
+					  UnpackedUndoRecord * uur)
 {
 	/* Read the header. */
 	memcpy(&work_hdr, readptr, SizeOfUndoRecordHeader);
@@ -224,7 +225,7 @@ UnpackZHeapUndoRecord(char *readptr, bool header_only, bool copy,
  * Compute size of the Unpacked undo record in memory
  */
 Size
-UnpackedUndoRecordSize(UnpackedUndoRecord *uur)
+UnpackedUndoRecordSize(UnpackedUndoRecord * uur)
 {
 	Size		size;
 
@@ -246,7 +247,7 @@ UnpackedUndoRecordSize(UnpackedUndoRecord *uur)
  * XXX Rename to UndoRecordFree() ?
  */
 void
-UndoRecordRelease(UnpackedUndoRecord *urec)
+UndoRecordRelease(UnpackedUndoRecord * urec)
 {
 	if (urec->data_copy)
 	{
@@ -264,7 +265,7 @@ UndoRecordRelease(UnpackedUndoRecord *urec)
  * record.
  */
 void
-ResetUndoRecord(UnpackedUndoRecord *urec)
+ResetUndoRecord(UnpackedUndoRecord * urec)
 {
 	if (urec->data_copy)
 	{

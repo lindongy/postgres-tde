@@ -283,9 +283,9 @@ zheap_insert(Relation relation, ZHeapTuple tup, CommandId cid,
 	bool		lock_reacquired;
 	bool		skip_undo;
 	ZHeapPrepareUndoInfo zh_undo_info;
-	XactUndoContext	xuctx;
-	UndoRecData	*rdt = NULL;
-	TransactionId	subxact_xid = InvalidTransactionId;
+	XactUndoContext xuctx;
+	UndoRecData *rdt = NULL;
+	TransactionId subxact_xid = InvalidTransactionId;
 
 	/*
 	 * We can skip inserting undo records if the tuples are to be marked as
@@ -399,8 +399,8 @@ reacquire_buffer:
 		rdt = PrepareZHeapUndoRecord(&undorecord);
 
 		/*
-		 * Prepare the insertion although we don't know the tuple offset
-		 * yet. We need to lock the undo buffers before the critical section
+		 * Prepare the insertion although we don't know the tuple offset yet.
+		 * We need to lock the undo buffers before the critical section
 		 * starts.
 		 */
 		urecptr = PrepareXactUndoData(&xuctx,
@@ -464,6 +464,7 @@ reacquire_buffer:
 	{
 		/* Update the tuple offset in the undo record. */
 		undorecord.uur_offset = ItemPointerGetOffsetNumber(&(zheaptup->t_self));
+
 		/*
 		 * TODO Introduce functions to update the corresponding item of the
 		 * chain item instead of reconstructing the chain from scratch.
@@ -492,7 +493,7 @@ reacquire_buffer:
 
 		ins_wal_info.buffer = buffer;
 		ins_wal_info.ztuple = zheaptup;
-		//ins_wal_info.urecptr = urecptr;
+		/* ins_wal_info.urecptr = urecptr; */
 		ins_wal_info.prev_urecptr = prev_urecptr;
 		ins_wal_info.new_trans_slot_id = trans_slot_id;
 		ins_wal_info.prior_trans_slot_id = InvalidXactSlotId;
@@ -601,7 +602,7 @@ zheap_delete(Relation relation, ItemPointer tid,
 	TM_Result	result;
 	FullTransactionId fxid = GetTopFullTransactionId();
 	TransactionId xid = XidFromFullTransactionId(fxid);
-	FullTransactionId	oldestFullXidHavingUndo;
+	FullTransactionId oldestFullXidHavingUndo;
 	TransactionId oldestXidHavingUndo,
 				single_locker_xid;
 	SubTransactionId tup_subxid = InvalidSubTransactionId,
@@ -630,10 +631,10 @@ zheap_delete(Relation relation, ItemPointer tid,
 	bool		lock_reacquired;
 	uint8		vm_status;
 	ZHeapTupleTransInfo zinfo;
-	XactUndoContext	xuctx;
-	UndoRecData	*rdt;
-	TransactionId	subxact_xid = InvalidTransactionId;
-	char *old_keys_ext = NULL;
+	XactUndoContext xuctx;
+	UndoRecData *rdt;
+	TransactionId subxact_xid = InvalidTransactionId;
+	char	   *old_keys_ext = NULL;
 	uint32		old_keys_ext_size = 0;
 
 	Assert(ItemPointerIsValid(tid));
@@ -1316,7 +1317,7 @@ zheap_update(Relation relation, ItemPointer otid, ZHeapTuple newtup,
 	TM_Result	result;
 	FullTransactionId fxid = GetTopFullTransactionId();
 	TransactionId xid = XidFromFullTransactionId(fxid);
-	FullTransactionId	oldestFullXidHavingUndo;
+	FullTransactionId oldestFullXidHavingUndo;
 	TransactionId save_tup_xid,
 				oldestXidHavingUndo,
 				single_locker_xid;
@@ -1378,12 +1379,13 @@ zheap_update(Relation relation, ItemPointer otid, ZHeapTuple newtup,
 	ZHeapTupleTransInfo zinfo;
 	ZHeapPrepareUndoInfo gen_undo_info;
 	ZHeapPrepareUpdateUndoInfo zh_up_undo_info;
-	UndoRecData	*rdt;
-	Size	undo_rec_size, undo_rec_size_old;
-	XactUndoContext		xuctx;
-	uint8	undo_rec_type;
-	TransactionId	subxact_xid = InvalidTransactionId;
-	char *old_keys_ext = NULL;
+	UndoRecData *rdt;
+	Size		undo_rec_size,
+				undo_rec_size_old;
+	XactUndoContext xuctx;
+	uint8		undo_rec_type;
+	TransactionId subxact_xid = InvalidTransactionId;
+	char	   *old_keys_ext = NULL;
 	uint32		old_keys_ext_size = 0;
 
 	Assert(ItemPointerIsValid(otid));
@@ -1470,9 +1472,9 @@ check_tup_satisfies_update:
 			/*
 			 * Since tuple data is gone let's be conservative about lock mode.
 			 *
-			 * XXX We could optimize here by checking whether the key column is
-			 * not updated and if so, then use lower lock level, but this case
-			 * should be rare enough that it won't matter.
+			 * XXX We could optimize here by checking whether the key column
+			 * is not updated and if so, then use lower lock level, but this
+			 * case should be rare enough that it won't matter.
 			 */
 			*lockmode = LockTupleExclusive;
 		}
@@ -2155,7 +2157,7 @@ reacquire_buffer:
 				  relation->rd_rel->relreplident == REPLICA_IDENTITY_FULL);
 	if (RelationIsLogicallyLogged(relation) && id_changed)
 	{
-		ZHeapTupleData	keytup;
+		ZHeapTupleData keytup;
 
 		/*
 		 * oldtup points to a place that can change due to in-place update, so
@@ -2961,9 +2963,9 @@ check_tup_satisfies_update:
 			memcpy(tuple->t_data, zhtup.t_data, zhtup.t_len);
 
 			/*
-			 * We reach here when the tuple is inserted/inplace updated
-			 * by current transaction and there are no other concurrent
-			 * locker on the tuple.
+			 * We reach here when the tuple is inserted/inplace updated by
+			 * current transaction and there are no other concurrent locker on
+			 * the tuple.
 			 */
 			switch (mode)
 			{
@@ -3117,7 +3119,7 @@ failed:
 	zh_undo_info.prev_urecptr = prev_urecptr;
 	zh_undo_info.fxid = fxid;
 	zh_undo_info.cid = FirstCommandId;
-	//zh_undo_info.relpersistence = relation->rd_rel->relpersistence;
+	/* zh_undo_info.relpersistence = relation->rd_rel->relpersistence; */
 
 	/*
 	 * If all the members were lockers and are all gone, we can do away with
@@ -3186,8 +3188,8 @@ zheap_tuple_already_locked(ZHeapTuple zhtup, UndoRecPtr urec_ptr,
 	else if (TransactionIdIsCurrentTransactionId(xid))
 	{
 		/*
-		 * We reach here when the current transaction is the sole locker
-		 * on the tuple.  In that case, ZHeapTupleSatisfiesUpdate returns
+		 * We reach here when the current transaction is the sole locker on
+		 * the tuple.  In that case, ZHeapTupleSatisfiesUpdate returns
 		 * TM_BeingModified and eventually we come here.
 		 */
 		switch (mode)
@@ -3807,10 +3809,10 @@ test_lockmode_for_conflict(Relation rel, Buffer buf, ZHeapTuple zhtup,
 		 * will not give proper status because if this transaction was running
 		 * at the time of crash, and after restart, status of this transaction
 		 * will be as aborted but still we should consider this transaction as
-		 * aborted and should apply the actions. So here, to identify all types
-		 * of aborted transaction, we will check that if this transaction is
-		 * not committed and not in-progress, it means this is aborted and we
-		 * can apply actions here.
+		 * aborted and should apply the actions. So here, to identify all
+		 * types of aborted transaction, we will check that if this
+		 * transaction is not committed and not in-progress, it means this is
+		 * aborted and we can apply actions here.
 		 */
 		zheap_exec_pending_rollback(rel, buf, trans_slot_id, xid, NULL);
 
@@ -3985,11 +3987,11 @@ lock_tuple:
 
 		/*
 		 * Here, if tuple xid is not same as our wait xid, then we can't go
-		 * ahead, because either our wait xid is committed or aborted and
-		 * new tuple xid may be in-progress, so return from here.  We will set
+		 * ahead, because either our wait xid is committed or aborted and new
+		 * tuple xid may be in-progress, so return from here.  We will set
 		 * rollback_and_relocked so that caller will reverify xwait again.
 		 */
-		if(zinfo.xid != xwait)
+		if (zinfo.xid != xwait)
 		{
 			/*
 			 * Set rollback_and_relocked so that to caller will refetch tuple
@@ -4013,10 +4015,10 @@ lock_tuple:
 		 * will not give proper status because if this transaction was running
 		 * at the time of crash, and after restart, status of this transaction
 		 * will be as aborted but still we should consider this transaction as
-		 * aborted and should apply the actions. So here, to identify all types
-		 * of aborted transaction, we will check that if this transaction is
-		 * not committed and not in-progress, it means this is aborted and we
-		 * can apply actions here.
+		 * aborted and should apply the actions. So here, to identify all
+		 * types of aborted transaction, we will check that if this
+		 * transaction is not committed and not in-progress, it means this is
+		 * aborted and we can apply actions here.
 		 */
 		if (!IsZHeapTupleModified(old_infomask) &&
 			!TransactionIdDidCommit(zinfo.xid) &&
@@ -4294,7 +4296,7 @@ lock_tuple:
 		zh_undo_info.prev_urecptr = prev_urecptr;
 		zh_undo_info.fxid = fxid;
 		zh_undo_info.cid = FirstCommandId;
-		//zh_undo_info.relpersistence = rel->rd_rel->relpersistence;
+		/* zh_undo_info.relpersistence = rel->rd_rel->relpersistence; */
 
 		(void) zheap_lock_tuple_guts(buf, rel->rd_rel->relpersistence,
 									 &zhtup, &zinfo,
@@ -4372,7 +4374,7 @@ zheap_lock_tuple_guts(Buffer buf, char relpersistence, ZHeapTuple zhtup,
 					  ZHeapPrepareUndoInfo *zh_undo_info,
 					  int *out_result_trans_slot)
 {
-	FullTransactionId	oldestFullXidHavingUndo;
+	FullTransactionId oldestFullXidHavingUndo;
 	TransactionId oldestXidHavingUndo;
 	TransactionId tup_xid;
 	UndoRecPtr	urecptr;
@@ -4381,8 +4383,8 @@ zheap_lock_tuple_guts(Buffer buf, char relpersistence, ZHeapTuple zhtup,
 	uint16		new_infomask = 0;
 	int			result_trans_slot;
 	ZHeapPrepareLockUndoInfo zh_lock_undo_info;
-	UndoRecData	*rdt;
-	XactUndoContext	xuctx;
+	UndoRecData *rdt;
+	XactUndoContext xuctx;
 
 	/* Compute the new xid and infomask to store into the tuple. */
 	old_infomask = zhtup->t_data->t_infomask;
@@ -5104,7 +5106,7 @@ zheap_fetchinsertxid(ZHeapTuple zhtup, Buffer buffer)
 void
 zheap_prepare_undoinsert(ZHeapPrepareUndoInfo *zh_undo_info,
 						 uint32 specToken, bool specIns,
-						 UnpackedUndoRecord *undorecord,
+						 UnpackedUndoRecord * undorecord,
 						 XLogReaderState *xlog_record)
 {
 	/*
@@ -5359,7 +5361,7 @@ void
 zheap_prepare_undodelete(ZHeapPrepareUndoInfo *zhUndoInfo, ZHeapTuple zhtup,
 						 TransactionId tup_xid, int tup_trans_slot_id,
 						 SubTransactionId subxid,
-						 UnpackedUndoRecord *undorecord,
+						 UnpackedUndoRecord * undorecord,
 						 XLogReaderState *xlog_record)
 {
 	bool		hasPayload = false;
@@ -5437,7 +5439,7 @@ zheap_prepare_undodelete(ZHeapPrepareUndoInfo *zhUndoInfo, ZHeapTuple zhtup,
  */
 void
 zheap_prepare_undolock(ZHeapPrepareLockUndoInfo *zh_undo_info,
-					   UnpackedUndoRecord *undorecord,
+					   UnpackedUndoRecord * undorecord,
 					   XLogReaderState *xlog_record)
 {
 	/*
@@ -5637,7 +5639,7 @@ zheap_index_delete_tuples(Relation rel, TM_IndexDeleteOp *delstate)
 		TM_IndexDelete *ideltid = &delstate->deltids[i];
 		TM_IndexStatus *istatus = delstate->status + ideltid->id;
 		ItemPointer htid = &ideltid->tid;
-		ItemId	hitemid;
+		ItemId		hitemid;
 		OffsetNumber offnum;
 
 		/*
@@ -5921,7 +5923,7 @@ log_zheap_insert(ZHeapWALInfo *walinfo, Relation relation,
 	 */
 	if (RelationIsLogicallyLogged(relation))
 	{
-		TransactionId	top_xid;
+		TransactionId top_xid;
 
 		xlrec.flags |= XLZ_INSERT_CONTAINS_NEW_TUPLE;
 		bufflags |= REGBUF_KEEP_DATA;
@@ -6030,7 +6032,7 @@ log_zheap_update(ZHeapWALInfo *old_walinfo, Relation relation,
 	xl_zheap_update xlrec;
 	ZHeapTuple	difftup;
 	ZHeapTupleHeader zhtuphdr;
-	int		zhtuplen;
+	int			zhtuplen;
 	uint16		prefix_suffix[2];
 	uint16		prefixlen = 0,
 				suffixlen = 0;
@@ -6114,7 +6116,7 @@ log_zheap_update(ZHeapWALInfo *old_walinfo, Relation relation,
 	 * Store the information required to generate undo record during replay.
 	 */
 	xlundohdr.reloid = old_walinfo->undorecord->uur_reloid;
-	//xlundohdr.urec_ptr = old_walinfo->urecptr;
+	/* xlundohdr.urec_ptr = old_walinfo->urecptr; */
 	xlundohdr.blkprev = old_walinfo->undorecord->uur_blkprev;
 
 	xlrec.prevxid = old_walinfo->undorecord->uur_prevxid;
@@ -6141,7 +6143,7 @@ log_zheap_update(ZHeapWALInfo *old_walinfo, Relation relation,
 		xlrec.flags |= XLZ_NON_INPLACE_UPDATE;
 
 		xlnewundohdr.reloid = new_walinfo->undorecord->uur_reloid;
-		//xlnewundohdr.urec_ptr = new_walinfo->urecptr;
+		/* xlnewundohdr.urec_ptr = new_walinfo->urecptr; */
 		xlnewundohdr.blkprev = new_walinfo->undorecord->uur_blkprev;
 
 		Assert(new_walinfo->ztuple);
@@ -6196,7 +6198,7 @@ prepare_xlog:
 	/* See log_zheap_delete() for comments. */
 	if (need_tuple_data)
 	{
-		TransactionId	top_xid;
+		TransactionId top_xid;
 
 		if (subxact_xid != InvalidTransactionId &&
 			subxact_xid != (top_xid = GetTopTransactionIdIfAny()))
@@ -6279,8 +6281,7 @@ prepare_xlog:
 		else
 		{
 			/*
-			 * Make sure that distinct buffers are allocated for the undo
-			 * log.
+			 * Make sure that distinct buffers are allocated for the undo log.
 			 */
 			block_id = 4;
 		}
@@ -6428,7 +6429,7 @@ log_zheap_delete(ZHeapWALInfo *walinfo, Relation relation,
 				 uint32 old_keys_ext_size, XactUndoContext *xuctx)
 {
 	ZHeapTupleHeader zhtuphdr = NULL;
-	int	zhtuplen;
+	int			zhtuplen;
 	xl_undo_header xlundohdr;
 	xl_zheap_delete xlrec;
 	xl_zheap_header xlhdr;
@@ -6453,7 +6454,7 @@ log_zheap_delete(ZHeapWALInfo *walinfo, Relation relation,
 		xlrec.flags |= XLZ_DELETE_CONTAINS_SUBXACT;
 
 	zhtuphdr = (ZHeapTupleHeader) walinfo->undorecord->uur_tuple.data;
-	zhtuplen =  walinfo->undorecord->uur_tuple.len;
+	zhtuplen = walinfo->undorecord->uur_tuple.len;
 
 	/*
 	 * The external (TOASTed) keys need to be logged separate from the tuple.
@@ -6504,7 +6505,7 @@ prepare_xlog:
 	 */
 	if (RelationIsLogicallyLogged(relation))
 	{
-		TransactionId	top_xid;
+		TransactionId top_xid;
 
 		/*
 		 * Note that the subxid parameter is just a counter that starts from
@@ -6627,7 +6628,7 @@ log_zheap_multi_insert(ZHeapMultiInsertWALInfo *multi_walinfo, bool skip_undo,
 	 */
 	if (need_tuple_data)
 	{
-		TransactionId	top_xid;
+		TransactionId top_xid;
 
 		if (subxact_xid != InvalidTransactionId &&
 			subxact_xid != (top_xid = GetTopTransactionIdIfAny()))
@@ -6791,7 +6792,7 @@ log_zheap_lock_tuple(ZHeapWALInfo *walinfo, TransactionId tup_xid,
 
 	/* Store the information required to generate undo record during replay. */
 	xlundohdr.reloid = walinfo->undorecord->uur_reloid;
-	//xlundohdr.urec_ptr = walinfo->urecptr;
+	/* xlundohdr.urec_ptr = walinfo->urecptr; */
 	xlundohdr.blkprev = walinfo->prev_urecptr;
 
 	xlrec.prev_xid = tup_xid;
@@ -7812,7 +7813,7 @@ PageFreezeTransSlots(Relation relation, Buffer buf, bool *lock_reacquired,
 	}
 
 	oldestFullXidHavingUndo = FullTransactionIdFromU64(
-pg_atomic_read_u64(&ProcGlobal->oldestFullXidHavingUndo));
+													   pg_atomic_read_u64(&ProcGlobal->oldestFullXidHavingUndo));
 
 	frozen_slots = palloc0(num_slots * sizeof(int));
 
@@ -8370,7 +8371,7 @@ zheap_multi_insert(Relation relation, TupleTableSlot **slots, int ntuples,
 	FullTransactionId fxid = GetTopFullTransactionId();
 	bool		lock_reacquired;
 	bool		skip_undo;
-	TransactionId	subxact_xid = InvalidTransactionId;
+	TransactionId subxact_xid = InvalidTransactionId;
 
 	needwal = RelationNeedsWAL(relation);
 	saveFreeSpace = RelationGetTargetPageFreeSpace(relation,
@@ -8431,10 +8432,10 @@ zheap_multi_insert(Relation relation, TupleTableSlot **slots, int ntuples,
 		OffsetNumber usedoff[MaxOffsetNumber];
 		OffsetNumber max_required_offset;
 		uint8		vm_status;
-		UndoRecData	*rdt;
-		XactUndoContext	xuctx;
+		UndoRecData *rdt;
+		XactUndoContext xuctx;
 		UndoRecPtr	urecptr;
-		int		payload_max_len;
+		int			payload_max_len;
 
 		CHECK_FOR_INTERRUPTS();
 
@@ -8571,10 +8572,11 @@ reacquire_buffer:
 		 * As the data will be written in a critical section, make sure no
 		 * allocation is needed there's enough space.
 		 *
-		 * TODO enlargeStringInfo() allocates more than we need - add a variant of
-		 * that function that allocates exactly the space required. (1 extra byte
-		 * is necessary to prevent enlargeStringInfo() from trying to enlarge the
-		 * buffer.) Use the function also in PrepareXactUndoData().
+		 * TODO enlargeStringInfo() allocates more than we need - add a
+		 * variant of that function that allocates exactly the space required.
+		 * (1 extra byte is necessary to prevent enlargeStringInfo() from
+		 * trying to enlarge the buffer.) Use the function also in
+		 * PrepareXactUndoData().
 		 */
 		payload_max_len = undorecord->uur_payload.len + 1;
 		undorecord->uur_payload.data = (char *) palloc(payload_max_len);
@@ -8582,8 +8584,8 @@ reacquire_buffer:
 		undorecord->uur_payload.len = 0;
 
 		/*
-		 * The subtransaction XID is needed for logical decoding - retrieve it now
-		 * because it does not work in the critical section.
+		 * The subtransaction XID is needed for logical decoding - retrieve it
+		 * now because it does not work in the critical section.
 		 */
 		if (needwal && RelationIsLogicallyLogged(relation) &&
 			IsSubTransaction())
@@ -8653,7 +8655,7 @@ reacquire_buffer:
 			zfree_offset_ranges->endOffset[i] = offnum - 1;
 			if (!skip_undo)
 			{
-				int		i;
+				int			i;
 
 				appendBinaryStringInfo(&undorecord->uur_payload,
 									   (char *) &zfree_offset_ranges->nranges,
@@ -8690,8 +8692,8 @@ reacquire_buffer:
 		if (!skip_undo)
 		{
 			/*
-			 * Process the record again so that the payload data is
-			 * included. The size should not change though.
+			 * Process the record again so that the payload data is included.
+			 * The size should not change though.
 			 */
 			rdt = PrepareZHeapUndoRecord(undorecord);
 
@@ -9393,13 +9395,14 @@ extract_toasted_identity_keys(ZHeapTuple tuple, Relation relation,
 							  Bitmapset *id_attrs, uint32 *res_size_p)
 {
 	TupleDesc	desc = RelationGetDescr(relation);
-	Datum	*values;
-	bool	*isnull, *serialize;
-	int	i;
-	Pointer	value;
-	int	bool_arr_size = desc->natts * sizeof(bool);
-	char	*result = NULL;
-	uint32	res_size = 0;
+	Datum	   *values;
+	bool	   *isnull,
+			   *serialize;
+	int			i;
+	Pointer		value;
+	int			bool_arr_size = desc->natts * sizeof(bool);
+	char	   *result = NULL;
+	uint32		res_size = 0;
 
 	/*
 	 * Check which of the external attributes are part of the identity key,
@@ -9411,8 +9414,8 @@ extract_toasted_identity_keys(ZHeapTuple tuple, Relation relation,
 	serialize = (bool *) palloc0(bool_arr_size);
 	for (i = 0; i < desc->natts; i++)
 	{
-		Form_pg_attribute	att;
-		int16	attnum;
+		Form_pg_attribute att;
+		int16		attnum;
 
 		if (isnull[i])
 			continue;
@@ -9429,11 +9432,11 @@ extract_toasted_identity_keys(ZHeapTuple tuple, Relation relation,
 		if (relation->rd_rel->relreplident == REPLICA_IDENTITY_FULL ||
 			bms_is_member(attnum - FirstLowInvalidHeapAttributeNumber, id_attrs))
 		{
-			Pointer	value = DatumGetPointer(values[i]);
+			Pointer		value = DatumGetPointer(values[i]);
 
 			if (VARATT_IS_EXTERNAL(value))
 			{
-				Size	val_size;
+				Size		val_size;
 
 				/*
 				 * The old tuple should just have been read from disk, so no
@@ -9457,26 +9460,27 @@ extract_toasted_identity_keys(ZHeapTuple tuple, Relation relation,
 	/* Serialize the keys if found some above. */
 	if (res_size > 0)
 	{
-		char	*c;
+		char	   *c;
 
 		c = result = (char *) palloc(res_size);
 
 		/* The actual serialization of the attributes. */
 		for (i = 0; i < desc->natts; i++)
 		{
-			char	*data;
+			char	   *data;
 
 			if (!serialize[i])
 				continue;
 
 			value = DatumGetPointer(values[i]);
+
 			/*
 			 * TODO Don't we need zheap_tuple_fetch_attr() /
 			 * zheap_tuple_untoast_attr()? Even ztuptoaster.c uses the
-			 * heap_tuple..() functions. While the scan might work
-			 * (e.g. visibility is checked according to the actual AM of the
-			 * table), I'm not sure if the fastgetattr() macro can be used for
-			 * zheap, see toast_fetch_datum().
+			 * heap_tuple..() functions. While the scan might work (e.g.
+			 * visibility is checked according to the actual AM of the table),
+			 * I'm not sure if the fastgetattr() macro can be used for zheap,
+			 * see toast_fetch_datum().
 			 */
 			data = (char *) detoast_attr((struct varlena *) value);
 			memcpy(c, data, VARSIZE(data));

@@ -24,7 +24,7 @@ undoxacttest_log_execute_mod(Relation rel, Buffer buf, int64 *counter, int64 mod
 	/* build undo record */
 	if (!is_undo)
 	{
-		UndoRecData	rdata;
+		UndoRecData rdata;
 
 		/* AFIXME: API needs to be changed so serialization happens at a later */
 		/* stage. */
@@ -67,7 +67,7 @@ undoxacttest_log_execute_mod(Relation rel, Buffer buf, int64 *counter, int64 mod
 		xl_undoxacttest_mod xlrec = {.newval = newval,
 			.debug_mod = mod,
 			.debug_oldval = oldval,
-			.reloid = RelationGetRelid(rel)};
+		.reloid = RelationGetRelid(rel)};
 		uint8		info = XLOG_UNDOXACTTEST_MOD;
 
 		XLogRegisterData((char *) &xlrec, sizeof(xlrec));
@@ -79,7 +79,7 @@ undoxacttest_log_execute_mod(Relation rel, Buffer buf, int64 *counter, int64 mod
 	}
 	else if (!is_undo)
 	{
-		char	data[1];
+		char		data[1];
 
 		/*
 		 * Insert a dummy record to which we can attach the undo-record-set
@@ -179,8 +179,8 @@ undoxacttest_undo(const WrittenUndoNode *record, FullTransactionId fxid)
 	const xu_undoxactest_mod *uxt_r;
 
 	/*
-	 * The end of transaction or subtransaction is not interesting for
-	 * us. Should we process the records in batches?
+	 * The end of transaction or subtransaction is not interesting for us.
+	 * Should we process the records in batches?
 	 */
 	if (record == NULL)
 		return;

@@ -29,7 +29,7 @@ typedef struct ReorderBufferTupleBuf
 	HeapTupleData tuple;
 
 	/* if extra data needs to follow the tuple, this is the amount */
-	uint32	extra_data;
+	uint32		extra_data;
 
 	/* pre-allocated size of tuple buffer, different from tuple size */
 	Size		alloc_tuple_size;

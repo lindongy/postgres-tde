@@ -33,7 +33,7 @@ typedef enum undorectype
 	UNDO_ZHEAP_XID_LOCK_FOR_UPDATE,
 	UNDO_ZHEAP_XID_MULTI_LOCK_ONLY,
 	UNDO_ZHEAP_ITEMID_UNUSED
-} undorectype;
+}			undorectype;
 
 /*
  * Every undo record begins with an UndoRecordHeader structure, which is
@@ -61,7 +61,7 @@ typedef struct UndoRecordHeader
 	 */
 	TransactionId urec_xid;		/* Transaction id */
 	CommandId	urec_cid;		/* command id */
-} UndoRecordHeader;
+}			UndoRecordHeader;
 
 #define SizeOfUndoRecordHeader	\
 	(offsetof(UndoRecordHeader, urec_cid) + sizeof(CommandId))
@@ -94,7 +94,7 @@ typedef struct UndoRecordHeader
 typedef struct UndoRecordRelationDetails
 {
 	ForkNumber	urec_fork;		/* fork number */
-} UndoRecordRelationDetails;
+}			UndoRecordRelationDetails;
 
 #define SizeOfUndoRecordRelationDetails \
 	(offsetof(UndoRecordRelationDetails, urec_fork) + sizeof(uint8))
@@ -108,7 +108,7 @@ typedef struct UndoRecordBlock
 	UndoRecPtr	urec_blkprev;	/* byte offset of previous undo for block */
 	BlockNumber urec_block;		/* block number */
 	OffsetNumber urec_offset;	/* offset number */
-} UndoRecordBlock;
+}			UndoRecordBlock;
 
 #define SizeOfUndoRecordBlock \
 	(offsetof(UndoRecordBlock, urec_offset) + sizeof(OffsetNumber))
@@ -123,7 +123,7 @@ typedef struct UndoRecordPayload
 {
 	uint16		urec_payload_len;	/* # of payload bytes */
 	uint16		urec_tuple_len; /* # of tuple bytes */
-} UndoRecordPayload;
+}			UndoRecordPayload;
 
 #define SizeOfUndoRecordPayload \
 	(offsetof(UndoRecordPayload, urec_tuple_len) + sizeof(uint16))
@@ -138,7 +138,7 @@ typedef struct UndoRecData
 	struct UndoRecData *next;	/* next struct in chain, or NULL */
 	char	   *data;			/* start of rmgr data to include */
 	Size		len;			/* length of rmgr data to include */
-} UndoRecData;
+}			UndoRecData;
 
 /*
  * Information that can be used to create an undo record or that can be
@@ -168,22 +168,22 @@ typedef struct UnpackedUndoRecord
 	CommandId	uur_cid;		/* command id */
 	ForkNumber	uur_fork;		/* fork number */
 	UndoRecPtr	uur_blkprev;	/* byte offset of previous undo for block and
-								 * XID*/
+								 * XID */
 	BlockNumber uur_block;		/* block number */
 	OffsetNumber uur_offset;	/* offset number */
 	uint32		uur_xidepoch;	/* epoch of the inserting transaction. */
 
 	StringInfoData uur_payload; /* payload bytes */
 	StringInfoData uur_tuple;	/* tuple bytes */
-	bool	data_copy;			/* do payload and tuple point to copies? */
-} UnpackedUndoRecord;
+	bool		data_copy;		/* do payload and tuple point to copies? */
+}			UnpackedUndoRecord;
 
-extern UndoRecData *PrepareZHeapUndoRecord(UnpackedUndoRecord *uur);
+extern UndoRecData * PrepareZHeapUndoRecord(UnpackedUndoRecord * uur);
 extern void UnpackZHeapUndoRecord(char *readptr, bool header_only, bool copy,
-								  UnpackedUndoRecord *uur);
-extern Size UnpackedUndoRecordSize(UnpackedUndoRecord *uur);
-extern void UndoRecordRelease(UnpackedUndoRecord *urec);
-extern void ResetUndoRecord(UnpackedUndoRecord *urec);
+								  UnpackedUndoRecord * uur);
+extern Size UnpackedUndoRecordSize(UnpackedUndoRecord * uur);
+extern void UndoRecordRelease(UnpackedUndoRecord * urec);
+extern void ResetUndoRecord(UnpackedUndoRecord * urec);
 
 extern void zheap_undo(const WrittenUndoNode *record, FullTransactionId fxid);
 extern void zheap_undo_desc(StringInfo buf, const WrittenUndoNode *record);
@@ -193,14 +193,14 @@ extern void zheap_undo_desc(StringInfo buf, const WrittenUndoNode *record);
  *
  * This checks whether an undorecord satisfies the given conditions.
  */
-typedef bool (*SatisfyUndoRecordCallback) (UnpackedUndoRecord *urec,
+typedef bool (*SatisfyUndoRecordCallback) (UnpackedUndoRecord * urec,
 										   BlockNumber blkno,
 										   OffsetNumber offset,
 										   TransactionId xid);
 
-extern UnpackedUndoRecord *UndoFetchRecord(UndoRecPtr urp, BlockNumber blkno,
-										   OffsetNumber offset,
-										   TransactionId xid,
-										   UndoRecPtr *urec_ptr_out,
-										   SatisfyUndoRecordCallback callback);
+extern UnpackedUndoRecord * UndoFetchRecord(UndoRecPtr urp, BlockNumber blkno,
+											OffsetNumber offset,
+											TransactionId xid,
+											UndoRecPtr *urec_ptr_out,
+											SatisfyUndoRecordCallback callback);
 #endif							/* ZUNDO_H */

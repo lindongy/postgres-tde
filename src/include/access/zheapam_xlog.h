@@ -72,7 +72,7 @@ typedef struct xl_undo_header
 {
 	Oid			reloid;			/* relation OID */
 	UndoRecPtr	blkprev;		/* the previous undo for block */
-} xl_undo_header;
+}			xl_undo_header;
 
 #define SizeOfUndoHeader	(offsetof(xl_undo_header, blkprev) + sizeof(uint64))
 

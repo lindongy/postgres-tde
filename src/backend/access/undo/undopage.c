@@ -162,7 +162,7 @@ UndoPageSkipHeader(Page page, int page_offset, int header_offset,
 {
 	UndoPageHeader uph = (UndoPageHeader) page;
 	size_t		all_header_size = SizeOfUndoRecordSetChunkHeader + type_header_size;
-	int		bytes_skipped;
+	int			bytes_skipped;
 
 	/* Must not overwrite the page header. */
 	Assert(page_offset >= SizeOfUndoPageHeaderData);
@@ -267,7 +267,7 @@ UndoPageSkipRecord(Page page, int page_offset, int data_offset,
 				   size_t data_size)
 {
 	UndoPageHeader uph = (UndoPageHeader) page;
-	int		bytes_skipped;
+	int			bytes_skipped;
 
 	/* Must not overwrite the page header. */
 	Assert(page_offset >= SizeOfUndoPageHeaderData);

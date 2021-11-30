@@ -94,7 +94,7 @@ typedef struct RewriteZheapStateData
 	bool		rs_buffer_valid;	/* T if any tuples in buffer */
 	MemoryContext rs_cxt;		/* for hash tables and entries and tuples in
 								 * them */
-}			RewriteZheapStateData;
+} RewriteZheapStateData;
 
 
 /* prototypes for internal functions */

@@ -26,9 +26,9 @@ typedef struct XactUndoContext
 	StringInfoData data;
 } XactUndoContext;
 
-extern Size GetUndoDataSize(UndoRecData *rdata);
+extern Size GetUndoDataSize(UndoRecData * rdata);
 extern void SerializeUndoData(StringInfo buf, RmgrId rmid,
-							  uint8 rec_type, UndoRecData *rdata);
+							  uint8 rec_type, UndoRecData * rdata);
 extern void ResetXactUndo(void);
 extern bool XactHasUndo(void);
 extern UndoRecPtr PrepareXactUndoData(XactUndoContext *ctx, char persistence,
@@ -59,7 +59,7 @@ extern void AtSubAbort_XactUndo(int level, bool cleanup_only);
 extern void AtPrepare_XactUndo(GlobalTransaction);
 extern void PostPrepare_XactUndo(void);
 extern void AtProcExit_XactUndo(void);
-extern bool GetCurrentUndoRange(UndoRecPtr * begin, UndoRecPtr * end,
+extern bool GetCurrentUndoRange(UndoRecPtr *begin, UndoRecPtr *end,
 								UndoPersistenceLevel plevel);
 
 #endif

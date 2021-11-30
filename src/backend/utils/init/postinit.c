@@ -1190,7 +1190,7 @@ process_settings(Oid databaseid, Oid roleid)
 static void
 ShutdownPostgres(int code, Datum arg)
 {
-	bool	perform_undo;
+	bool		perform_undo;
 
 	/*
 	 * Make sure we've killed any active transaction.

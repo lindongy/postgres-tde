@@ -252,20 +252,20 @@ extern TransactionId zheap_fetchinsertxid(ZHeapTuple zhtup, Buffer buffer);
 extern void copy_zrelation_data(Relation srcRel, SMgrRelation dst);
 extern void zheap_prepare_undoinsert(ZHeapPrepareUndoInfo *zh_undo_info,
 									 uint32 specToken, bool specIns,
-									 UnpackedUndoRecord *undorecord,
+									 UnpackedUndoRecord * undorecord,
 									 XLogReaderState *xlog_record);
 extern void zheap_prepare_undodelete(ZHeapPrepareUndoInfo *zhUndoInfo, ZHeapTuple zhtup,
 									 TransactionId tup_xid, int tup_trans_slot_id,
-									 SubTransactionId subxid, UnpackedUndoRecord *undorecord,
+									 SubTransactionId subxid, UnpackedUndoRecord * undorecord,
 									 XLogReaderState *xlog_record);
 extern void zheap_prepare_undoupdate(ZHeapPrepareUpdateUndoInfo *zh_up_undo_info, ZHeapTuple zhtup,
-										   XLogReaderState *xlog_record);
+									 XLogReaderState *xlog_record);
 extern void zheap_prepare_undolock(ZHeapPrepareLockUndoInfo *zh_undo_info,
-								   UnpackedUndoRecord *undorecord,
+								   UnpackedUndoRecord * undorecord,
 								   XLogReaderState *xlog_record);
-extern UnpackedUndoRecord *zheap_prepare_undo_multi_insert(ZHeapPrepareUndoInfo *zh_undo_info,
-														   int nranges,
-														   XLogReaderState *xlog_record);
+extern UnpackedUndoRecord * zheap_prepare_undo_multi_insert(ZHeapPrepareUndoInfo *zh_undo_info,
+															int nranges,
+															XLogReaderState *xlog_record);
 extern TransactionId zheap_index_delete_tuples(Relation rel,
 											   TM_IndexDeleteOp *delstate);
 
@@ -308,7 +308,7 @@ extern Size PageGetZHeapFreeSpace(Page page);
 extern void RelationPutZHeapTuple(Relation relation, Buffer buffer,
 								  ZHeapTuple tuple);
 extern ZHeapFreeOffsetRanges *ZHeapGetUsableOffsetRanges(Buffer buffer,
-														 ZHeapTuple *tuples, int ntuples, Size saveFreeSpace);
+														 ZHeapTuple * tuples, int ntuples, Size saveFreeSpace);
 extern void ZheapInitPage(Page page, Size pageSize);
 extern void zheap_init_meta_page(Buffer metabuf, BlockNumber first_blkno,
 								 BlockNumber last_blkno);
@@ -318,9 +318,9 @@ extern ZHeapTuple zheap_gettuple(Relation relation, Buffer buffer,
 								 OffsetNumber offnum);
 
 /* Zheap and undo record interaction related API's (zundo.c) */
-extern bool ZHeapSatisfyUndoRecord(UnpackedUndoRecord *uurec, BlockNumber blkno,
+extern bool ZHeapSatisfyUndoRecord(UnpackedUndoRecord * uurec, BlockNumber blkno,
 								   OffsetNumber offset, TransactionId xid);
-extern int	UpdateTupleHeaderFromUndoRecord(UnpackedUndoRecord *urec,
+extern int	UpdateTupleHeaderFromUndoRecord(UnpackedUndoRecord * urec,
 											ZHeapTupleHeader hdr, Page page);
 extern bool ValidateTuplesXact(Relation relation, ZHeapTuple tuple,
 							   Snapshot snapshot, Buffer buf,

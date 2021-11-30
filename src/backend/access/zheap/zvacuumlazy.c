@@ -70,14 +70,14 @@ static int	elevel = -1;
 static TransactionId OldestXmin;
 
 /* non-export function prototypes */
-static int lazy_vacuum_zpage(Relation onerel, BlockNumber blkno, Buffer buffer,
-							 int tupindex, LVDeadTuples *dead_tuples,
-							 TransactionId latestRemovedXid, Buffer *vmbuffer);
-static int lazy_vacuum_zpage_with_undo(Relation onerel, BlockNumber blkno, Buffer buffer,
-									   int tupindex, LVDeadTuples *dead_tuples,
-									   TransactionId latestRemovedXid,
-									   Buffer *vmbuffer,
-									   TransactionId *global_visibility_cutoff_xid);
+static int	lazy_vacuum_zpage(Relation onerel, BlockNumber blkno, Buffer buffer,
+							  int tupindex, LVDeadTuples *dead_tuples,
+							  TransactionId latestRemovedXid, Buffer *vmbuffer);
+static int	lazy_vacuum_zpage_with_undo(Relation onerel, BlockNumber blkno, Buffer buffer,
+										int tupindex, LVDeadTuples *dead_tuples,
+										TransactionId latestRemovedXid,
+										Buffer *vmbuffer,
+										TransactionId *global_visibility_cutoff_xid);
 static void lazy_scan_zheap(LVRelState *vacrel, VacuumParams *params,
 							bool aggressive);
 static bool zheap_page_is_all_visible(Relation rel, Buffer buf,
@@ -217,8 +217,8 @@ lazy_vacuum_zpage_with_undo(Relation onerel, BlockNumber blkno, Buffer buffer,
 	bool		doPageWrites;
 	bool		lock_reacquired;
 	bool		pruned = false;
-	UndoRecData	*rdt;
-	XactUndoContext	xuctx;
+	UndoRecData *rdt;
+	XactUndoContext xuctx;
 
 	for (; tupindex < dead_tuples->num_tuples; tupindex++)
 	{
@@ -324,9 +324,9 @@ reacquire_slot:
 	/* Serialize the undo record. */
 	SerializeUndoData(&xuctx.data, RM_ZHEAP_ID, UNDO_ZHEAP_ITEMID_UNUSED,
 					  rdt);
+
 	/*
-	 * Insert it. Undo buffers will be registered during WAL insertion
-	 * below.
+	 * Insert it. Undo buffers will be registered during WAL insertion below.
 	 */
 	InsertXactUndoData(&xuctx, -1);
 
@@ -648,7 +648,7 @@ lazy_scan_zheap(LVRelState *vacrel, VacuumParams *params, bool aggressive)
 		{
 			uint8		vmstatus;
 
- 			vmstatus = visibilitymap_get_status(vacrel->rel,
+			vmstatus = visibilitymap_get_status(vacrel->rel,
 												next_unskippable_block,
 												&vmbuffer);
 
@@ -678,7 +678,7 @@ lazy_scan_zheap(LVRelState *vacrel, VacuumParams *params, bool aggressive)
 		bool		all_visible_according_to_vm = false;
 		bool		all_visible;
 		bool		has_dead_tuples;
-		TransactionId	latestRemovedXid = InvalidTransactionId;
+		TransactionId latestRemovedXid = InvalidTransactionId;
 
 		/*
 		 * Consider need to skip blocks.  See note above about forcing
@@ -949,6 +949,7 @@ lazy_scan_zheap(LVRelState *vacrel, VacuumParams *params, bool aggressive)
 											   NULL);
 
 		/* Now scan the page to collect vacuumable items. */
+
 		/*
 		 * A.H. In heap, lazy_scan_prune() seems to do the following as well
 		 * as the pruning above. We should probably try to implement similar
@@ -1208,13 +1209,13 @@ lazy_scan_zheap(LVRelState *vacrel, VacuumParams *params, bool aggressive)
 		 */
 		for (i = 0; i < vacrel->nindexes; i++)
 		{
-				Relation	indrel = vacrel->indrels[i];
-				IndexBulkDeleteResult *istat = vacrel->indstats[i];
+			Relation	indrel = vacrel->indrels[i];
+			IndexBulkDeleteResult *istat = vacrel->indstats[i];
 
-				lazy_vacuum_one_index(indrel,
-									  istat,
-									  vacrel->old_live_tuples,
-									  vacrel);
+			lazy_vacuum_one_index(indrel,
+								  istat,
+								  vacrel->old_live_tuples,
+								  vacrel);
 		}
 
 		pgstat_progress_update_param(PROGRESS_VACUUM_NUM_INDEX_VACUUMS,
@@ -1483,8 +1484,8 @@ lazy_vacuum_zheap_rel(Relation rel, VacuumParams *params,
 	 *
 	 * Deliberately avoid telling the stats collector about LP_DEAD items that
 	 * remain in the table due to VACUUM bypassing index and heap vacuuming.
-	 * ANALYZE will consider the remaining LP_DEAD items to be dead tuples.
-	 * It seems like a good idea to err on the side of not vacuuming again too
+	 * ANALYZE will consider the remaining LP_DEAD items to be dead tuples. It
+	 * seems like a good idea to err on the side of not vacuuming again too
 	 * soon in cases where the failsafe prevented significant amounts of heap
 	 * vacuuming.
 	 */

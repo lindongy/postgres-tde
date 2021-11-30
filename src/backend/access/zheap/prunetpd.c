@@ -57,7 +57,7 @@ TPDPagePrune(Relation rel, Buffer tpdbuf, BufferAccessStrategy strategy,
 				maxoff;
 	ItemId		itemId;
 	Size		space_freed;
-	FullTransactionId	oldest_fxid_having_undo;
+	FullTransactionId oldest_fxid_having_undo;
 
 	prstate.nunused = 0;
 	tpdpage = BufferGetPage(tpdbuf);
@@ -74,7 +74,7 @@ TPDPagePrune(Relation rel, Buffer tpdbuf, BufferAccessStrategy strategy,
 	/* Can we prune the entire page? */
 	tpdopaque = (TPDPageOpaque) PageGetSpecialPointer(tpdpage);
 	oldest_fxid_having_undo = FullTransactionIdFromU64(
-				pg_atomic_read_u64(&ProcGlobal->oldestFullXidHavingUndo));
+													   pg_atomic_read_u64(&ProcGlobal->oldestFullXidHavingUndo));
 
 	if (FullTransactionIdPrecedes(tpdopaque->tpd_latest_fxid,
 								  oldest_fxid_having_undo))
@@ -261,12 +261,13 @@ TPDEntryPrune(Buffer tpdbuf, OffsetNumber offnum, TPDPruneState *prstate,
 	memcpy((char *) trans_slots, tpdpage + loc_trans_slots, size_tpd_e_slots);
 
 	oldestFullXidHavingUndo = FullTransactionIdFromU64(
-															pg_atomic_read_u64(&ProcGlobal->oldestFullXidHavingUndo));
+													   pg_atomic_read_u64(&ProcGlobal->oldestFullXidHavingUndo));
 
 	for (slot_no = 0; slot_no < num_trans_slots; slot_no++)
 	{
 		FullTransactionId slot_fxid;
-		//UndoRecPtr	urec_ptr = trans_slots[slot_no].urec_ptr;
+
+		/* UndoRecPtr	urec_ptr = trans_slots[slot_no].urec_ptr; */
 
 		slot_fxid = trans_slots[slot_no].fxid;
 
@@ -277,17 +278,17 @@ TPDEntryPrune(Buffer tpdbuf, OffsetNumber offnum, TPDPruneState *prstate,
 		 * oldest xid with undo.
 		 */
 		if (
-			/*
-			 * A.H. What exactly means that slot_fxid is invalid and at the
-			 * same time urec_ptr is valid? It'd be easier to Assert() that
-			 * both are valid or both invalid than to implement
-			 * UndoLogIsDiscarded() in an efficient way (i.e. with a
-			 * backend-local cache to avoid too frequent calls of
-			 * UndoLogAcquire().
-			 *
-			 * (!FullTransactionIdIsValid(slot_fxid) &&
-			 *  (!UndoRecPtrIsValid(urec_ptr) || UndoLogIsDiscarded(urec_ptr))) ||
-			 */
+
+		/*
+		 * A.H. What exactly means that slot_fxid is invalid and at the same
+		 * time urec_ptr is valid? It'd be easier to Assert() that both are
+		 * valid or both invalid than to implement UndoLogIsDiscarded() in an
+		 * efficient way (i.e. with a backend-local cache to avoid too
+		 * frequent calls of UndoLogAcquire().
+		 *
+		 * (!FullTransactionIdIsValid(slot_fxid) &&
+		 * (!UndoRecPtrIsValid(urec_ptr) || UndoLogIsDiscarded(urec_ptr))) ||
+		 */
 
 			(FullTransactionIdIsValid(slot_fxid) &&
 			 FullTransactionIdPrecedes(slot_fxid, oldestFullXidHavingUndo)))
@@ -354,7 +355,7 @@ TPDPageRepairFragmentation(Page page, Page tmppage, OffsetNumber target_offnum,
 	Offset		pd_upper = ((PageHeader) page)->pd_upper;
 	Offset		pd_special = ((PageHeader) page)->pd_special;
 	itemIdCompactData itemidbase[MaxTPDTuplesPerPage];
-	itemIdCompact	itemidptr;
+	itemIdCompact itemidptr;
 	ItemId		lp;
 	int			nline,
 				nstorage,

@@ -128,7 +128,7 @@ toast_save_datum(Relation rel, Datum value,
 	Datum		t_values[3];
 	bool		t_isnull[3];
 	CommandId	mycid = GetCurrentCommandId(true);
-	ItemPointerData	ctid;
+	ItemPointerData ctid;
 	struct varlena *result;
 	struct varatt_external toast_pointer;
 	union
@@ -307,7 +307,7 @@ toast_save_datum(Relation rel, Datum value,
 	while (data_todo > 0)
 	{
 		int			i;
-		void	*toasttup_ptr;
+		void	   *toasttup_ptr;
 
 		CHECK_FOR_INTERRUPTS();
 

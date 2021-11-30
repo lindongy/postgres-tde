@@ -88,9 +88,9 @@ undo_seg_compare(const void *s1, const void *s2)
 }
 
 static void
-print_chunk_info(UndoLogChunkInfo *chunk, UndoRecPtr location)
+print_chunk_info(UndoLogChunkInfo * chunk, UndoRecPtr location)
 {
-	UndoRecordSetChunkHeader	*hdr = &chunk->hdr;
+	UndoRecordSetChunkHeader *hdr = &chunk->hdr;
 	UndoLogNumber logno = UndoRecPtrGetLogNo(location);
 
 	printf("logno: %.6X, start: " UndoRecPtrFormat ", prev: ", logno, location);
@@ -114,6 +114,7 @@ print_chunk_info(UndoLogChunkInfo *chunk, UndoRecPtr location)
 
 		hdr = &chunk->type_header.xact;
 		xid = XidFromFullTransactionId(hdr->fxid);
+
 		/*
 		 * Print out t/f rather than true/false as if it was the bool SQL
 		 * type. (Other monitoring code does use bool.)
@@ -142,8 +143,8 @@ static void
 print_record_info(UndoNode *node, UndoRecPtr location)
 {
 	const RmgrDescData *desc;
-	StringInfoData	buf;
-	WrittenUndoNode	wnode;
+	StringInfoData buf;
+	WrittenUndoNode wnode;
 
 	wnode.n = *node;
 	wnode.location = location;
@@ -172,18 +173,18 @@ print_record_info(UndoNode *node, UndoRecPtr location)
 static void
 process_log_segment(UndoLogParserState *s, char *segbuf, UndoSegFile *seg)
 {
-	char *p = segbuf;
-	int i;
+	char	   *p = segbuf;
+	int			i;
 
 	for (i = 0; i < UndoLogSegmentSize / BLCKSZ; i++)
 	{
-		int	j;
+		int			j;
 
 		parse_undo_page(s, p, i, seg, show_records);
 
 		for (j = 0; j < s->nitems; j++)
 		{
-			UndoPageItem	*item = &s->items[j];
+			UndoPageItem *item = &s->items[j];
 
 			if (show_chunks)
 				print_chunk_info(&item->u.chunk, item->location);
@@ -216,7 +217,7 @@ process_log(UndoSegFile *first, int count)
 	UndoSegFile *seg = first;
 	UndoLogOffset off_expected = 0;
 	char		buf[UndoLogSegmentSize];
-	UndoLogParserState	state;
+	UndoLogParserState state;
 
 	/* This is very unlikely, but easy to check. */
 	if (count > (UndoLogMaxSize / UndoLogSegmentSize))

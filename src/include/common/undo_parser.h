@@ -17,13 +17,13 @@
 
 typedef struct UndoSegFile
 {
-	char	path[MAXPGPATH];
+	char		path[MAXPGPATH];
 	UndoLogNumber logno;
 	UndoLogOffset offset;
 
 	/* The following fields are only used in backend code. */
 	UndoLogOffset insert;		/* The last known insertion pointer. */
-	char	persistence;
+	char		persistence;
 } UndoSegFile;
 
 /*
@@ -45,22 +45,22 @@ typedef struct UndoLogChunkInfo
 {
 	UndoRecordSetChunkHeader hdr;
 	UndoRecordSetType type;
-	TypeHeader type_header;
-} UndoLogChunkInfo;
+	TypeHeader	type_header;
+}			UndoLogChunkInfo;
 
 /*
  * Common storage for chunks and records contained on an undo page.
  */
 typedef struct UndoPageItem
 {
-	UndoRecPtr location;
+	UndoRecPtr	location;
 
 	union
 	{
 		UndoLogChunkInfo chunk;
 		UndoNode	record;
-	} u;
-} UndoPageItem;
+	}			u;
+}			UndoPageItem;
 
 /*
  * State of parsing of an undo log file.
@@ -84,19 +84,19 @@ typedef struct UndoLogParserState
 	/* Likewise, the type header. */
 	TypeHeader	type_hdr;
 	int			type_hdr_size;
-	int		type_hdr_bytes_left;
+	int			type_hdr_bytes_left;
 
 	/* Track parsing of the chunk data. */
 	UndoLogOffset chunk_bytes_left;
 
 	/* Seen uninitialized part of an undo page?? */
-	bool	gap;
+	bool		gap;
 
-	UndoPageItem	*items;
-	int		nitems;				/* Number of items. */
-	int		nitems_max;			/* Allocated array size. */
+	UndoPageItem *items;
+	int			nitems;			/* Number of items. */
+	int			nitems_max;		/* Allocated array size. */
 
-	int	npage_records;
+	int			npage_records;
 } UndoLogParserState;
 
 extern void initialize_undo_parser(UndoLogParserState *state);

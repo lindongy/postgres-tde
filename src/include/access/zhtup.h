@@ -49,7 +49,7 @@ typedef enum LockOper
 	LockForUpdate,
 	/* Update/Delete */
 	ForUpdate
-} LockOper;
+}			LockOper;
 
 /*
  * Heap tuple header.  To avoid wasting space, the fields should be

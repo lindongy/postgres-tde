@@ -367,7 +367,7 @@ tpd_xlog_free_page(XLogReaderState *record)
 {
 	XLogRecPtr	lsn = record->EndRecPtr;
 	RelFileNode rnode;
-	SmgrId	smgrid;
+	SmgrId		smgrid;
 	xl_tpd_free_page *xlrec = (xl_tpd_free_page *) XLogRecGetData(record);
 	Buffer		buffer = InvalidBuffer,
 				prevbuf = InvalidBuffer,
@@ -407,8 +407,8 @@ tpd_xlog_free_page(XLogReaderState *record)
 	/*
 	 * It is quite possible that this buffer is already flushed by checkpoint
 	 * so in that case, we will can't read that buffer because at do time, we
-	 * are making buffer as new to free it.  So, if here action is BLK_NOTFOUND,
-	 * then we will skip memset.
+	 * are making buffer as new to free it.  So, if here action is
+	 * BLK_NOTFOUND, then we will skip memset.
 	 */
 	if (action != BLK_NOTFOUND)
 	{

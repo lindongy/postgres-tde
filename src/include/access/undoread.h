@@ -36,10 +36,12 @@ typedef struct UndoCachedBuffer
 {
 	Buffer		pinned_buffer;
 	BlockNumber pinned_block;
-	/* XXX Should we introduce InvalidLogNumber? Currently we consider it
+
+	/*
+	 * XXX Should we introduce InvalidLogNumber? Currently we consider it
 	 * valid iff pinned_block is valid.
 	 */
-	UndoLogNumber	pinned_log;
+	UndoLogNumber pinned_log;
 } UndoCachedBuffer;
 
 typedef struct UndoRSReaderState
@@ -63,10 +65,10 @@ typedef struct UndoRSReaderState
 	 * Record distances in varbyte format. The individual record pointers are
 	 * derived from these values, relative to end_reading.
 	 */
-	StringInfoData	rec_dists;
+	StringInfoData rec_dists;
 
 	/* Pointer to the last processed byte of rec_lengths.data. */
-	char	*backward_cur;
+	char	   *backward_cur;
 } UndoRSReaderState;
 
 extern UndoRecPtr undo_reader_read_bytes(UndoRSReaderState *r, UndoRecPtr urp,

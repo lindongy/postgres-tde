@@ -64,11 +64,11 @@ typedef struct TPDBuffers
 /* Used to allocate/update TPD entry. */
 typedef struct TPDEntryInfo
 {
-	char			*new_tpd_entry;
-	Buffer			old_tpd_buf;
-	OffsetNumber	old_tpd_item_off;
-	Size			new_size_tpd_entry;
-}TPDEntryInfo;
+	char	   *new_tpd_entry;
+	Buffer		old_tpd_buf;
+	OffsetNumber old_tpd_item_off;
+	Size		new_size_tpd_entry;
+} TPDEntryInfo;
 
 /*
  * GetTPDBuffer operations
@@ -87,7 +87,7 @@ typedef enum
 	TPD_BUF_FIND_OR_ENTER,
 	TPD_BUF_FIND_OR_KNOWN_ENTER,
 	TPD_BUF_ENTER
-} TPDACTION;
+}			TPDACTION;
 
 static Buffer registered_tpd_buffers[MAX_TPD_BUFFERS];
 static TPDBuffers tpd_buffers[MAX_TPD_BUFFERS];
@@ -431,7 +431,7 @@ ExtendTPDEntry(Relation relation, Buffer heapbuf, TransInfo *trans_slots,
 	bool		allocate_new_tpd_page = false;
 	bool		update_tpd_inplace,
 				tpd_pruned;
-	TPDEntryInfo	tpd_info;
+	TPDEntryInfo tpd_info;
 
 	heappage = BufferGetPage(heapbuf);
 	max_page_offnum = PageGetMaxOffsetNumber(heappage);
@@ -1125,12 +1125,12 @@ TPDFreePage(Relation rel, Buffer buf, BufferAccessStrategy bstrategy)
 
 	/*
 	 * Update the current page so that it can be reused as new TPD or zheap
-	 * page from FSM.
-	 * Here, we will meset full page as zero because if we will not do this,
-	 * then from RelationGetBufferForZTuple, it will be costly to decide that
-	 * page is still in meta list or not because it is possible that empty TPD
-	 * page is still in meta list(see ExtendTPDEntry, there we can make page
-	 * as empty and will not remove from mera list to avoid deadlock).
+	 * page from FSM. Here, we will meset full page as zero because if we will
+	 * not do this, then from RelationGetBufferForZTuple, it will be costly to
+	 * decide that page is still in meta list or not because it is possible
+	 * that empty TPD page is still in meta list(see ExtendTPDEntry, there we
+	 * can make page as empty and will not remove from mera list to avoid
+	 * deadlock).
 	 */
 	MemSet((PageHeader) page, 0, BufferGetPageSize(buf));
 
@@ -1706,7 +1706,7 @@ TPDAllocateAndReserveTransSlot(Relation relation, Buffer pagebuf,
 	bool		allocate_new_tpd_page = false;
 	bool		update_meta = false;
 	bool		already_exists;
-	TPDEntryInfo	tpd_info;
+	TPDEntryInfo tpd_info;
 
 	metabuf = ReadBuffer(relation, ZHEAP_METAPAGE);
 	LockBuffer(metabuf, BUFFER_LOCK_SHARE);
@@ -1797,8 +1797,8 @@ TPDAllocateAndReserveTransSlot(Relation relation, Buffer pagebuf,
 
 	/* Allocate a new TPD entry */
 	tpd_info.new_tpd_entry = AllocateAndFormTPDEntry(pagebuf, offnum,
-										&tpd_info.new_size_tpd_entry,
-										&reserved_slot);
+													 &tpd_info.new_size_tpd_entry,
+													 &reserved_slot);
 	Assert(tpd_info.new_tpd_entry != NULL);
 
 	tpd_info.old_tpd_item_off = InvalidOffsetNumber;
@@ -2384,7 +2384,7 @@ TPDPageGetTransactionSlotInfo(Buffer heapbuf, int trans_slot,
 	{
 		SMgrRelation smgr;
 		BlockNumber lastblock;
-		SmgrId	smgrid;
+		SmgrId		smgrid;
 
 		BufferGetTag(heapbuf, &smgrid, &rnode, &forknum, &heapblk);
 

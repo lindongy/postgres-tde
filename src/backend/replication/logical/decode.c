@@ -566,7 +566,7 @@ DecodeZHeapOp(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				DecodeZHeapMultiInsert(ctx, buf);
 			break;
 
-		/* Low-level stuff not interesting for logical decoding. */
+			/* Low-level stuff not interesting for logical decoding. */
 		case XLOG_ZHEAP_FREEZE_XACT_SLOT:
 		case XLOG_ZHEAP_INVALID_XACT_SLOT:
 		case XLOG_ZHEAP_LOCK:
@@ -606,7 +606,7 @@ DecodeZHeap2Op(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				DecodeZHeapSpecConfirm(ctx, buf);
 			break;
 
-		/* Low-level stuff not interesting for logical decoding. */
+			/* Low-level stuff not interesting for logical decoding. */
 		case XLOG_ZHEAP_UNUSED:
 		case XLOG_ZHEAP_VISIBLE:
 			break;
@@ -1089,8 +1089,8 @@ DecodeZHeapInsert(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	xl_zheap_insert *xlrec;
 	ReorderBufferChange *change;
 	RelFileNode target_node;
-	TransactionId	xid;
-	bool	is_subxact;
+	TransactionId xid;
+	bool		is_subxact;
 
 	xlrec = (xl_zheap_insert *) XLogRecGetData(r);
 	is_subxact = xlrec->flags & XLZ_INSERT_CONTAINS_SUBXID;
@@ -1221,17 +1221,17 @@ DecodeZHeapUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 {
 	XLogReaderState *r = buf->record;
 	Size		datalen;
-	Size	recordlen;
+	Size		recordlen;
 	char	   *tupledata;
 	Size		tuplelen;
 	xl_undo_header *xlundohdr;
 	xl_zheap_update xlrec;
 	RelFileNode target_node;
 	ReorderBufferChange *change;
-	TransactionId	xid;
-	char *old_keys_ext = NULL;
-	uint32 old_keys_ext_size = 0;
-	bool	is_subxact;
+	TransactionId xid;
+	char	   *old_keys_ext = NULL;
+	uint32		old_keys_ext_size = 0;
+	bool		is_subxact;
 
 	recordlen = XLogRecGetDataLen(r);
 
@@ -1319,7 +1319,7 @@ DecodeZHeapUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 		if (old_keys_ext_size > 0)
 		{
-			HeapTuple tup = &change->data.tp.oldtuple->tuple;
+			HeapTuple	tup = &change->data.tp.oldtuple->tuple;
 
 			memcpy((char *) tup->t_data + tup->t_len,
 				   old_keys_ext, old_keys_ext_size);
@@ -1415,17 +1415,17 @@ DecodeZHeapDelete(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 {
 	XLogReaderState *r = buf->record;
 	Size		datalen;
-	Size	recordlen;
+	Size		recordlen;
 	char	   *tupledata;
 	Size		tuplelen;
 	xl_undo_header *xlundohdr;
 	xl_zheap_delete xlrec;
 	RelFileNode target_node;
 	ReorderBufferChange *change;
-	TransactionId	xid;
-	char *old_keys_ext = NULL;
-	uint32 old_keys_ext_size = 0;
-	bool	is_subxact;
+	TransactionId xid;
+	char	   *old_keys_ext = NULL;
+	uint32		old_keys_ext_size = 0;
+	bool		is_subxact;
 
 	recordlen = XLogRecGetDataLen(r);
 
@@ -1498,7 +1498,7 @@ DecodeZHeapDelete(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	 */
 	if (old_keys_ext_size > 0)
 	{
-		HeapTuple tup = &change->data.tp.oldtuple->tuple;
+		HeapTuple	tup = &change->data.tp.oldtuple->tuple;
 
 		memcpy((char *) tup->t_data + tup->t_len,
 			   old_keys_ext, old_keys_ext_size);
@@ -1673,6 +1673,7 @@ DecodeXLogZHeapTuple(char *data, Size len, ReorderBufferTupleBuf *tuple)
 	Assert(datalen >= 0);
 
 	tuple->tuple.t_len = datalen + SizeofZHeapTupleHeader;
+
 	/*
 	 * ZHeapTupleHeader is stored in the buffer, until the tuple is converted
 	 * to regular heap tuple.
@@ -1705,14 +1706,16 @@ static void
 DecodeZHeapMultiInsert(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 {
 	XLogReaderState *r = buf->record;
-	char	   *data, *tupledata;
-	Size	tuplelen;
-	int		nranges, i;
+	char	   *data,
+			   *tupledata;
+	Size		tuplelen;
+	int			nranges,
+				i;
 	xl_undo_header *xlundohdr;
 	xl_zheap_multi_insert xlrec;
 	RelFileNode rnode;
-	TransactionId	xid;
-	bool	is_subxact;
+	TransactionId xid;
+	bool		is_subxact;
 
 	xlundohdr = (xl_undo_header *) XLogRecGetData(r);
 	data = (char *) xlundohdr + SizeOfUndoHeader;
@@ -1784,8 +1787,7 @@ DecodeZHeapMultiInsert(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		ItemPointerSetInvalid(&tuple->tuple.t_self);
 
 		/*
-		 * We can only figure this out after reassembling the
-		 * transactions.
+		 * We can only figure this out after reassembling the transactions.
 		 */
 		tuple->tuple.t_tableOid = InvalidOid;
 

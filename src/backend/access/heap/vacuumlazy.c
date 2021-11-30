@@ -2102,7 +2102,7 @@ lazy_vacuum_heap_rel(LVRelState *vacrel)
 
 	ereport(elevel,
 			(errmsg("table \"%s\": removed %lld dead item identifiers in %u pages",
-					vacrel->relname, (long long ) tupindex, vacuumed_pages),
+					vacrel->relname, (long long) tupindex, vacuumed_pages),
 			 errdetail_internal("%s", pg_rusage_show(&ru0))));
 
 	/* Revert to the previous phase information for error traceback */
@@ -3053,4 +3053,3 @@ parallel_vacuum_main(dsm_segment *seg, shm_toc *toc)
 	FreeAccessStrategy(vacrel.bstrategy);
 	pfree(vacrel.indstats);
 }
-

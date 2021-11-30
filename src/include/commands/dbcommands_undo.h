@@ -22,9 +22,9 @@
 
 typedef struct xu_dbase_create
 {
-	Oid		db_id;
-	Oid		tablespace_id;
-} xu_dbase_create;
+	Oid			db_id;
+	Oid			tablespace_id;
+}			xu_dbase_create;
 
 extern void dbase_undo(const WrittenUndoNode *record, FullTransactionId fxid);
 extern void dbase_undo_desc(StringInfo buf, const WrittenUndoNode *record);

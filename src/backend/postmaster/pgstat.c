@@ -2454,7 +2454,7 @@ AtEOXact_PgStat(bool isCommit, bool parallel)
 				/* update and delete each create a dead tuple */
 				tabstat->t_counts.t_delta_dead_tuples +=
 					(trans->tuples_updated - trans->tuples_inplace_updated)
-					 + trans->tuples_deleted;
+					+ trans->tuples_deleted;
 				/* insert, update, delete each count as one change event */
 				tabstat->t_counts.t_changed_tuples +=
 					trans->tuples_inserted + trans->tuples_updated +

@@ -94,8 +94,7 @@ parse_undo_page(UndoLogParserState *s, char *page, int nr, UndoSegFile *seg,
 	if (page_usage == 0)
 	{
 		/*
-		 * This should be the end of the current log file, not only the
-		 * chunk.
+		 * This should be the end of the current log file, not only the chunk.
 		 */
 		s->gap = true;
 		return;
@@ -126,14 +125,14 @@ parse_undo_page(UndoLogParserState *s, char *page, int nr, UndoSegFile *seg,
 #else
 		ereport(ERROR,
 				(errmsg("page %d of the log segment \"%s\" has invalid ud_first_record: %d",
-					 nr, seg->path, pghdr.ud_first_record)));
+						nr, seg->path, pghdr.ud_first_record)));
 #endif
 	}
 
 	/* The current chunk must start before the end of the current page. */
 #ifdef USE_ASSERT_CHECKING
 	{
-		UndoRecPtr page_end = MakeUndoRecPtr(seg->logno, 0);
+		UndoRecPtr	page_end = MakeUndoRecPtr(seg->logno, 0);
 
 		/*
 		 * Add the offset manually because MakeUndoRecPtr() does not work if
@@ -190,7 +189,7 @@ parse_undo_page(UndoLogParserState *s, char *page, int nr, UndoSegFile *seg,
 	while (page_offset < page_usage)
 	{
 		int			done,
-			read_now;
+					read_now;
 
 		/*
 		 * At any moment we're reading either the chunk or chunk header, but
@@ -220,7 +219,7 @@ parse_undo_page(UndoLogParserState *s, char *page, int nr, UndoSegFile *seg,
 			{
 				UndoLogNumber logno = UndoRecPtrGetLogNo(s->current_chunk);
 				UndoLogOffset offset = UndoRecPtrGetOffset(s->current_chunk);
-				bool	invalid_size = false;
+				bool		invalid_size = false;
 
 				/* Should not be reading chunk w/o knowing its location. */
 				Assert(s->current_chunk != InvalidUndoRecPtr);
@@ -231,7 +230,7 @@ parse_undo_page(UndoLogParserState *s, char *page, int nr, UndoSegFile *seg,
 				 */
 				if (s->chunk_hdr.size == 0)
 				{
-					UndoLogOffset	seg_offset PG_USED_FOR_ASSERTS_ONLY;
+					UndoLogOffset seg_offset PG_USED_FOR_ASSERTS_ONLY;
 
 					seg_offset = offset - offset % UndoLogSegmentSize;
 
@@ -245,7 +244,7 @@ parse_undo_page(UndoLogParserState *s, char *page, int nr, UndoSegFile *seg,
 				}
 
 				if (s->chunk_hdr.size < SizeOfUndoRecordSetChunkHeader ||
-					/* TODO Check the "usable bytes" instead. */
+				/* TODO Check the "usable bytes" instead. */
 					s->chunk_hdr.size > UndoLogMaxSize)
 					invalid_size = true;
 
@@ -380,8 +379,8 @@ parse_undo_page(UndoLogParserState *s, char *page, int nr, UndoSegFile *seg,
 												  nr * BLCKSZ + page_offset);
 
 				/*
-				 * Save the offset of the first chunk start, to check the value
-				 * stored in the header.
+				 * Save the offset of the first chunk start, to check the
+				 * value stored in the header.
 				 */
 				if (first_chunk == 0)
 					first_chunk = page_offset;
@@ -447,8 +446,8 @@ parse_undo_page(UndoLogParserState *s, char *page, int nr, UndoSegFile *seg,
 static void
 add_chunk_info(UndoLogParserState *s, UndoRecordSetType urs_type)
 {
-	UndoPageItem	*item;
-	UndoLogChunkInfo	*chunk;
+	UndoPageItem *item;
+	UndoLogChunkInfo *chunk;
 
 	enlarge_item_array(s, s->nitems + 1);
 
@@ -477,7 +476,7 @@ enlarge_item_array(UndoLogParserState *s, int size)
 	}
 	else
 	{
-		int	i;
+		int			i;
 
 		s->nitems_max *= 2;
 		s->items = (UndoPageItem *)
@@ -496,11 +495,11 @@ reset_storage(UndoLogParserState *state, bool records)
 {
 	if (records)
 	{
-		int	i;
+		int			i;
 
 		for (i = 0; i < state->nitems_max; i++)
 		{
-			UndoNode	*node = &state->items[i].u.record;
+			UndoNode   *node = &state->items[i].u.record;
 
 			if (node->data)
 			{
@@ -542,6 +541,7 @@ process_records(UndoLogParserState *s, char *data, int size,
 
 		if (rec_buffer == NULL)
 #ifndef	FRONTEND
+
 			/*
 			 * TopMemoryContext is needed in the backend because it calls the
 			 * function from within a SRF.
@@ -575,9 +575,9 @@ process_records(UndoLogParserState *s, char *data, int size,
 		Size		rec_off_tmp = rec_buf_off;
 		uint8		rmid,
 					rec_type;
-		UndoPageItem	item;
-		UndoNode *node;
-		Size	data_len;
+		UndoPageItem item;
+		UndoNode   *node;
+		Size		data_len;
 
 		enlarge_item_array(s, s->nitems + 1);
 		node = &item.u.record;
@@ -616,7 +616,7 @@ process_records(UndoLogParserState *s, char *data, int size,
 		 */
 		if (data_len > 0)
 		{
-			char	*data = rec_buffer + rec_off_tmp;
+			char	   *data = rec_buffer + rec_off_tmp;
 
 			node->data = (char *) palloc(data_len);
 			memcpy(node->data, data, data_len);

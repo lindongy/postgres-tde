@@ -191,7 +191,7 @@ static void
 log_undo_smgr_create(xu_smgr_create *undo_rec)
 {
 	XactUndoContext undo_context;
-	UndoRecData	rdata;
+	UndoRecData rdata;
 	XLogRecPtr	lsn;
 	xl_smgr_precreate xlrec;
 
@@ -1097,8 +1097,8 @@ smgr_undo(const WrittenUndoNode *record, FullTransactionId fxid)
 	xl_smgr_drop xlrec;
 
 	/*
-	 * The end of transaction or subtransaction is not interesting for
-	 * us. Should we process the records in batches?
+	 * The end of transaction or subtransaction is not interesting for us.
+	 * Should we process the records in batches?
 	 */
 	if (record == NULL)
 		return;

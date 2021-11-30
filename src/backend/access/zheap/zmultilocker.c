@@ -405,15 +405,15 @@ ZMultiLockMembersWait(Relation rel, List *mlmembers, ZHeapTuple zhtup,
 
 		/*
 		 * For aborted transaction, if the undo actions are not applied yet,
-		 * then apply them before modifying the page.
-		 * To check abort, we can call TransactionIdDidAbort but always this
-		 * will not give proper status because if this transaction was running
-		 * at the time of crash, and after restart, status of this transaction
-		 * will be as aborted but still we should consider this transaction as
-		 * aborted and should apply the actions. So here, to identify all types
-		 * of aborted transaction, we will check that if this transaction is
-		 * not committed and not in-progress, it means this is aborted and we
-		 * can apply actions here.
+		 * then apply them before modifying the page. To check abort, we can
+		 * call TransactionIdDidAbort but always this will not give proper
+		 * status because if this transaction was running at the time of
+		 * crash, and after restart, status of this transaction will be as
+		 * aborted but still we should consider this transaction as aborted
+		 * and should apply the actions. So here, to identify all types of
+		 * aborted transaction, we will check that if this transaction is not
+		 * committed and not in-progress, it means this is aborted and we can
+		 * apply actions here.
 		 */
 		if (!TransactionIdDidCommit(memxid) && !TransactionIdIsInProgress(memxid))
 		{
@@ -508,9 +508,9 @@ ZIsAnyMultiLockMemberRunning(Relation rel,
 
 			/* Apply the actions. */
 			action_applied = zheap_exec_pending_rollback(rel, buf,
-													mlmember->trans_slot_id,
-													memxid,
-													NULL);
+														 mlmember->trans_slot_id,
+														 memxid,
+														 NULL);
 
 			/*
 			 * If actions are applied, then set pending_actions_applied flag
@@ -670,7 +670,7 @@ GetLockerTransInfo(Relation rel, ItemPointer tid, Buffer buf,
 		*trans_slot = InvalidXactSlotId;
 
 	oldestFullXidHavingUndo = FullTransactionIdFromU64(
-		pg_atomic_read_u64(&ProcGlobal->oldestFullXidHavingUndo));
+													   pg_atomic_read_u64(&ProcGlobal->oldestFullXidHavingUndo));
 	trans_slots = GetTransactionsSlotsForPage(rel, buf, &total_trans_slots,
 											  &tpd_blkno);
 

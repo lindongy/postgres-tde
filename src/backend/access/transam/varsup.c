@@ -373,7 +373,7 @@ SetTransactionIdLimit(TransactionId oldest_datfrozenxid, Oid oldest_datoid)
 	TransactionId xidStopLimit;
 	TransactionId xidWrapLimit;
 	TransactionId curXid;
-	FullTransactionId	oldestFullXidHavingUndo;
+	FullTransactionId oldestFullXidHavingUndo;
 	TransactionId oldestXidHavingUndo;
 
 	Assert(TransactionIdIsNormal(oldest_datfrozenxid));

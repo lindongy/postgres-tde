@@ -44,13 +44,13 @@ dbase_desc(StringInfo buf, XLogReaderState *record)
 	}
 	else if (info == XLOG_DBASE_PRECREATE)
 	{
-		xl_dbase_precreate_rec	*xlrec = (xl_dbase_precreate_rec *) rec;
+		xl_dbase_precreate_rec *xlrec = (xl_dbase_precreate_rec *) rec;
 
 		appendStringInfo(buf, " %u/%u", xlrec->tablespace_id, xlrec->db_id);
 	}
 	else if (info == XLOG_DBASE_DROP_DIR)
 	{
-		xl_dbase_drop_dir_rec	*xlrec = (xl_dbase_drop_dir_rec *) rec;
+		xl_dbase_drop_dir_rec *xlrec = (xl_dbase_drop_dir_rec *) rec;
 
 		appendStringInfo(buf, " %u/%u", xlrec->tablespace_id, xlrec->db_id);
 	}

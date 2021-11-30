@@ -111,7 +111,7 @@ Datum
 test_undoread_insert(PG_FUNCTION_ARGS)
 {
 	char	   *string = text_to_cstring(PG_GETARG_TEXT_PP(0));
-	UndoRecData	rdata;
+	UndoRecData rdata;
 	XactUndoContext undo_context;
 	UndoRecPtr	urp;
 
@@ -166,8 +166,8 @@ test_undoread_read(PG_FUNCTION_ARGS)
 {
 	FuncCallContext *funcctx;
 	UndoRSReaderState *state;
-	bool	backward = PG_GETARG_BOOL(2);
-	bool	have_next;
+	bool		backward = PG_GETARG_BOOL(2);
+	bool		have_next;
 
 	check_debug_build();
 

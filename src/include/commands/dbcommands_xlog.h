@@ -45,14 +45,14 @@ typedef struct xl_dbase_precreate_rec
 {
 	Oid			db_id;
 	Oid			tablespace_id;
-} xl_dbase_precreate_rec;
+}			xl_dbase_precreate_rec;
 
 /* Drop a single database directory. */
 typedef struct xl_dbase_drop_dir_rec
 {
 	Oid			db_id;
 	Oid			tablespace_id;
-} xl_dbase_drop_dir_rec;
+}			xl_dbase_drop_dir_rec;
 
 extern void dbase_redo(XLogReaderState *rptr);
 extern void dbase_desc(StringInfo buf, XLogReaderState *rptr);

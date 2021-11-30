@@ -716,9 +716,10 @@ GetPreparedTransactionList(GlobalTransaction *gxacts)
 bool
 TransactionIdIsPrepared(TransactionId xid)
 {
-	GlobalTransaction	array;
-	int	num, i;
-	bool	found = false;
+	GlobalTransaction array;
+	int			num,
+				i;
+	bool		found = false;
 
 	num = GetPreparedTransactionList(&array);
 	if (num == 0)

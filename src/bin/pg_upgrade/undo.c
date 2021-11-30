@@ -37,7 +37,7 @@ typedef struct
 	UndoLogOffset discard;
 	char		persistence;
 	Oid			tablespace;
-}			UndoLogInfo;
+} UndoLogInfo;
 
 static void
 read_raw(UndoCheckpointContext *ctx, void *data, size_t size)
@@ -95,7 +95,7 @@ write_and_checksum(UndoCheckpointContext *ctx, const void *data, size_t size)
 static void
 read_one_undo_log(UndoCheckpointContext *ctx,
 				  ClusterInfo *cluster,
-				  UndoLogInfo * info)
+				  UndoLogInfo *info)
 {
 	UndoLogMetaData meta_data;
 
@@ -108,8 +108,8 @@ read_one_undo_log(UndoCheckpointContext *ctx,
 }
 
 static void
-merge_undo_log(UndoLogInfo * logs, UndoLogNumber * num_logs,
-			   const UndoLogInfo * info)
+merge_undo_log(UndoLogInfo *logs, UndoLogNumber *num_logs,
+			   const UndoLogInfo *info)
 {
 	UndoLogNumber i;
 

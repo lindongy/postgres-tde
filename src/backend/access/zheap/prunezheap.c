@@ -54,15 +54,15 @@ typedef struct
 	OffsetNumber nowunused[MaxZHeapTuplesPerPage];
 	/* marked[i] is TRUE if item i is entered in one of the above arrays */
 	bool		marked[MaxZHeapTuplesPerPage + 1];
-} ZPruneState;
+}			ZPruneState;
 
 static int	zheap_prune_item(Relation relation, Buffer buffer,
 							 OffsetNumber rootoffnum, TransactionId OldestXmin,
-							 ZPruneState *prstate, int *space_freed);
-static void zheap_prune_record_prunable(ZPruneState *prstate,
+							 ZPruneState * prstate, int *space_freed);
+static void zheap_prune_record_prunable(ZPruneState * prstate,
 										TransactionId xid);
-static void zheap_prune_record_dead(ZPruneState *prstate, OffsetNumber offnum);
-static void zheap_prune_record_deleted(ZPruneState *prstate,
+static void zheap_prune_record_dead(ZPruneState * prstate, OffsetNumber offnum);
+static void zheap_prune_record_deleted(ZPruneState * prstate,
 									   OffsetNumber offnum);
 
 /*
@@ -472,7 +472,7 @@ zheap_page_prune_execute(Buffer buffer, OffsetNumber target_offnum,
  */
 static int
 zheap_prune_item(Relation relation, Buffer buffer, OffsetNumber offnum,
-				 TransactionId OldestXmin, ZPruneState *prstate,
+				 TransactionId OldestXmin, ZPruneState * prstate,
 				 int *space_freed)
 {
 	ZHeapTupleData tup;
@@ -570,7 +570,7 @@ zheap_prune_item(Relation relation, Buffer buffer, OffsetNumber offnum,
 
 /* Record lowest soon-prunable XID */
 static void
-zheap_prune_record_prunable(ZPruneState *prstate, TransactionId xid)
+zheap_prune_record_prunable(ZPruneState * prstate, TransactionId xid)
 {
 	/*
 	 * This should exactly match the PageSetPrunable macro.  We can't store
@@ -584,7 +584,7 @@ zheap_prune_record_prunable(ZPruneState *prstate, TransactionId xid)
 
 /* Record item pointer to be marked dead */
 static void
-zheap_prune_record_dead(ZPruneState *prstate, OffsetNumber offnum)
+zheap_prune_record_dead(ZPruneState * prstate, OffsetNumber offnum)
 {
 	Assert(prstate->ndead < MaxZHeapTuplesPerPage);
 	prstate->nowdead[prstate->ndead] = offnum;
@@ -595,7 +595,7 @@ zheap_prune_record_dead(ZPruneState *prstate, OffsetNumber offnum)
 
 /* Record item pointer to be deleted */
 static void
-zheap_prune_record_deleted(ZPruneState *prstate, OffsetNumber offnum)
+zheap_prune_record_deleted(ZPruneState * prstate, OffsetNumber offnum)
 {
 	Assert(prstate->ndead < MaxZHeapTuplesPerPage);
 	prstate->nowdeleted[prstate->ndeleted] = offnum;
@@ -690,7 +690,7 @@ compactify_ztuples(itemIdCompact itemidbase, int nitems, Page page, Page tmppage
 	upper = phdr->pd_special;
 	for (i = nitems - 1; i >= 0; i--)
 	{
-		itemIdCompact	itemidptr = &itemidbase[i];
+		itemIdCompact itemidptr = &itemidbase[i];
 		ItemId		lp;
 
 		lp = PageGetItemId(page, itemidptr->offsetindex + 1);
@@ -732,7 +732,7 @@ ZPageRepairFragmentation(Buffer buffer, Page tmppage,
 	Offset		pd_upper = ((PageHeader) page)->pd_upper;
 	Offset		pd_special = ((PageHeader) page)->pd_special;
 	itemIdCompactData itemidbase[MaxZHeapTuplesPerPage];
-	itemIdCompact	itemidptr;
+	itemIdCompact itemidptr;
 	ItemId		lp;
 	int			nline,
 				nstorage,

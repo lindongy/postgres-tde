@@ -33,7 +33,7 @@ zheap_desc(StringInfo buf, XLogReaderState *record)
 	else if (info == XLOG_ZHEAP_INSERT)
 	{
 		xl_zheap_insert *xlrec = (xl_zheap_insert *) rec;
-		char	*c = (char *) xlrec + SizeOfZHeapInsert;
+		char	   *c = (char *) xlrec + SizeOfZHeapInsert;
 		xl_undo_header xlundohdr;
 
 		memcpy(&xlundohdr, c, SizeOfUndoHeader);
@@ -55,7 +55,7 @@ zheap_desc(StringInfo buf, XLogReaderState *record)
 		xl_undo_header *xlundohdr = (xl_undo_header *) rec;
 		xl_zheap_delete xlrec;
 
-		memcpy(&xlrec,  (char *) xlundohdr + SizeOfUndoHeader,
+		memcpy(&xlrec, (char *) xlundohdr + SizeOfUndoHeader,
 			   SizeOfZHeapDelete);
 
 		appendStringInfo(buf, "off %u, trans_slot %u, hasUndoTuple: %c, blkprev %lu",
@@ -267,14 +267,14 @@ append_blkprev(StringInfo buf, UndoRecPtr blk_prev, UndoRecPtr blk_cur)
 void
 zheap_undo_desc(StringInfo buf, const WrittenUndoNode *record)
 {
-	uint8	type;
+	uint8		type;
 
 	Assert(record->n.rmid == RM_ZHEAP_ID);
 
 	type = record->n.type;
 	if (type == UNDO_ZHEAP_INSERT)
 	{
-		UnpackedUndoRecord	uur;
+		UnpackedUndoRecord uur;
 
 		UnpackZHeapUndoRecord(record->n.data, true, false, &uur);
 		appendStringInfo(buf,
@@ -285,8 +285,8 @@ zheap_undo_desc(StringInfo buf, const WrittenUndoNode *record)
 	}
 	else if (type == UNDO_ZHEAP_MULTI_INSERT)
 	{
-		UnpackedUndoRecord	uur;
-		int		nranges;
+		UnpackedUndoRecord uur;
+		int			nranges;
 
 		UnpackZHeapUndoRecord(record->n.data, false, false, &uur);
 
@@ -301,7 +301,7 @@ zheap_undo_desc(StringInfo buf, const WrittenUndoNode *record)
 	}
 	else if (type == UNDO_ZHEAP_DELETE)
 	{
-		UnpackedUndoRecord	uur;
+		UnpackedUndoRecord uur;
 
 		UnpackZHeapUndoRecord(record->n.data, false, false, &uur);
 		appendStringInfo(buf,
@@ -312,7 +312,7 @@ zheap_undo_desc(StringInfo buf, const WrittenUndoNode *record)
 	}
 	else if (type == UNDO_ZHEAP_INPLACE_UPDATE)
 	{
-		UnpackedUndoRecord	uur;
+		UnpackedUndoRecord uur;
 
 		UnpackZHeapUndoRecord(record->n.data, false, false, &uur);
 		appendStringInfo(buf,
@@ -323,7 +323,7 @@ zheap_undo_desc(StringInfo buf, const WrittenUndoNode *record)
 	}
 	else if (type == UNDO_ZHEAP_UPDATE)
 	{
-		UnpackedUndoRecord	uur;
+		UnpackedUndoRecord uur;
 
 		UnpackZHeapUndoRecord(record->n.data, false, false, &uur);
 		appendStringInfo(buf, "UPDATE reloid %u, blk %u, off %u, cid %u, prevxid %u,",
@@ -335,19 +335,19 @@ zheap_undo_desc(StringInfo buf, const WrittenUndoNode *record)
 			 type == UNDO_ZHEAP_XID_LOCK_FOR_UPDATE ||
 			 type == UNDO_ZHEAP_XID_MULTI_LOCK_ONLY)
 	{
-		UnpackedUndoRecord	uur;
-		const	char	*type_str;
+		UnpackedUndoRecord uur;
+		const char *type_str;
 
 		UnpackZHeapUndoRecord(record->n.data, false, false, &uur);
 		switch (type)
 		{
-			case	UNDO_ZHEAP_XID_MULTI_LOCK_ONLY:
+			case UNDO_ZHEAP_XID_MULTI_LOCK_ONLY:
 				type_str = "MULTI_LOCK_ONLY";
 				break;
-			case	UNDO_ZHEAP_XID_LOCK_FOR_UPDATE:
+			case UNDO_ZHEAP_XID_LOCK_FOR_UPDATE:
 				type_str = "LOCK_FOR_UPDATE";
 				break;
-			case	UNDO_ZHEAP_XID_LOCK_ONLY:
+			case UNDO_ZHEAP_XID_LOCK_ONLY:
 				type_str = "LOCK_ONLY";
 				break;
 
@@ -362,7 +362,7 @@ zheap_undo_desc(StringInfo buf, const WrittenUndoNode *record)
 	}
 	else if (type == UNDO_ZHEAP_ITEMID_UNUSED)
 	{
-		UnpackedUndoRecord	uur;
+		UnpackedUndoRecord uur;
 
 		UnpackZHeapUndoRecord(record->n.data, false, false, &uur);
 		appendStringInfo(buf, "ITEMID_UNUSED reloid %u, blk %u, off %u, cid %u, prevxid %u,",

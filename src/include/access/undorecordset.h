@@ -63,11 +63,10 @@ typedef struct UndoRecordSetChunkHeader
 typedef struct XactUndoRecordSetHeader
 {
 	FullTransactionId fxid;
-	Oid				  dboid;
+	Oid			dboid;
 
 	/*
-	 * Was the set applied. Never set to true if the transaction
-	 * committed.
+	 * Was the set applied. Never set to true if the transaction committed.
 	 */
 	bool		applied;
 } XactUndoRecordSetHeader;

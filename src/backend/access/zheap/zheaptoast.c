@@ -344,13 +344,13 @@ zheap_toast_insert_or_update(Relation rel, ZHeapTuple newtup,
 
 		/* Copy over the data, and fill the null bitmap if needed */
 		zheap_fill_tuple(tupleDesc,
-						toast_values,
-						toast_isnull,
-						(char *) new_data + new_header_len,
-						new_data_len,
-						&(new_data->t_infomask),
-						((ttc.ttc_flags & TOAST_HAS_NULLS) != 0) ?
-						new_data->t_bits : NULL);
+						 toast_values,
+						 toast_isnull,
+						 (char *) new_data + new_header_len,
+						 new_data_len,
+						 &(new_data->t_infomask),
+						 ((ttc.ttc_flags & TOAST_HAS_NULLS) != 0) ?
+						 new_data->t_bits : NULL);
 	}
 	else
 		result_tuple = newtup;

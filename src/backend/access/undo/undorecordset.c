@@ -407,10 +407,10 @@ UndoPrepareToSetChunkHeaderFlag(UndoRecPtr chunk_hdr, uint16 off,
 {
 	RelFileNode rnode;
 	BlockNumber block;
-	UndoLogNumber	logno = UndoRecPtrGetLogNo(chunk_hdr);
+	UndoLogNumber logno = UndoRecPtrGetLogNo(chunk_hdr);
 	UndoLogOffset chunk_hdr_off = UndoRecPtrGetOffset(chunk_hdr);
 	UndoRecPtr	flag_ptr;
-	UndoLogOffset	flag_off;
+	UndoLogOffset flag_off;
 
 
 	/* Find out where in the log is the flag stored. */
@@ -981,8 +981,8 @@ UndoSetChunkHeaderFlag(UndoRecPtr chunk_hdr, uint16 off, Buffer buf,
 {
 	UndoLogOffset chunk_hdr_off = UndoRecPtrGetOffset(chunk_hdr);
 	UndoRecordSetXLogBufData bufdata;
-	UndoLogOffset	flag_off;
-	bool	new_value = true;
+	UndoLogOffset flag_off;
+	bool		new_value = true;
 	XLogRecPtr	lsn;
 
 	/* Find out where in the log is the flag stored ... */
@@ -1142,6 +1142,7 @@ UndoReplay(XLogReaderState *xlog_record, void *record_data, size_t record_size)
 				slot->meta.insert =
 					BLCKSZ * block->blkno + bufdata->insert_page_offset;
 			}
+
 			/*
 			 * Are we still writing a chunk size that spilled into the next
 			 * page?
@@ -1435,7 +1436,7 @@ UndoReplay(XLogReaderState *xlog_record, void *record_data, size_t record_size)
 										  0, sizeof(bool));
 				else
 				{
-					bool	new_value = true;
+					bool		new_value = true;
 
 					UndoPageOverwrite(page,
 									  bufdata->flag_offset,
@@ -2120,7 +2121,7 @@ typedef struct URSEntry
 	uint8		urs_type;		/* see UndoRecordSetType */
 	char		persistence;	/* relation persistence */
 	char		status;			/* used by simplehash */
-} URSEntry;
+}			URSEntry;
 
 #define SH_PREFIX chunktable
 #define SH_ELEMENT_TYPE URSEntry
@@ -2161,7 +2162,7 @@ GetAllUndoRecordSets(void)
 	ListCell   *lc;
 	Buffer		buffers[2];
 	chunktable_hash *chunks;
-	URSEntry *entry;
+	URSEntry   *entry;
 
 	/*
 	 * When merging the chunks into sets, we assume that the chunks at lower
@@ -2221,8 +2222,8 @@ GetAllUndoRecordSets(void)
 			UndoRecordSetChunkHeader chunk_hdr;
 			XactUndoRecordSetHeader xact_hdr;
 			UndoRecordSetType urs_type;
-			bool	discarded;
-			bool	applied = false;
+			bool		discarded;
+			bool		applied = false;
 
 			chunk_start = MakeUndoRecPtr(logno, cur);
 
@@ -2430,10 +2431,10 @@ UndoSetFlag(UndoRecPtr last_chunk, uint16 off, char persistence)
 void
 ApplyPendingUndo(void)
 {
-	ResourceOwner	res_owner_tmp;
+	ResourceOwner res_owner_tmp;
 	chunktable_hash *sets;
 	chunktable_iterator iterator;
-	URSEntry *entry;
+	URSEntry   *entry;
 
 	/*
 	 * At this point we do not need a regular transaction, but need to have
@@ -2519,7 +2520,7 @@ ApplyPendingUndo(void)
 				 */
 				if (entry->urs_type == URST_TRANSACTION)
 				{
-					uint16	off;
+					uint16		off;
 
 					/* Compute the offset of the "applied" flag in the chunk. */
 					off = SizeOfUndoRecordSetChunkHeader +
@@ -2582,7 +2583,7 @@ AdvanceOldestXidHavingUndo(void)
 	uint32		xid_orig_epoch;
 	chunktable_hash *sets;
 	chunktable_iterator iterator;
-	URSEntry *entry;
+	URSEntry   *entry;
 
 	/*
 	 * Since this function assists in undo discarding, do nothing while the
@@ -2629,9 +2630,9 @@ AdvanceOldestXidHavingUndo(void)
 			continue;
 
 		/*
-		 * Skip transactions that might still be visible to other
-		 * transactions
-		 . */
+		 * Skip transactions that might still be visible to other transactions
+		 * .
+		 */
 		if (!TransactionIdPrecedes(xid, oldestXmin))
 			continue;
 
@@ -2819,10 +2820,11 @@ pg_discard_undo_record_set_chunks(PG_FUNCTION_ARGS)
 Datum
 pg_current_urs_begin(PG_FUNCTION_ARGS)
 {
-	UndoRecPtr	begin, end;
+	UndoRecPtr	begin,
+				end;
 	char		relpersist = PG_GETARG_CHAR(0);
-	UndoPersistenceLevel	p;
-	char	*res_str;
+	UndoPersistenceLevel p;
+	char	   *res_str;
 
 	p = GetUndoPersistenceLevel(relpersist);
 
@@ -2837,10 +2839,11 @@ pg_current_urs_begin(PG_FUNCTION_ARGS)
 Datum
 pg_current_urs_end(PG_FUNCTION_ARGS)
 {
-	UndoRecPtr	begin, end;
+	UndoRecPtr	begin,
+				end;
 	char		relpersist = PG_GETARG_CHAR(0);
-	UndoPersistenceLevel	p;
-	char	*res_str;
+	UndoPersistenceLevel p;
+	char	   *res_str;
 
 	p = GetUndoPersistenceLevel(relpersist);
 
@@ -2855,8 +2858,9 @@ pg_current_urs_end(PG_FUNCTION_ARGS)
 static UndoRecPtr
 urp_from_string(char *str)
 {
-	uint32		   high, low;
-	UndoRecPtr	   result;
+	uint32		high,
+				low;
+	UndoRecPtr	result;
 
 	if (sscanf(str, "%08X%08X", &high, &low) != 2)
 		elog(ERROR, "could not recognize UNDO pointer value \"%s\"", str);
@@ -2874,14 +2878,14 @@ typedef struct UndoScanState
 
 	/* Start of the current page. */
 	UndoRecPtr	cur_page;
-	UndoLogParserState	parser;
-	UndoSegFile	seg;			/* The current segment. */
+	UndoLogParserState parser;
+	UndoSegFile seg;			/* The current segment. */
 
-	int		cur_item;
+	int			cur_item;
 
 	/* Found the first non-discarded page? */
-	bool	found_page;
-} UndoScanState;
+	bool		found_page;
+}			UndoScanState;
 
 /*
  * Parse the next undo log page and return true, or return false if suitable
@@ -2890,9 +2894,9 @@ typedef struct UndoScanState
  * Parsing runs in the memory context passed by the caller.
  */
 static bool
-parse_next_page(UndoScanState *state, MemoryContext context, bool records)
+parse_next_page(UndoScanState * state, MemoryContext context, bool records)
 {
-	Buffer	buffer = InvalidBuffer;
+	Buffer		buffer = InvalidBuffer;
 	MemoryContext oldcontext;
 
 	/* Stop if the parser encountered end of data. */
@@ -2903,10 +2907,11 @@ parse_next_page(UndoScanState *state, MemoryContext context, bool records)
 	while (state->cur_page == InvalidUndoRecPtr ||
 		   (state->cur_page < state->end && buffer == InvalidBuffer))
 	{
-		bool	page_exists;
-		UndoLogOffset	page_start_off, seg_start_off;
-		UndoSegFile		*seg = &state->seg;
-		UndoLogNumber	logno;
+		bool		page_exists;
+		UndoLogOffset page_start_off,
+					seg_start_off;
+		UndoSegFile *seg = &state->seg;
+		UndoLogNumber logno;
 
 		/* Invalid cur_page indicates that this is the first call. */
 		if (state->cur_page == InvalidUndoRecPtr)
@@ -2940,9 +2945,9 @@ parse_next_page(UndoScanState *state, MemoryContext context, bool records)
 			UndoLogSlot *slot;
 
 			/*
-			 * There's usually no relationship between two consecutive
-			 * logs. If the transaction spans multiple logs, caller needs to
-			 * handle them separately.
+			 * There's usually no relationship between two consecutive logs.
+			 * If the transaction spans multiple logs, caller needs to handle
+			 * them separately.
 			 */
 			if (strlen(seg->path) > 0 && logno != seg->logno)
 				return false;
@@ -3000,7 +3005,7 @@ parse_next_page(UndoScanState *state, MemoryContext context, bool records)
 		if (page_exists)
 		{
 			RelFileNode rnode;
-			BlockNumber	blockno;
+			BlockNumber blockno;
 
 			UndoRecPtrAssignRelFileNode(rnode, state->cur_page);
 			blockno = UndoRecPtrGetOffset(state->cur_page) / BLCKSZ;
@@ -3033,6 +3038,7 @@ parse_next_page(UndoScanState *state, MemoryContext context, bool records)
 	state->found_page = true;
 
 	LockBuffer(buffer, BUFFER_LOCK_SHARE);
+
 	/*
 	 * Parse the page. Do so in the multi-call context so that data allocated
 	 * by the parser do survive.
@@ -3052,11 +3058,11 @@ parse_next_page(UndoScanState *state, MemoryContext context, bool records)
  * Setup the multi-call context for get_undo_log_chunks().
  */
 static void
-setup_undo_log_items_context(PG_FUNCTION_ARGS,  FuncCallContext *funcctx,
-							  UndoRecPtr start, UndoRecPtr end)
+setup_undo_log_items_context(PG_FUNCTION_ARGS, FuncCallContext *funcctx,
+							 UndoRecPtr start, UndoRecPtr end)
 {
 	MemoryContext oldcontext;
-	UndoScanState	*state;
+	UndoScanState *state;
 	TupleDesc	tupdesc;
 
 	oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
@@ -3082,15 +3088,15 @@ static UndoPageItem *
 get_next_undo_log_item(PG_FUNCTION_ARGS, FuncCallContext *funcctx,
 					   bool record)
 {
-	UndoScanState	*state;
-	UndoPageItem	*item;
+	UndoScanState *state;
+	UndoPageItem *item;
 
 	state = (UndoScanState *) funcctx->user_fctx;
 
 	/* Need the next undo page? */
 	if (state->cur_item >= state->parser.nitems)
 	{
-		bool	success;
+		bool		success;
 
 		Assert(state->cur_item == state->parser.nitems);
 
@@ -3101,7 +3107,8 @@ get_next_undo_log_item(PG_FUNCTION_ARGS, FuncCallContext *funcctx,
 			/* Does any item start on the page? */
 			if (state->parser.nitems > 0)
 			{
-				UndoPageItem	*first, *last;
+				UndoPageItem *first,
+						   *last;
 
 				/*
 				 * Although at least some part of the page should be in the
@@ -3134,6 +3141,7 @@ get_next_undo_log_item(PG_FUNCTION_ARGS, FuncCallContext *funcctx,
 		item = &state->parser.items[state->cur_item++];
 	} while (item->location < state->start &&
 			 state->cur_item < state->parser.nitems);
+
 	/*
 	 * At least the last item must be in the range, see the overlap check
 	 * above.
@@ -3161,10 +3169,10 @@ get_next_undo_log_item(PG_FUNCTION_ARGS, FuncCallContext *funcctx,
 static HeapTuple
 get_next_undo_log_chunk(PG_FUNCTION_ARGS, FuncCallContext *funcctx)
 {
-	UndoPageItem	*item;
-	UndoLogChunkInfo	*chunk;
-	Datum	values[7];
-	bool	isnull[7];
+	UndoPageItem *item;
+	UndoLogChunkInfo *chunk;
+	Datum		values[7];
+	bool		isnull[7];
 
 	item = get_next_undo_log_item(fcinfo, funcctx, false);
 	if (item == NULL)
@@ -3224,12 +3232,13 @@ get_next_undo_log_chunk(PG_FUNCTION_ARGS, FuncCallContext *funcctx)
 Datum
 pg_get_undo_log_chunks(PG_FUNCTION_ARGS)
 {
-	FuncCallContext	*funcctx;
+	FuncCallContext *funcctx;
 	HeapTuple	tuple;
 
 	if (SRF_IS_FIRSTCALL())
 	{
-		UndoRecPtr	start, end;
+		UndoRecPtr	start,
+					end;
 
 		start = urp_from_string(text_to_cstring(PG_GETARG_TEXT_PP(0)));
 		end = urp_from_string(text_to_cstring(PG_GETARG_TEXT_PP(1)));
@@ -3243,7 +3252,7 @@ pg_get_undo_log_chunks(PG_FUNCTION_ARGS)
 
 	if (tuple)
 	{
-		Datum result = HeapTupleGetDatum(tuple);
+		Datum		result = HeapTupleGetDatum(tuple);
 
 		SRF_RETURN_NEXT(funcctx, result);
 	}
@@ -3254,13 +3263,13 @@ pg_get_undo_log_chunks(PG_FUNCTION_ARGS)
 static HeapTuple
 get_next_undo_log_record(PG_FUNCTION_ARGS, FuncCallContext *funcctx)
 {
-	UndoPageItem	*item;
-	UndoNode	*node;
-	WrittenUndoNode	wnode;
+	UndoPageItem *item;
+	UndoNode   *node;
+	WrittenUndoNode wnode;
 	const RmgrData *desc;
-	StringInfoData	buf;
-	Datum	values[4];
-	bool	isnull[4];
+	StringInfoData buf;
+	Datum		values[4];
+	bool		isnull[4];
 
 	item = get_next_undo_log_item(fcinfo, funcctx, true);
 	if (item == NULL)
@@ -3289,12 +3298,13 @@ get_next_undo_log_record(PG_FUNCTION_ARGS, FuncCallContext *funcctx)
 Datum
 pg_get_undo_log_records(PG_FUNCTION_ARGS)
 {
-	FuncCallContext	*funcctx;
+	FuncCallContext *funcctx;
 	HeapTuple	tuple;
 
 	if (SRF_IS_FIRSTCALL())
 	{
-		UndoRecPtr	start, end;
+		UndoRecPtr	start,
+					end;
 
 		start = urp_from_string(text_to_cstring(PG_GETARG_TEXT_PP(0)));
 		end = urp_from_string(text_to_cstring(PG_GETARG_TEXT_PP(1)));
@@ -3308,7 +3318,7 @@ pg_get_undo_log_records(PG_FUNCTION_ARGS)
 
 	if (tuple)
 	{
-		Datum result = HeapTupleGetDatum(tuple);
+		Datum		result = HeapTupleGetDatum(tuple);
 
 		SRF_RETURN_NEXT(funcctx, result);
 	}
