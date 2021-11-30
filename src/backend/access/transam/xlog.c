@@ -7704,15 +7704,11 @@ StartupXLOG(void)
 	 * If we have reset any unlogged relations, then there must be no
 	 * remaining references pointing to unlogged undo logs, so reset those
 	 * too.
+	 *
+	 * In contrast, temporary undo logs are managed by backends.
 	 */
 	if (InRecovery)
-		ResetUndoLogs(RELPERSISTENCE_UNLOGGED);
-
-	/*
-	 * We always blow away temporary undo logs, because there can be no
-	 * remaining references to them after a restart.
-	 */
-	ResetUndoLogs(RELPERSISTENCE_TEMP);
+		ResetUnloggedUndoLogs();
 
 	/*
 	 * We don't need the latch anymore. It's not strictly necessary to disown

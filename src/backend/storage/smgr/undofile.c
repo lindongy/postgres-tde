@@ -54,7 +54,8 @@ typedef struct UndoFileState
 static MemoryContext UndoFileCxt;
 
 static File undofile_open_segment_file(Oid relNode, Oid spcNode,
-									   BlockNumber segno, bool missing_ok);
+									   BlockNumber segno, bool missing_ok,
+									   bool is_temp);
 static File undofile_get_segment_file(SMgrRelation reln, BlockNumber segno);
 
 void
@@ -142,13 +143,6 @@ undofile_read(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 											 BLCKSZ * (blocknum + 1) - 1)))
 		return false;
 
-	/*
-	 * A.H. At least in theory it seems possible that the undo log segment
-	 * gets discarded and even recycled and overwritten with new data before
-	 * we can read the page from it. This should cause ERROR rather than
-	 * reading the wrong data, but it might still be worth checking. Should we
-	 * use the slot's file_lock to avoid that problem?
-	 */
 	file = undofile_get_segment_file(reln, blocknum / UNDOSEG_SIZE);
 	seekpos = (off_t) BLCKSZ * (blocknum % ((BlockNumber) UNDOSEG_SIZE));
 	Assert(seekpos < (off_t) BLCKSZ * UNDOSEG_SIZE);
@@ -260,12 +254,13 @@ undofile_immedsync(SMgrRelation reln, ForkNumber forknum)
 
 static File
 undofile_open_segment_file(Oid relNode, Oid spcNode,
-						   BlockNumber segno, bool missing_ok)
+						   BlockNumber segno, bool missing_ok, bool is_temp)
 {
 	File		file;
 	char		path[MAXPGPATH];
 
-	UndoLogSegmentPath(relNode, segno, spcNode, path);
+	UndoLogSegmentPath(relNode, segno, spcNode,
+					   !is_temp ? InvalidPid : MyProcPid, path);
 	file = PathNameOpenFile(path, O_RDWR | PG_BINARY);
 
 	if (file <= 0 && (!missing_ok || errno != ENOENT))
@@ -297,7 +292,7 @@ undofile_get_segment_file(SMgrRelation reln, BlockNumber segno)
 		state->mru_file =
 			undofile_open_segment_file(reln->smgr_rnode.node.relNode,
 									   reln->smgr_rnode.node.spcNode,
-									   segno, InRecovery);
+									   segno, InRecovery, SmgrIsTemp(reln));
 		if (InRecovery && state->mru_file <= 0)
 		{
 			/*
@@ -311,7 +306,7 @@ undofile_get_segment_file(SMgrRelation reln, BlockNumber segno)
 			state->mru_file =
 				undofile_open_segment_file(reln->smgr_rnode.node.relNode,
 										   reln->smgr_rnode.node.spcNode,
-										   segno, false);
+										   segno, false, SmgrIsTemp(reln));
 			Assert(state->mru_file > 0);
 		}
 		state->mru_segno = segno;
@@ -341,7 +336,7 @@ undofile_syncfiletag(const FileTag *tag, char *path)
 	{
 		/* Sync a segment file. */
 		UndoLogSegmentPath(tag->rnode.relNode, tag->segno, tag->rnode.spcNode,
-						   path);
+						   InvalidPid, path);
 
 		file = undofile_get_segment_file(reln, tag->segno);
 		if (file <= 0)

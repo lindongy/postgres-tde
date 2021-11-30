@@ -1,9 +1,9 @@
 /*
  * rmgrdesc.c
  *
- * pg_undo_dump resource managers definition
+ * pg_undodump resource managers definition
  *
- * src/bin/pg_undo_dump/rmgrdesc.c
+ * src/bin/pg_undodump/rmgrdesc.c
  */
 #define FRONTEND 1
 #include "postgres.h"

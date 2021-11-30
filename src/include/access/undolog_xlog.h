@@ -39,11 +39,10 @@ typedef struct xl_undolog_discard
 {
 	UndoLogNumber logno;
 	UndoLogOffset discard;
-	bool		entirely_discarded;
 } xl_undolog_discard;
 
 #define SizeOfUndologDiscard \
-	(offsetof(xl_undolog_discard, entirely_discarded) + sizeof(bool))
+	(offsetof(xl_undolog_discard, discard) + sizeof(UndoLogOffset))
 
 /* Adjust the size of an undo log, once it is determined to be full. */
 typedef struct xl_undolog_truncate

@@ -18,6 +18,7 @@
 
 #include "access/undodefs.h"
 #include "lib/ilist.h"
+#include "nodes/pg_list.h"
 
 #ifndef FRONTEND
 #include "storage/lwlock.h"
@@ -223,6 +224,30 @@ typedef struct UndoLogSlot
 	UndoLogOffset end;			/* one past end of highest segment */
 } UndoLogSlot;
 
+
+/* The information needed to manage undo log segment files. */
+typedef struct UndoLogFile
+{
+	UndoLogNumber logno;
+	Oid			tablespace;
+	UndoLogOffset begin;
+	UndoLogOffset end;
+	UndoLogOffset size;
+	pid_t		pid;
+} UndoLogFile;
+
+/*
+ * Temporary undo uses UndoLogSlot only to make sure that the containing
+ * tablespace is not dropped while it's still needed, but the pointers are
+ * maintained in the backend-local memory.
+ */
+typedef struct UndoLogTemp
+{
+	UndoLogFile file;
+	UndoLogOffset discard;
+	UndoLogOffset insert;
+} UndoLogTemp;
+
 extern UndoLogSlot *UndoLogGetSlot(UndoLogNumber logno, bool missing_ok);
 extern UndoLogSlot *UndoLogGetNextSlot(UndoLogSlot *slot);
 extern UndoRecPtr UndoLogGetOldestRecord(UndoLogNumber logno, bool *full);
@@ -267,6 +292,7 @@ typedef struct UndoLogTableEntry
 
 extern PGDLLIMPORT undologtable_hash * undologtable_cache;
 extern UndoLogNumber undologtable_low_logno;
+extern List *temp_undo_logs;
 
 /*
  * Find or create an UndoLogTableGetEntry for this log number.  This is used
@@ -327,6 +353,7 @@ UndoRecPtrGetPersistence(UndoRecPtr urp)
 
 /* Discarding data. */
 extern void UndoDiscard(UndoRecPtr location);
+extern void UndoDiscardTemp(void);
 extern bool UndoLogRecPtrIsDiscardedSlowPath(UndoRecPtr pointer);
 
 #ifndef FRONTEND
@@ -358,6 +385,9 @@ extern void UndoLogRelease(UndoLogSlot *slot);
 extern void UndoLogAdjustPhysicalRange(UndoLogNumber logno,
 									   UndoLogOffset new_discard,
 									   UndoLogOffset new_isnert);
+extern void UndoLogAdjustPhysicalRangeTemp(UndoLogTemp *log,
+										   UndoLogOffset new_discard,
+										   UndoLogOffset new_insert);
 extern void UndoLogTruncate(UndoLogSlot *uls, UndoLogOffset size);
 
 extern UndoPersistenceLevel GetUndoPersistenceLevel(char persistence);
@@ -377,8 +407,8 @@ extern void CheckPointUndoLogs(UndoCheckpointContext *ctx);
 extern void UndoLogNewSegment(UndoLogNumber logno, Oid tablespace, int segno);
 extern void UndoLogDirectory(Oid tablespace, char *path);
 extern void UndoLogSegmentPath(UndoLogNumber logno, int segno, Oid tablespace,
-							   char *path);
-extern void ResetUndoLogs(char persistence);
+							   int pid, char *path);
+extern void ResetUnloggedUndoLogs(void);
 
 /* Interface use by tablespace.c. */
 extern bool DropUndoLogsInTablespace(Oid tablespace);

@@ -157,10 +157,9 @@ UndoPageInsertHeader(Page page, int page_offset, int header_offset,
  * returned given the same arguments, but without writing anything.
  */
 int
-UndoPageSkipHeader(Page page, int page_offset, int header_offset,
+UndoPageSkipHeader(int page_offset, int header_offset,
 				   size_t type_header_size)
 {
-	UndoPageHeader uph = (UndoPageHeader) page;
 	size_t		all_header_size = SizeOfUndoRecordSetChunkHeader + type_header_size;
 	int			bytes_skipped;
 
@@ -172,13 +171,6 @@ UndoPageSkipHeader(Page page, int page_offset, int header_offset,
 
 	bytes_skipped = Min(BLCKSZ - page_offset,
 						all_header_size - header_offset);
-
-	/*
-	 * Keep track of the insertion point even if not actually inserting:
-	 * UndoReplay() needs to return the record position even if skipping the
-	 * part of the undo log.
-	 */
-	uph->ud_insertion_point += bytes_skipped;
 
 	return bytes_skipped;
 }
@@ -263,10 +255,8 @@ UndoPageInsertRecord(Page page, int page_offset, int data_offset,
  * returned given the same arguments, but without writing anything.
  */
 int
-UndoPageSkipRecord(Page page, int page_offset, int data_offset,
-				   size_t data_size)
+UndoPageSkipRecord(int page_offset, int data_offset, size_t data_size)
 {
-	UndoPageHeader uph = (UndoPageHeader) page;
 	int			bytes_skipped;
 
 	/* Must not overwrite the page header. */
@@ -276,13 +266,6 @@ UndoPageSkipRecord(Page page, int page_offset, int data_offset,
 	Assert(page_offset < BLCKSZ);
 
 	bytes_skipped = Min(BLCKSZ - page_offset, data_size - data_offset);
-
-	/*
-	 * Keep track of the insertion point even if not actually inserting:
-	 * UndoReplay() needs to return the record position even if skipping the
-	 * part of the undo log.
-	 */
-	uph->ud_insertion_point += bytes_skipped;
 
 	return bytes_skipped;
 }

@@ -87,6 +87,7 @@
 typedef struct UndoRecordSetChunk
 {
 	UndoLogSlot *slot;
+	UndoLogTemp *log_temp;
 	bool		chunk_header_written;
 	/* The offset of the chunk header. */
 	UndoLogOffset chunk_header_offset;
@@ -106,7 +107,6 @@ typedef struct UndoBuffer
 	Buffer		buffer;
 	bool		is_new;
 	bool		needs_init;
-	uint16		init_page_offset;
 	UndoRecordSetXLogBufData bufdata;
 } UndoBuffer;
 
@@ -142,6 +142,8 @@ struct UndoRecordSet
 
 	/* Currently active slot for insertion. */
 	UndoLogSlot *slot;
+	/* backend-local state for temporary undo. */
+	UndoLogTemp *log_temp;
 	UndoRecPtr	chunk_start;	/* where the chunk started */
 
 	/* Resource management. */
@@ -178,11 +180,6 @@ UndoCreate(UndoRecordSetType type, char persistence, int nestingLevel,
 	UndoRecordSet *urs;
 	MemoryContext oldcontext;
 
-	if (IsInParallelMode())
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-				 errmsg("cannot write undo during a parallel operation")));
-
 	Assert(UndoContext != NULL);
 
 	oldcontext = MemoryContextSwitchTo(UndoContext);
@@ -205,6 +202,18 @@ UndoCreate(UndoRecordSetType type, char persistence, int nestingLevel,
 	MemoryContextSwitchTo(oldcontext);
 
 	return urs;
+}
+
+/* Return pointer to the first chunk. */
+UndoRecPtr
+UndoGetFirstChunkPtr(UndoRecordSet *urs)
+{
+	UndoRecordSetChunk *chunk;
+
+	Assert(urs->nchunks > 0);
+	chunk = &urs->chunks[0];
+
+	return MakeUndoRecPtr(chunk->slot->logno, chunk->chunk_header_offset);
 }
 
 /*
@@ -334,7 +343,10 @@ UndoMarkChunkClosed(UndoRecordSet *urs, UndoRecordSetChunk *chunk,
 	Assert(chunk->chunk_header_buffer_index[0] != -1);
 
 	header = chunk->chunk_header_offset;
-	insert = chunk->slot->meta.insert;
+	if (urs->persistence != RELPERSISTENCE_TEMP)
+		insert = chunk->slot->meta.insert;
+	else
+		insert = chunk->log_temp->insert;
 	size = insert - header;
 	page_offset = header % BLCKSZ;
 	data_offset = 0;
@@ -450,6 +462,8 @@ reserve_buffer_array(UndoRecordSet *urs, size_t capacity)
 static void
 create_new_chunk(UndoRecordSet *urs, UndoLogNumber min_logno)
 {
+	UndoLogOffset insert;
+
 	/* Make sure there is book-keeping space for one more chunk. */
 	if (urs->nchunks == urs->max_chunks)
 	{
@@ -461,12 +475,37 @@ create_new_chunk(UndoRecordSet *urs, UndoLogNumber min_logno)
 	/* Get our hands on a new undo log. */
 	urs->need_chunk_header = true;
 	urs->slot = UndoLogAcquire(urs->persistence, min_logno);
+	if (urs->persistence != RELPERSISTENCE_TEMP)
+	{
+		insert = urs->slot->meta.insert;
+		urs->log_temp = NULL;
+	}
+	else
+	{
+		ListCell   *lc;
+		UndoLogTemp *log_temp = NULL;
+
+		/*
+		 * For temporary undo, the insert position is maintained by the
+		 * backend, so find the metadata in temp_undo_logs. UndoLogAcquire()
+		 * should have ensured that the log we need is already in the list.
+		 */
+		foreach(lc, temp_undo_logs)
+		{
+			log_temp = (UndoLogTemp *) lfirst(lc);
+			if (log_temp->file.logno == urs->slot->logno)
+				break;
+		}
+		insert = log_temp->insert;
+		urs->log_temp = log_temp;
+	}
 	urs->chunks[urs->nchunks].slot = urs->slot;
+	urs->chunks[urs->nchunks].log_temp = urs->log_temp;
 	urs->chunks[urs->nchunks].chunk_header_written = false;
-	urs->chunks[urs->nchunks].chunk_header_offset = urs->slot->meta.insert;
+	urs->chunks[urs->nchunks].chunk_header_offset = insert;
 	urs->chunks[urs->nchunks].chunk_header_buffer_index[0] = -1;
 	urs->chunks[urs->nchunks].chunk_header_buffer_index[1] = -1;
-	urs->chunk_start = MakeUndoRecPtr(urs->slot->logno, urs->slot->meta.insert);
+	urs->chunk_start = MakeUndoRecPtr(urs->slot->logno, insert);
 	urs->nchunks++;
 }
 
@@ -506,6 +545,7 @@ reserve_physical_undo(UndoRecordSet *urs, size_t total_size)
 		urs->slot->meta.size = urs->slot->meta.insert;
 		urs->slot->force_truncate = false;
 		urs->slot = NULL;
+		urs->log_temp = NULL;
 		return InvalidUndoRecPtr;
 	}
 
@@ -520,6 +560,7 @@ reserve_physical_undo(UndoRecordSet *urs, size_t total_size)
 	{
 		Assert(insert == size);
 		urs->slot = NULL;
+		urs->log_temp = NULL;
 		return InvalidUndoRecPtr;
 	}
 
@@ -548,6 +589,62 @@ reserve_physical_undo(UndoRecordSet *urs, size_t total_size)
 	urs->slot->meta.size = insert;
 	LWLockRelease(&urs->slot->meta_lock);
 	urs->slot = NULL;
+	urs->log_temp = NULL;
+	return InvalidUndoRecPtr;
+}
+
+/*
+ * Like reserve_physical_undo(), but for temporary undo.
+ */
+static UndoRecPtr
+reserve_physical_undo_temp(UndoRecordSet *urs, size_t total_size)
+{
+	UndoLogOffset new_insert;
+	UndoLogOffset size,
+				insert,
+				end;
+	UndoLogTemp *log_temp;
+
+	Assert(urs->persistence == RELPERSISTENCE_TEMP);
+	Assert(urs->nchunks >= 1);
+	Assert(urs->chunks);
+
+	log_temp = urs->log_temp;
+	insert = log_temp->insert;
+	size = log_temp->file.size;
+	end = log_temp->file.end;
+
+	/* The log is full, possibly due to recent truncation. */
+	if (insert >= size)
+	{
+		Assert(insert == size);
+		urs->log_temp = NULL;
+		urs->slot = NULL;
+		return InvalidUndoRecPtr;
+	}
+
+	new_insert = UndoLogOffsetPlusUsableBytes(insert, total_size);
+	if (new_insert <= end)
+		return MakeUndoRecPtr(urs->slot->logno, insert);
+
+	/*
+	 * Can we extend this undo log to make space?  Again, it's possible for
+	 * end to advance concurrently, but UndoLogAdjustPhysicalRange() can deal
+	 * with that.
+	 */
+	if (new_insert <= size)
+	{
+		UndoLogAdjustPhysicalRangeTemp(urs->log_temp, 0, new_insert);
+		return MakeUndoRecPtr(urs->slot->logno, insert);
+	}
+
+	/*
+	 * There is not enough space left for this record.  Truncate any remaining
+	 * space, so that we stop trying to reuse this undo log.
+	 */
+	urs->log_temp->file.size = insert;
+	urs->log_temp = NULL;
+	urs->slot = NULL;
 	return InvalidUndoRecPtr;
 }
 
@@ -571,11 +668,6 @@ UndoPrepareToInsert(UndoRecordSet *urs, size_t record_size)
 	int			chunk_number_to_close = -1;
 	UndoLogNumber min_logno = InvalidUndoLogNumber;
 
-	if (IsInParallelMode())
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-				 errmsg("cannot write undo during a parallel operation")));
-
 	for (;;)
 	{
 		/* Figure out the total range we need to pin. */
@@ -598,7 +690,10 @@ UndoPrepareToInsert(UndoRecordSet *urs, size_t record_size)
 			 */
 			min_logno = urs->slot->logno + 1;
 
-			begin = reserve_physical_undo(urs, total_size);
+			if (urs->persistence != RELPERSISTENCE_TEMP)
+				begin = reserve_physical_undo(urs, total_size);
+			else
+				begin = reserve_physical_undo_temp(urs, total_size);
 			if (begin != InvalidUndoRecPtr)
 				break;
 
@@ -613,6 +708,10 @@ UndoPrepareToInsert(UndoRecordSet *urs, size_t record_size)
 				chunk_number_to_close = urs->nchunks - 1;
 			else
 			{
+				/*
+				 * TODO Add a bool argument that avoids adding the full log to
+				 * the session's private free list.
+				 */
 				UndoLogRelease(urs->chunks[urs->nchunks - 1].slot);
 				urs->nchunks--;
 			}
@@ -651,7 +750,6 @@ UndoPrepareToInsert(UndoRecordSet *urs, size_t record_size)
 			rbm = RBM_ZERO;
 			urs->buffers[urs->nbuffers].is_new = true;
 			urs->buffers[urs->nbuffers].needs_init = true;
-			urs->buffers[urs->nbuffers].init_page_offset = 0;
 		}
 		else
 			rbm = RBM_NORMAL;
@@ -725,13 +823,6 @@ init_if_needed(UndoBuffer *ubuf)
 	{
 		UndoPageInit(BufferGetPage(ubuf->buffer));
 
-		if (ubuf->init_page_offset)
-		{
-			UndoPageHeader uph = (UndoPageHeader) BufferGetPage(ubuf->buffer);
-
-			uph->ud_insertion_point = ubuf->init_page_offset;
-		}
-
 		ubuf->needs_init = false;
 	}
 }
@@ -779,12 +870,6 @@ UndoInsert(UndoRecordSet *urs,
 	int			all_header_size = type_header_size + chunk_header_size;
 	UndoRecordSetChunk *first_chunk;
 	bool		first_insert;
-	uint16		init_page_offset = 0;
-
-	if (IsInParallelMode())
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-				 errmsg("cannot write undo during a parallel operation")));
 
 	Assert(!InRecovery);
 	Assert(CritSectionCount > 0);
@@ -807,20 +892,6 @@ UndoInsert(UndoRecordSet *urs,
 	first_chunk = &urs->chunks[0];
 	first_insert = urs->begin == MakeUndoRecPtr(first_chunk->slot->logno,
 												first_chunk->chunk_header_offset);
-
-	/*
-	 * The first buffer of the temporary set needs to be initialized because
-	 * the previous owner (backend) of the underlying log might have dropped
-	 * the corresponding local buffer w/o writing it initialized to disk. The
-	 * initialization should not make any harm to that previous owner because
-	 * its transaction should either have been rolled back or committed. Even
-	 * if it was committed, the undo log should not be needed for visibility
-	 * purposes because other transactions do not see the temporary relations
-	 * anyway.
-	 */
-	if (urs->persistence == RELPERSISTENCE_TEMP &&
-		buffer_index == 0 && first_insert)
-		init_page_offset = page_offset;
 
 	/* Write out the header(s), if necessary. */
 	if (urs->need_chunk_header)
@@ -850,13 +921,6 @@ UndoInsert(UndoRecordSet *urs,
 
 			if (buffer_index >= urs->nbuffers)
 				elog(ERROR, "ran out of buffers while inserting undo record headers");
-			if (init_page_offset > 0)
-			{
-				ubuf->needs_init = true;
-				ubuf->init_page_offset = init_page_offset;
-				/* Do not force initialization of the following pages. */
-				init_page_offset = 0;
-			}
 			init_if_needed(ubuf);
 			if (URSNeedsWAL(urs))
 			{
@@ -945,12 +1009,22 @@ UndoInsert(UndoRecordSet *urs,
 
 	urs->state = URS_STATE_DIRTY;
 
-	/* Advance the insert pointer in shared memory. */
-	LWLockAcquire(&urs->slot->meta_lock, LW_EXCLUSIVE);
-	urs->slot->meta.insert =
-		UndoLogOffsetPlusUsableBytes(urs->slot->meta.insert,
-									 all_header_size + record_size);
-	LWLockRelease(&urs->slot->meta_lock);
+	if (urs->persistence != RELPERSISTENCE_TEMP)
+	{
+		/* Advance the insert pointer in shared memory. */
+		LWLockAcquire(&urs->slot->meta_lock, LW_EXCLUSIVE);
+		urs->slot->meta.insert =
+			UndoLogOffsetPlusUsableBytes(urs->slot->meta.insert,
+										 all_header_size + record_size);
+		LWLockRelease(&urs->slot->meta_lock);
+	}
+	else
+	{
+		/* Advance the insert pointer locally. */
+		urs->log_temp->insert =
+			UndoLogOffsetPlusUsableBytes(urs->log_temp->insert,
+										 all_header_size + record_size);
+	}
 
 	/*
 	 * If we created a new chunk, we may also need to mark the previous chunk
@@ -977,7 +1051,7 @@ UndoInsert(UndoRecordSet *urs,
  */
 void
 UndoSetChunkHeaderFlag(UndoRecPtr chunk_hdr, uint16 off, Buffer buf,
-					   uint8 first_block_id)
+					   uint8 first_block_id, bool need_wal)
 {
 	UndoLogOffset chunk_hdr_off = UndoRecPtrGetOffset(chunk_hdr);
 	UndoRecordSetXLogBufData bufdata;
@@ -998,6 +1072,10 @@ UndoSetChunkHeaderFlag(UndoRecPtr chunk_hdr, uint16 off, Buffer buf,
 					  sizeof(bool),
 					  (char *) &new_value);
 	MarkBufferDirty(buf);
+
+	if (!need_wal)
+		return;
+
 	XLogRegisterBuffer(first_block_id, buf, REGBUF_KEEP_DATA);
 	EncodeUndoRecordSetXLogBufData(&bufdata, first_block_id);
 
@@ -1058,9 +1136,10 @@ UndoReplay(XLogReaderState *xlog_record, void *record_data, size_t record_size)
 			UndoLogOffset past_this_block;
 			bool		skip = false;
 			UndoRecordSetXLogBufData *bufdata = &buffers[nbuffers].bufdata;
-			Page		page;
-			UndoPageHeader uph;
+			Page		page = NULL;
+			UndoPageHeader uph = NULL;
 			UndoRecPtr	chunk_start = InvalidUndoRecPtr;
+			uint16		insert_page_offset = 0;
 
 			/* Figure out which undo log is referenced. */
 			slot = UndoLogGetSlot(block->rnode.relNode, false);
@@ -1084,7 +1163,6 @@ UndoReplay(XLogReaderState *xlog_record, void *record_data, size_t record_size)
 				rbm = RBM_ZERO_AND_LOCK;
 				buffers[nbuffers].is_new = true;
 				buffers[nbuffers].needs_init = true;
-				buffers[nbuffers].init_page_offset = 0;
 			}
 			else
 				rbm = RBM_NORMAL;
@@ -1103,7 +1181,9 @@ UndoReplay(XLogReaderState *xlog_record, void *record_data, size_t record_size)
 			 * the next page.
 			 *
 			 * If the block was not found, then it must be discarded later in
-			 * the WAL.
+			 * the WAL. (This should only happen if full_page_writes is
+			 * disabled, otherwise the page is initialized from the record's
+			 * full page image.)
 			 *
 			 * In both of these cases, we'll just remember to skip modifying
 			 * the page.
@@ -1113,8 +1193,12 @@ UndoReplay(XLogReaderState *xlog_record, void *record_data, size_t record_size)
 
 			if (!DecodeUndoRecordSetXLogBufData(bufdata, xlog_record, block_id))
 				elog(ERROR, "failed to decode undo xlog buffer data");
-			page = BufferGetPage(buffers[nbuffers].buffer);
-			uph = (UndoPageHeader) page;
+
+			if (action != BLK_NOTFOUND)
+			{
+				page = BufferGetPage(buffers[nbuffers].buffer);
+				uph = (UndoPageHeader) page;
+			}
 
 			/*
 			 * The UndoPageXXX function need the chunk start location, if they
@@ -1131,8 +1215,20 @@ UndoReplay(XLogReaderState *xlog_record, void *record_data, size_t record_size)
 			{
 				if (!record_data)
 					elog(ERROR, "undo buf data contained an insert page offset, but no record was passed to UndoReplay()");
+
+				/*
+				 * In the action==BLK_NOTFOUND case we cannot use
+				 * ud_insertion_point to keep track of the insert position, so
+				 * use this variable.
+				 */
+				insert_page_offset = bufdata->insert_page_offset;
+
 				/* Update the insertion point on the page. */
-				uph->ud_insertion_point = bufdata->insert_page_offset;
+				if (uph)
+				{
+					uph->ud_insertion_point = insert_page_offset;
+					MarkBufferDirty(buffers[nbuffers].buffer);
+				}
 
 				/*
 				 * Also update it in shared memory, though this isn't really
@@ -1140,7 +1236,7 @@ UndoReplay(XLogReaderState *xlog_record, void *record_data, size_t record_size)
 				 * the page.
 				 */
 				slot->meta.insert =
-					BLCKSZ * block->blkno + bufdata->insert_page_offset;
+					BLCKSZ * block->blkno + insert_page_offset;
 			}
 
 			/*
@@ -1171,22 +1267,31 @@ UndoReplay(XLogReaderState *xlog_record, void *record_data, size_t record_size)
 			/* Are we still writing a header that spilled into the next page? */
 			else if (header_more)
 			{
-				if (skip)
-					header_offset += UndoPageSkipHeader(page,
-														SizeOfUndoPageHeaderData,
-														header_offset,
-														type_header_size);
+				int			header_off_incr;
+
+				Assert(insert_page_offset == SizeOfUndoPageHeaderData);
+
+				/*
+				 * If the previous 'action' was BLK_NOTFOUND, it's possible
+				 * that we don't have valid type_header.
+				 */
+				if (skip || (type_header_size > 0 && type_header == NULL))
+					header_off_incr = UndoPageSkipHeader(SizeOfUndoPageHeaderData,
+														 header_offset,
+														 type_header_size);
 				else
 				{
-					header_offset += UndoPageInsertHeader(page,
-														  SizeOfUndoPageHeaderData,
-														  header_offset,
-														  &chunk_header,
-														  type_header_size,
-														  type_header,
-														  bufdata->chunk_header_location);
+					header_off_incr = UndoPageInsertHeader(page,
+														   SizeOfUndoPageHeaderData,
+														   header_offset,
+														   &chunk_header,
+														   type_header_size,
+														   type_header,
+														   bufdata->chunk_header_location);
 					MarkBufferDirty(buffers[nbuffers].buffer);
 				}
+				header_offset += header_off_incr;
+				insert_page_offset += header_off_incr;
 
 				/*
 				 * The shared memory insertion point must be after this
@@ -1199,7 +1304,16 @@ UndoReplay(XLogReaderState *xlog_record, void *record_data, size_t record_size)
 				 * record
 				 */
 				if (bufdata->flags & URS_XLOG_INSERT)
-					slot->meta.insert = BLCKSZ * block->blkno + uph->ud_insertion_point;
+				{
+					slot->meta.insert = BLCKSZ * block->blkno + insert_page_offset;
+
+					if (uph)
+					{
+						uph->ud_insertion_point = insert_page_offset;
+						MarkBufferDirty(buffers[nbuffers].buffer);
+					}
+				}
+
 				/* Do we need to go around again, on the next page? */
 				if (header_offset < SizeOfUndoRecordSetChunkHeader + type_header_size)
 				{
@@ -1215,29 +1329,42 @@ UndoReplay(XLogReaderState *xlog_record, void *record_data, size_t record_size)
 			/* Are we still writing a record that spilled into the next page? */
 			else if (record_more)
 			{
+				int			rec_off_incr;
+
+				Assert(insert_page_offset == SizeOfUndoPageHeaderData);
+
 				if (skip)
-					record_offset += UndoPageSkipRecord(page,
-														SizeOfUndoPageHeaderData,
-														record_offset,
-														record_size);
+					rec_off_incr = UndoPageSkipRecord(SizeOfUndoPageHeaderData,
+													  record_offset,
+													  record_size);
 				else
 				{
-					record_offset += UndoPageInsertRecord(page,
-														  SizeOfUndoPageHeaderData,
-														  record_offset,
-														  record_size,
-														  record_data,
-														  bufdata->chunk_header_location,
-														  bufdata->urs_type);
+					rec_off_incr = UndoPageInsertRecord(page,
+														SizeOfUndoPageHeaderData,
+														record_offset,
+														record_size,
+														record_data,
+														bufdata->chunk_header_location,
+														bufdata->urs_type);
 					MarkBufferDirty(buffers[nbuffers].buffer);
 				}
+				record_offset += rec_off_incr;
+				insert_page_offset += rec_off_incr;
 
 				/*
 				 * The shared memory insertion point must be after this
 				 * fragment.
 				 */
 				if (bufdata->flags & URS_XLOG_INSERT)
-					slot->meta.insert = BLCKSZ * block->blkno + uph->ud_insertion_point;
+				{
+					slot->meta.insert = BLCKSZ * block->blkno + insert_page_offset;
+
+					if (uph)
+					{
+						uph->ud_insertion_point = insert_page_offset;
+						MarkBufferDirty(buffers[nbuffers].buffer);
+					}
+				}
 
 				/* Do we need to go around again, on the next page? */
 				if (record_offset < record_size)
@@ -1258,8 +1385,10 @@ UndoReplay(XLogReaderState *xlog_record, void *record_data, size_t record_size)
 
 				if (skip)
 				{
-					header_offset = UndoPageSkipHeader(page,
-													   uph->ud_insertion_point,
+					/* insert_page_offset should have been initialized */
+					Assert(bufdata->flags & URS_XLOG_INSERT);
+
+					header_offset = UndoPageSkipHeader(insert_page_offset,
 													   header_offset,
 													   type_header_size);
 				}
@@ -1281,6 +1410,12 @@ UndoReplay(XLogReaderState *xlog_record, void *record_data, size_t record_size)
 					MarkBufferDirty(buffers[nbuffers].buffer);
 				}
 
+				/*
+				 * If the undo record follows, make sure it's written at the
+				 * correct position.
+				 */
+				insert_page_offset += header_offset;
+
 				/* Do we need to go around again, on the next page? */
 				if (header_offset < SizeOfUndoRecordSetChunkHeader + type_header_size)
 				{
@@ -1298,10 +1433,12 @@ UndoReplay(XLogReaderState *xlog_record, void *record_data, size_t record_size)
 
 				if (skip)
 				{
-					header_offset += UndoPageSkipHeader(page,
-														uph->ud_insertion_point,
-														header_offset,
-														type_header_size);
+					/* insert_page_offset should have been initialized */
+					Assert(bufdata->flags & URS_XLOG_INSERT);
+
+					header_offset = UndoPageSkipHeader(insert_page_offset,
+													   header_offset,
+													   type_header_size);
 				}
 				else
 				{
@@ -1321,6 +1458,12 @@ UndoReplay(XLogReaderState *xlog_record, void *record_data, size_t record_size)
 					MarkBufferDirty(buffers[nbuffers].buffer);
 				}
 
+				/*
+				 * If the undo record follows, make sure it's written at the
+				 * correct position.
+				 */
+				insert_page_offset += header_offset;
+
 				if (header_offset < SizeOfUndoRecordSetChunkHeader)
 				{
 					header_more = true;
@@ -1332,24 +1475,26 @@ UndoReplay(XLogReaderState *xlog_record, void *record_data, size_t record_size)
 			/* Check if we need to insert the caller's record data. */
 			if (record_data)
 			{
+				/* insert_page_offset should have been initialized. */
+				Assert(bufdata->flags & URS_XLOG_INSERT);
+
 				/*
 				 * Remember the insert pointer, to be returned to the caller.
 				 */
 				Assert(result == InvalidUndoRecPtr);
 				result = MakeUndoRecPtr(slot->logno,
-										BLCKSZ * block->blkno + uph->ud_insertion_point);
+										BLCKSZ * block->blkno + insert_page_offset);
 
 				if (skip)
 				{
-					record_offset += UndoPageSkipRecord(page,
-														uph->ud_insertion_point,
+					record_offset += UndoPageSkipRecord(insert_page_offset,
 														record_offset,
 														record_size);
 				}
 				else
 				{
 					record_offset = UndoPageInsertRecord(page,
-														 uph->ud_insertion_point,
+														 insert_page_offset,
 														 0,
 														 record_size,
 														 record_data,
@@ -1359,11 +1504,25 @@ UndoReplay(XLogReaderState *xlog_record, void *record_data, size_t record_size)
 				}
 
 				/*
+				 * If the undo record follows, make sure it's written at the
+				 * correct position.
+				 */
+				insert_page_offset += record_offset;
+
+				/*
 				 * The shared memory insertion point must be after this
 				 * fragment.
 				 */
 				if (bufdata->flags & URS_XLOG_INSERT)
-					slot->meta.insert = BLCKSZ * block->blkno + uph->ud_insertion_point;
+				{
+					slot->meta.insert = BLCKSZ * block->blkno + insert_page_offset;
+
+					if (uph)
+					{
+						uph->ud_insertion_point = insert_page_offset;
+						MarkBufferDirty(buffers[nbuffers].buffer);
+					}
+				}
 
 				/* Do we need to go around again, on the next page? */
 				if (record_offset < record_size)
@@ -1381,11 +1540,9 @@ UndoReplay(XLogReaderState *xlog_record, void *record_data, size_t record_size)
 				chunk_size = bufdata->chunk_size;
 
 				if (skip)
-				{
 					chunk_size_offset = UndoPageSkipOverwrite(bufdata->chunk_size_page_offset,
 															  chunk_size_offset,
 															  sizeof(chunk_size));
-				}
 				else
 				{
 					chunk_size_offset =
@@ -1394,21 +1551,14 @@ UndoReplay(XLogReaderState *xlog_record, void *record_data, size_t record_size)
 										  0,
 										  sizeof(bufdata->chunk_size),
 										  (char *) &chunk_size);
+					MarkBufferDirty(buffers[nbuffers].buffer);
 				}
 
 				/*
 				 * The shared memory insertion point must be after this
 				 * fragment.
 				 */
-				if (bufdata->flags & URS_XLOG_INSERT)
-					slot->meta.insert = BLCKSZ * block->blkno + uph->ud_insertion_point;
-
-				/*
-				 * Note on undo execution : If we closed an UndoRecordSet of
-				 * type URST_TRANSACTION, the undo records will be applied
-				 * according to the transaction status at the end of crash
-				 * recovery.
-				 */
+				Assert((bufdata->flags & URS_XLOG_INSERT) == 0);
 
 				/*
 				 * XXX IS it OK that we delivered the callback before writing
@@ -1748,6 +1898,7 @@ UndoCloseAndDestroyForXactLevel(int nestingLevel)
 		UndoMarkClosedForXactLevel(nestingLevel);
 		UndoXLogRegisterBuffersForXactLevel(nestingLevel, 0);
 		XLogRegisterData((char *) &xlrec, sizeof(xlrec));
+		/* XXX Skip the insertion if all the URSs are non-permanent? */
 		lsn = XLogInsert(RM_UNDOLOG_ID, XLOG_UNDOLOG_CLOSE_URS);
 		UndoPageSetLSNForXactLevel(nestingLevel, lsn);
 		END_CRIT_SECTION();
@@ -1890,7 +2041,8 @@ find_start_of_final_chunk_in_undo_log(UndoLogNumber logno, UndoLogOffset insert)
  */
 static void
 read_undo_header(char *out, size_t size, UndoRecPtr urp,
-				 Buffer *buffers, int nbuffers)
+				 Buffer *buffers, int nbuffers, bool lock_excl,
+				 char relpersistence)
 {
 	Buffer		buffer;
 	RelFileNode rnode;
@@ -1915,8 +2067,8 @@ read_undo_header(char *out, size_t size, UndoRecPtr urp,
 										   blockno,
 										   RBM_NORMAL,
 										   NULL,
-										   RELPERSISTENCE_PERMANENT);
-		LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
+										   relpersistence);
+		LockBuffer(buffer, lock_excl ? BUFFER_LOCK_EXCLUSIVE : BUFFER_LOCK_SHARE);
 		buffers[buffer_index] = buffer;
 		bytes_on_this_page = Min(size - bytes_copied, BLCKSZ - page_offset);
 		memcpy((char *) out + bytes_copied,
@@ -1961,6 +2113,7 @@ CloseDanglingUndoRecordSets(void)
 		UndoLogNumber logno = slot->logno;
 		UndoLogOffset discard = slot->meta.discard;
 		UndoLogOffset insert = slot->meta.insert;
+		char		persistence = slot->meta.persistence;
 		UndoRecPtr	chunk_header_location;
 		UndoRecPtr	begin;
 		UndoRecordSetChunkHeader chunk_header;
@@ -1990,7 +2143,7 @@ CloseDanglingUndoRecordSets(void)
 		/* Read the chunk header. */
 		read_undo_header((void *) &chunk_header, SizeOfUndoRecordSetChunkHeader,
 						 chunk_header_location,
-						 buffers, lengthof(buffers));
+						 buffers, lengthof(buffers), false, persistence);
 		release_buffers(buffers, lengthof(buffers));
 
 		/*
@@ -2024,7 +2177,7 @@ CloseDanglingUndoRecordSets(void)
 				elog(PANIC, "found partially discarded unclosed undo record set");
 			read_undo_header((void *) &chunk_header, SizeOfUndoRecordSetChunkHeader,
 							 begin,
-							 buffers, lengthof(buffers));
+							 buffers, lengthof(buffers), false, persistence);
 			release_buffers(buffers, lengthof(buffers));
 		}
 		type = chunk_header.type;
@@ -2032,13 +2185,13 @@ CloseDanglingUndoRecordSets(void)
 		type_header = palloc(type_header_size);
 		read_undo_header(type_header, type_header_size,
 						 UndoRecPtrPlusUsableBytes(begin, SizeOfUndoRecordSetChunkHeader),
-						 buffers, lengthof(buffers));
+						 buffers, lengthof(buffers), false, persistence);
 		release_buffers(buffers, lengthof(buffers));
 
 		/* Prepare to write the final chunk's missing size. */
 		read_undo_header((void *) &chunk_header, SizeOfUndoRecordSetChunkHeader,
 						 chunk_header_location,
-						 buffers, lengthof(buffers));
+						 buffers, lengthof(buffers), true, persistence);
 		page_offset = chunk_header_location % BLCKSZ;
 		bytes_on_first_page = Min(BLCKSZ - page_offset, sizeof(chunk_size));
 
@@ -2071,13 +2224,18 @@ CloseDanglingUndoRecordSets(void)
 			UndoPageOverwrite(BufferGetPage(buffers[1]),
 							  SizeOfUndoPageHeaderData,
 							  bytes_on_first_page,
-							  sizeof(chunk_size),
+							  sizeof(chunk_size) - bytes_on_first_page,
 							  (char *) &chunk_size);
 			MarkBufferDirty(buffers[1]);
 			XLogRegisterBuffer(1, buffers[1], REGBUF_UNDO);
 		}
 
 		XLogRegisterData((char *) &xlrec, sizeof(xlrec));
+
+		/*
+		 * There should be no unlogged/temporary undo segments in the system
+		 * at the moment, so we insert the WAL record unconditionally.
+		 */
 		lsn = XLogInsert(RM_UNDOLOG_ID, XLOG_UNDOLOG_CLOSE_URS);
 		PageSetLSN(BufferGetPage(buffers[0]), lsn);
 		if (buffers[1] != InvalidBuffer)
@@ -2135,8 +2293,8 @@ typedef struct URSEntry
 #include "lib/simplehash.h"
 
 /*
- * Gather information on existing undo record sets, which might be split into
- * chunks.
+ * Gather information on existing non-temporary undo record sets, which might
+ * be split into chunks.
  *
  * The problem is that only the first chunk of an undo record set contains XID
  * (which is needed to decide whether the set should be applied or discarded),
@@ -2146,6 +2304,9 @@ typedef struct URSEntry
  * discarded.
  *
  * Hash table that we use to collect the information is returned.
+ *
+ * Caller should ensure that no discarding takes place while this function is
+ * executing.
  *
  * TODO Implement this in a way that allows the chunk information to be
  * spilled to disk. Otherwise insufficient memory will break discarding
@@ -2164,18 +2325,36 @@ GetAllUndoRecordSets(void)
 	chunktable_hash *chunks;
 	URSEntry   *entry;
 
+	/* Prevent logno from being changed. */
+	LWLockAcquire(UndoLogLock, LW_EXCLUSIVE);
+
 	/*
 	 * When merging the chunks into sets, we assume that the chunks at lower
 	 * addresses are followed by those at higher addresses. Therefore we need
 	 * to scan the slots in the log number order.
 	 */
 	while ((slot = UndoLogGetNextSlot(slot)))
-		lognos_list = lappend_int(lognos_list, slot->logno);
+	{
+		LWLockAcquire(&slot->meta_lock, LW_EXCLUSIVE);
+
+		/*
+		 * Only consider logs that contain some useful data - these should not
+		 * disappear even if we release UndoLogLock because this function is
+		 * not supposed to run concurrently with discarding.
+		 */
+		if (slot->meta.persistence != RELPERSISTENCE_TEMP &&
+			slot->meta.discard < slot->meta.insert)
+			lognos_list = lappend_int(lognos_list, slot->logno);
+		LWLockRelease(&slot->meta_lock);
+	}
+	LWLockRelease(UndoLogLock);
+
 	nlogs = list_length(lognos_list);
 	lognos = (int *) palloc(nlogs * sizeof(int));
 	i = 0;
 	foreach(lc, lognos_list)
 		lognos[i++] = lfirst_int(lc);
+	list_free(lognos_list);
 	qsort(lognos, nlogs, sizeof(int), logno_comparator);
 
 	chunks = chunktable_create(CurrentMemoryContext, 8, NULL);
@@ -2206,10 +2385,8 @@ GetAllUndoRecordSets(void)
 		persistence = slot->meta.persistence;
 		LWLockRelease(&slot->meta_lock);
 
-		/* If the undo is empty, skip. */
-		if (insert == discard)
-			continue;
-		Assert(discard < insert);
+		/* See the initial scan of the slots at the top. */
+		Assert(insert > discard);
 
 		cur = discard;
 
@@ -2231,7 +2408,7 @@ GetAllUndoRecordSets(void)
 							 SizeOfUndoRecordSetChunkHeader,
 							 chunk_start,
 							 buffers,
-							 lengthof(buffers));
+							 lengthof(buffers), false, persistence);
 			release_buffers(buffers, lengthof(buffers));
 
 			cur += chunk_hdr.size;
@@ -2276,13 +2453,12 @@ GetAllUndoRecordSets(void)
 			if (chunk_hdr.type == URST_TRANSACTION &&
 				chunk_hdr.previous_chunk == InvalidUndoRecPtr)
 			{
-				/* TODO Shared lock on the buffers should be enough. */
 				read_undo_header((void *) &xact_hdr,
 								 SizeOfXactUndoRecordSetHeader,
 								 UndoRecPtrPlusUsableBytes(chunk_start,
 														   SizeOfUndoRecordSetChunkHeader),
 								 buffers,
-								 lengthof(buffers));
+								 lengthof(buffers), false, persistence);
 				release_buffers(buffers, lengthof(buffers));
 			}
 
@@ -2375,6 +2551,7 @@ UndoSetFlag(UndoRecPtr last_chunk, uint16 off, char persistence)
 		Buffer		buffer;
 		UndoRecordSetChunkHeader hdr;
 		UndoRecPtr	previous_chunk;
+		bool		need_wal = persistence == RELPERSISTENCE_PERMANENT;
 
 		/*
 		 * Read the chunk header in order to retrieve location of the previous
@@ -2385,7 +2562,7 @@ UndoSetFlag(UndoRecPtr last_chunk, uint16 off, char persistence)
 		read_undo_header((void *) &hdr,
 						 SizeOfUndoRecordSetChunkHeader,
 						 last_chunk,
-						 buffers, 2);
+						 buffers, 2, false, persistence);
 
 		/* Unlock the buffer(s) but keep pin. */
 		LockBuffer(buffers[0], BUFFER_LOCK_UNLOCK);
@@ -2400,14 +2577,15 @@ UndoSetFlag(UndoRecPtr last_chunk, uint16 off, char persistence)
 
 		START_CRIT_SECTION();
 
-		XLogBeginInsert();
+		if (need_wal)
+			XLogBeginInsert();
 
 		/*
 		 * Store the new value of the "discarded" field in the chunk header. A
 		 * separate buffer variable is used because we don't know which buffer
 		 * of 'buffers' we'll modify.
 		 */
-		UndoSetChunkHeaderFlag(last_chunk, off, buffer, 0);
+		UndoSetChunkHeaderFlag(last_chunk, off, buffer, 0, need_wal);
 
 		END_CRIT_SECTION();
 
@@ -2431,31 +2609,18 @@ UndoSetFlag(UndoRecPtr last_chunk, uint16 off, char persistence)
 void
 ApplyPendingUndo(void)
 {
-	ResourceOwner res_owner_tmp;
 	chunktable_hash *sets;
 	chunktable_iterator iterator;
 	URSEntry   *entry;
 
-	/*
-	 * At this point we do not need a regular transaction, but need to have
-	 * the CurrentResourceOwner set, in order to access the undo log in shared
-	 * buffers. (It few used a transaction here, we'd also have to copy the
-	 * result from that transaction's memory context.)
-	 */
-	Assert(CurrentResourceOwner == NULL);
-	CurrentResourceOwner = ResourceOwnerCreate(CurrentResourceOwner,
-											   "GetAllUndoRecordSets");
 	sets = GetAllUndoRecordSets();
-	res_owner_tmp = CurrentResourceOwner;
-	CurrentResourceOwner = NULL;
-	ResourceOwnerDelete(res_owner_tmp);
 
 	if (sets->members == 0)
 		return;
 
 	/*
 	 * Now that we have the whole record sets, check if their undo records
-	 * need to be executed, and execute them.
+	 * need to be executed.
 	 *
 	 * TODO If there can be multiple per-subtransaction URSs (i.e. they have
 	 * the same XID) make sure they are processed in the correct order.
@@ -2469,10 +2634,6 @@ ApplyPendingUndo(void)
 
 		/* The set can be discarded but the underlying log still there. */
 		if (entry->discarded)
-			continue;
-
-		/* We can only process undo of the database we are connected to. */
-		if (entry->xact_hdr.dboid != MyDatabaseId)
 			continue;
 
 		xid = XidFromFullTransactionId(entry->xact_hdr.fxid);
@@ -2497,7 +2658,15 @@ ApplyPendingUndo(void)
 		}
 		else if (TransactionIdIsPrepared(xid))
 		{
-			/* Prepared transactions may still need the undo log. */
+			/*
+			 * Prepared transactions may still need the undo log.
+			 *
+			 * Since no connection should exist at the moment, only prepared
+			 * transactions should be in the proc array now, so
+			 * TransactionIdIsInProgress() would normally reveal them. However
+			 * that function does not work in the startup worker, as it does
+			 * not have MyProc->pgxactoff set.
+			 */
 		}
 		else
 		{
@@ -2510,9 +2679,16 @@ ApplyPendingUndo(void)
 			 */
 			if (!entry->applied)
 			{
-				/* Do the actual work. */
-				PerformBackgroundUndo(entry->begin, entry->end,
-									  UndoPersistenceForRelPersistence(entry->persistence));
+				/*
+				 * As we're not in a failed transaction now, we might want to
+				 * create a dummy transaction state. So far let's assume that
+				 * the RMGR specific undo routines only deal with shared
+				 * buffers and WAL, e.g. they do not open relations. Thus we
+				 * should not need transaction state like we don't need it for
+				 * WAL replay.
+				 */
+				PerformUndoActionsRange(entry->begin, entry->end,
+										entry->persistence, 1);
 
 				/*
 				 * Mark the URS applied (only the first chunk can carry this
@@ -2525,20 +2701,18 @@ ApplyPendingUndo(void)
 					/* Compute the offset of the "applied" flag in the chunk. */
 					off = SizeOfUndoRecordSetChunkHeader +
 						offsetof(XactUndoRecordSetHeader, applied);
-
-					/*
-					 * Adjust the chunk(s). Transaction is not needed here,
-					 * but resource owner is.
-					 */
-					Assert(CurrentResourceOwner == NULL);
-					CurrentResourceOwner = ResourceOwnerCreate(CurrentResourceOwner,
-															   "UndoSetFlag");
 					UndoSetFlag(entry->begin, off, entry->persistence);
-					res_owner_tmp = CurrentResourceOwner;
-					CurrentResourceOwner = NULL;
-					ResourceOwnerDelete(res_owner_tmp);
 				}
 			}
+
+			/*
+			 * Now that the changes are undone, make sure the affected chunks
+			 * are discarded.
+			 */
+			if (!entry->discarded)
+				UndoSetFlag(entry->last_chunk,
+							offsetof(UndoRecordSetChunkHeader, discarded),
+							entry->persistence);
 		}
 	}
 
@@ -2571,7 +2745,9 @@ AtProcExit_UndoRecordSet(void)
 
 /*
  * Try to advance oldestFullXidHavingUndo and return the new value. While
- * doing so, discard the URS chunks that can be discarded.
+ * doing so, discard the URS chunks that can be discarded. Note that
+ * transactions that use only temporary relations do not affect this
+ * computation.
  */
 TransactionId
 AdvanceOldestXidHavingUndo(void)
@@ -2596,14 +2772,19 @@ AdvanceOldestXidHavingUndo(void)
 				(errmsg("cannot advance oldestXidHavingUndo during recovery")));
 
 	/*
-	 * Although VACUUM does not need the undo of other backends for visibility
-	 * checks (if it did, we'd have to track the "oldest XID having undo" in
-	 * the way we track "frozen XID" for tables and databases), it does
-	 * produce undo records (UNDO_ZHEAP_ITEMID_UNUSED). Therefore we must not
-	 * ignore lazy VACUUM processes when determining the XID limit for undo
-	 * removal.
+	 * We need to keep the undo log for transactions which - although possibly
+	 * committed - may still be considered by other transactions as running.
+	 * Therefore we can compute the initial value in the same way as if we
+	 * were preparing for VACUUM (i.e. tuples deleted by a transaction must
+	 * stay available to all transactions that consider the deleting
+	 * transaction as running). The running lazy VACUUM processes do not
+	 * affect this value (see procarray.c for explanation), which is ok for us
+	 * because VACUUM does not produce any undo. (Conversely, VACUUM itself
+	 * does not need undo log of other backends. If it did, we couldn't
+	 * determine the horizon here and the VACUUM processes would have to get
+	 * involved in the computation.)
 	 */
-	oldestXmin = GetOldestTransactionIdConsideredRunning();
+	oldestXmin = GetOldestNonRemovableTransactionId(NULL);
 
 	Assert(TransactionIdIsNormal(oldestXmin));
 
@@ -2621,6 +2802,23 @@ AdvanceOldestXidHavingUndo(void)
 	{
 		TransactionId xid;
 
+		/*
+		 * Temporary undo is handled by UndoDiscardTemp(), without checking
+		 * the chunk headers. Here we should not expected valid contents of
+		 * the temporary undo because a backend can exit w/o flushing its
+		 * local buffers to disk.
+		 *
+		 * Fortunately the temporary undo should not affect the computation of
+		 * oldestXidHavingUndo. One possible explanation is that
+		 * oldestXidHavingUndo is the means to ensure that transaction which
+		 * still has undo is not truncated from the CLOG. Thus the other
+		 * backends can examine status of the transaction when trying to apply
+		 * its undo (this happens with the zheap AM). However, temporary undo
+		 * (as well as the temporary relations) is not visible to other
+		 * backends, so they won't try to apply it anyway.
+		 */
+		Assert(entry->persistence != RELPERSISTENCE_TEMP);
+
 		Assert(entry->urs_type == URST_TRANSACTION);
 
 		xid = XidFromFullTransactionId(entry->xact_hdr.fxid);
@@ -2630,8 +2828,8 @@ AdvanceOldestXidHavingUndo(void)
 			continue;
 
 		/*
-		 * Skip transactions that might still be visible to other transactions
-		 * .
+		 * Skip transactions that might still be visible to other
+		 * transactions.
 		 */
 		if (!TransactionIdPrecedes(xid, oldestXmin))
 			continue;
@@ -2648,12 +2846,15 @@ AdvanceOldestXidHavingUndo(void)
 		else
 		{
 			/*
-			 * If the transaction aborted, we can only discard the chunk(s) if
-			 * the URS has already been applied. We must not try to apply the
-			 * undo ourselves because 1) the backend/worker that ran the
-			 * transaction might try to do itself and there's no easy way to
-			 * find out (and interlock), 2) the URS might belong to a prepared
-			 * transaction which can eventually commit.
+			 * If the transaction aborted (the current xid should not be
+			 * running because it precedes oldestXmin), we can only discard
+			 * the chunk(s) if the URS has already been applied. We should not
+			 * try to apply the undo ourselves because the backend/worker that
+			 * ran the transaction might try to do itself and there's no easy
+			 * way to find out (and interlock). Rather than execution of the
+			 * same undo record concurrently, the problem is that we might
+			 * discard a record that the owning backend/worker is just going
+			 * to read (and execute).
 			 */
 			if (entry->applied)
 				UndoSetFlag(entry->last_chunk,
@@ -2662,16 +2863,12 @@ AdvanceOldestXidHavingUndo(void)
 			else
 			{
 				/*
-				 * This URS must be preserved, so adjust the discarding
+				 * This URS needs to be preserved, so adjust the discarding
 				 * horizon if needed.
 				 *
-				 * Note that besides prepared transactions, we can see here an
-				 * URS of a transaction that could not complete due to server
-				 * crash. This is not too likely because the undo worker
-				 * should start processing such transactions immediately after
-				 * the completion of crash recovery. If we hit particular xid
-				 * before the undo worker did, the next run of this function
-				 * should find it as applied.
+				 * Note that here we should not see URS of a transaction that
+				 * could not complete due to server crash - those should have
+				 * been processed by now, see ApplyPendingUndo().
 				 */
 				if (TransactionIdPrecedes(xid, oldestXidHavingUndo))
 					oldestXidHavingUndo = xid;
@@ -2688,13 +2885,21 @@ AdvanceOldestXidHavingUndo(void)
 	xid_orig_epoch = EpochFromFullTransactionId(oldestFullXidHavingUndo);
 
 	/*
-	 * Adjust the epoch if the 32-bit value has overflown. Note that it cannot
-	 * happen twice between calls of this function, because at latest when
-	 * oldestXidHavingUndo lags by 2 billions XIDs behind the newest active
-	 * XID, it will block CLOG truncation and therefore GetNewTransactionId()
-	 * will stop generating new XIDs.
+	 * The value of oldestXidHavingUndo should not advance by more than 2
+	 * billions XIDs because the existing value is the limit for CLOG
+	 * truncation. Therefore XIDs being that far in the future shouldn't even
+	 * have been generated.
 	 */
 	Assert(TransactionIdIsNormal(oldestXidHavingUndo));
+	Assert(!TransactionIdIsNormal(xid_orig) ||
+		   TransactionIdPrecedesOrEquals(xid_orig, oldestXidHavingUndo));
+
+	/*
+	 * Adjust the epoch if the 32-bit value has overflown. Note that it cannot
+	 * happen twice between calls of this function, because - as explained
+	 * above - the existing value restricts CLOG truncation and thus
+	 * eventually the new XID allocation.
+	 */
 	if (oldestXidHavingUndo < xid_orig)
 		xid_orig_epoch++;
 
@@ -2713,6 +2918,8 @@ AdvanceOldestXidHavingUndo(void)
 /*
  * In each log, move the discard pointer behind the last discarded undo record
  * set chunk.
+ *
+ * No more than one backend/worker should run this function at a time.
  */
 void
 DiscardUndoRecordSetChunks(void)
@@ -2721,12 +2928,16 @@ DiscardUndoRecordSetChunks(void)
 	UndoRecordSetChunkHeader chunk_hdr;
 	Buffer		buffers[2];
 	int			i;
+	List	   *logs = NIL;
+	ListCell   *lc;
 
 	/*
 	 * Since AdvanceOldestXidHavingUndo() does nothing in the recovery mode,
-	 * we should not find much work to do in recovery as well.  Furthermore,
-	 * we don't want to perform discarding on standby cluster in other way
-	 * than by replaying WAL.
+	 * all we could process here is the chunks discarded by
+	 * ApplyPendingUndo(). Not sure it's worth the effort. Furthermore, the
+	 * discard worker is not expected to run during recovery. And finally, we
+	 * don't want to perform discarding on standby cluster in other way than
+	 * by replaying WAL.
 	 *
 	 * ERROR seems more suitable than returning because this function can be
 	 * called interactively from a backend.
@@ -2738,23 +2949,46 @@ DiscardUndoRecordSetChunks(void)
 	for (i = 0; i < lengthof(buffers); ++i)
 		buffers[i] = InvalidBuffer;
 
+	LWLockAcquire(UndoLogLock, LW_SHARED);
 	while ((slot = UndoLogGetNextSlot(slot)))
 	{
-		UndoLogNumber logno;
-		UndoLogOffset discard;
-		UndoLogOffset insert;
-		UndoLogOffset cur;
+		UndoLogMetaData *log;
 
 		LWLockAcquire(&slot->meta_lock, LW_SHARED);
-		logno = slot->logno;
-		discard = slot->meta.discard;
-		insert = slot->meta.insert;
+
+		Assert(slot->meta.discard <= slot->meta.insert);
+
+		/*
+		 * Is there something to do? Temporary undo is managed by the backends
+		 * that wrote it.
+		 */
+		if (slot->meta.persistence != RELPERSISTENCE_TEMP &&
+			slot->meta.discard < slot->meta.insert)
+		{
+			/*
+			 * Add the necessary information on the log to a list so that we
+			 * can process it later, when we have released UndoLogLock. Since
+			 * discarding should not run concurrently, the logno should not
+			 * change even then.
+			 */
+			log = (UndoLogMetaData *) palloc(sizeof(UndoLogMetaData));
+			log->logno = slot->logno;
+			log->insert = slot->meta.insert;
+			log->discard = slot->meta.discard;
+			log->persistence = slot->meta.persistence;
+			logs = lappend(logs, log);
+		}
 		LWLockRelease(&slot->meta_lock);
+	}
+	LWLockRelease(UndoLogLock);
 
-		Assert(discard <= insert);
+	foreach(lc, logs)
+	{
+		UndoLogMetaData *log = (UndoLogMetaData *) lfirst(lc);
+		UndoLogOffset cur;
 
-		cur = discard;
-		while (cur < insert)
+		cur = log->discard;
+		while (cur < log->insert)
 		{
 			/*
 			 * We only discard the whole chunks, so the first chunk should
@@ -2762,9 +2996,9 @@ DiscardUndoRecordSetChunks(void)
 			 */
 			read_undo_header((void *) &chunk_hdr,
 							 SizeOfUndoRecordSetChunkHeader,
-							 MakeUndoRecPtr(logno, cur),
+							 MakeUndoRecPtr(log->logno, cur),
 							 buffers,
-							 lengthof(buffers));
+							 lengthof(buffers), false, log->persistence);
 			release_buffers(buffers, lengthof(buffers));
 
 			/*
@@ -2777,18 +3011,23 @@ DiscardUndoRecordSetChunks(void)
 			cur += chunk_hdr.size;
 		}
 		/* The insert pointer should also be at chunk boundary. */
-		Assert(cur <= insert);
+		Assert(cur <= log->insert);
 
 		/* Perform the actual discarding. */
-		if (cur > discard)
-			UndoDiscard(MakeUndoRecPtr(logno, cur));
+		if (cur > log->discard)
+			UndoDiscard(MakeUndoRecPtr(log->logno, cur));
+
+		pfree(log);
 	}
+	list_free(logs);
 }
 
 /*
- * User interface for AdvanceOldextXidHavingUndo(), for debugging purposes
- * only. CAUTION: It's not recommended to call this function while the discard
- * worker is running - should it be moved to an extension?
+ * User interface for AdvanceOldextXidHavingUndo(), for debugging and
+ * regression tests only.
+ *
+ * TODO The function is useful for pg_upgrade regression test - make sure
+ * it can be executed while the discard worker is running.
  */
 Datum
 pg_advance_oldest_xid_having_undo(PG_FUNCTION_ARGS)
@@ -2799,9 +3038,11 @@ pg_advance_oldest_xid_having_undo(PG_FUNCTION_ARGS)
 }
 
 /*
- * User interface for DiscardUndoRecordSetChunks(), for debugging purposes
- * only. CAUTION: It's not recommended to call this function while the discard
- * worker is running - should it be moved to an extension?
+ * User interface for DiscardUndoRecordSetChunks(), for debugging and
+ * regression tests only.
+ *
+ * TODO The function is useful for pg_upgrade regression test - make sure
+ * it can be executed while the discard worker is running.
  */
 Datum
 pg_discard_undo_record_set_chunks(PG_FUNCTION_ARGS)
@@ -2960,8 +3201,45 @@ parse_next_page(UndoScanState * state, MemoryContext context, bool records)
 			slot = UndoLogGetSlot(logno, true);
 			if (slot != NULL)
 			{
+				UndoLogOffset insert;
+
 				LWLockAcquire(&slot->meta_lock, LW_SHARED);
-				if (page_start_off < slot->meta.insert)
+
+				if (slot->meta.persistence == RELPERSISTENCE_TEMP)
+				{
+					ListCell   *lc;
+					UndoLogTemp *log = NULL;
+
+					/*
+					 * Temporary log of other backends is in their local
+					 * buffers. Parts of it can already be on disk, but
+					 * there's no guarantee that those are contiguous, so it's
+					 * not worth trying to parse it.
+					 */
+					if (slot->pid != MyProcPid)
+					{
+						LWLockRelease(&slot->meta_lock);
+						return false;
+					}
+
+					foreach(lc, temp_undo_logs)
+					{
+						log = (UndoLogTemp *) lfirst(lc);
+						if (log->file.logno == logno)
+							break;
+					}
+
+					/* Should not happen. */
+					if (log == NULL)
+						elog(ERROR, "could not find temporary log for logno %u",
+							 logno);
+
+					insert = log->insert;
+				}
+				else
+					insert = slot->meta.insert;
+
+				if (page_start_off < insert)
 					page_exists = true;
 				else
 				{
@@ -2978,17 +3256,22 @@ parse_next_page(UndoScanState * state, MemoryContext context, bool records)
 					slot->meta.logno != seg->logno ||
 					seg_start_off != seg->offset)
 				{
+					int			pid;
+
 					seg->logno = slot->meta.logno;
 					seg->offset = seg_start_off;
-					seg->insert = slot->meta.insert;
+					seg->insert = insert;
 					seg->persistence = slot->meta.persistence;
+					pid = seg->persistence != RELPERSISTENCE_TEMP ?
+						InvalidPid : MyProcPid;
 					UndoLogSegmentPath(seg->logno,
 									   seg->offset / UndoLogSegmentSize,
 									   slot->meta.tablespace,
+									   pid,
 									   seg->path);
 				}
 				else
-					seg->insert = slot->meta.insert;
+					seg->insert = insert;
 				LWLockRelease(&slot->meta_lock);
 			}
 			else
@@ -3204,13 +3487,15 @@ get_next_undo_log_chunk(PG_FUNCTION_ARGS, FuncCallContext *funcctx)
 		/* Print the type header (only contained in the first chunk). */
 		if (chunk->hdr.previous_chunk == InvalidUndoRecPtr)
 		{
+			char	   *cstr;
+
 			/*
 			 * Print out t/f rather than true/false so it's consistent with
 			 * the 'discarded' bool value.
 			 */
-			values[6] = CStringGetTextDatum(psprintf("(xid=%u, dboid=%u, applied=%s)",
-													 xid, hdr->dboid, hdr->applied ?
-													 "t" : "f"));
+			cstr = psprintf("(xid=%u, applied=%s)", xid, hdr->applied ?
+							"t" : "f");
+			values[6] = CStringGetTextDatum(cstr);
 		}
 		else
 			isnull[6] = true;

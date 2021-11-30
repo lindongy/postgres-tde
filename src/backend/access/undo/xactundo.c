@@ -88,15 +88,15 @@ SerializeUndoData(StringInfo buf, RmgrId rmid, uint8 rec_type,
 
 
 	/* TODO: replace with actual serialization */
-	appendBinaryStringInfoNoExtend(buf, (char *) &len_total,
-								   sizeof(((UndoNode *) NULL)->length));
-	appendBinaryStringInfoNoExtend(buf, (char *) &rmid,
-								   sizeof(((UndoNode *) NULL)->rmid));
-	appendBinaryStringInfoNoExtend(buf, (char *) &rec_type,
-								   sizeof(((UndoNode *) NULL)->type));
+	appendBinaryStringInfo(buf, (char *) &len_total,
+						   sizeof(((UndoNode *) NULL)->length));
+	appendBinaryStringInfo(buf, (char *) &rmid,
+						   sizeof(((UndoNode *) NULL)->rmid));
+	appendBinaryStringInfo(buf, (char *) &rec_type,
+						   sizeof(((UndoNode *) NULL)->type));
 	while (rdata)
 	{
-		appendBinaryStringInfoNoExtend(buf, rdata->data, rdata->len);
+		appendBinaryStringInfo(buf, rdata->data, rdata->len);
 		rdata = rdata->next;
 	}
 }
@@ -117,6 +117,14 @@ typedef struct XactUndoData
 	/* Has the transaction generated any undo log? */
 	bool		has_undo;
 	XactUndoSubTransaction *subxact;
+
+	/*
+	 * The first chunk of the underlying URS. It's set as soon as the first
+	 * undo record is inserted, whether it's created by the top-level
+	 * transaction or by any subtransaction. Used to mark the URS applied.
+	 */
+	UndoRecPtr	urs_header[NUndoPersistenceLevels];
+
 	UndoRecPtr	end_location[NUndoPersistenceLevels];
 	UndoRecordSet *record_set[NUndoPersistenceLevels];
 } XactUndoData;
@@ -144,6 +152,7 @@ ResetXactUndo(void)
 	for (i = 0; i < NUndoPersistenceLevels; ++i)
 	{
 		XactUndoTopState.start_location[i] = InvalidUndoRecPtr;
+		XactUndo.urs_header[i] = InvalidUndoRecPtr;
 		XactUndo.end_location[i] = InvalidUndoRecPtr;
 		XactUndo.record_set[i] = NULL;
 	}
@@ -166,7 +175,7 @@ PrepareXactUndoData(XactUndoContext *ctx, char persistence,
 	UndoPersistenceLevel plevel = GetUndoPersistenceLevel(persistence);
 	FullTransactionId fxid = GetTopFullTransactionId();
 	UndoRecPtr	result;
-	UndoRecPtr *sub_start_location;
+	UndoRecPtr *urp_location;
 	UndoRecordSet *urs;
 
 	/* We should be connected to a database. */
@@ -242,9 +251,14 @@ PrepareXactUndoData(XactUndoContext *ctx, char persistence,
 	 * If this is the first undo for this persistence level in this
 	 * subtransaction, record the start location.
 	 */
-	sub_start_location = &XactUndo.subxact->start_location[plevel];
-	if (!UndoRecPtrIsValid(*sub_start_location))
-		*sub_start_location = result;
+	urp_location = &XactUndo.subxact->start_location[plevel];
+	if (!UndoRecPtrIsValid(*urp_location))
+		*urp_location = result;
+
+	/* Likewise the urs_header. */
+	urp_location = &XactUndo.urs_header[plevel];
+	if (!UndoRecPtrIsValid(*urp_location))
+		*urp_location = UndoGetFirstChunkPtr(XactUndo.record_set[plevel]);
 
 	/*
 	 * Remember this as the last end location.
@@ -313,7 +327,7 @@ CleanupXactUndoInsertion(XactUndoContext *ctx)
  *
  * XXX: Should this live here? Or somewhere around the serialization code?
  */
-UndoRecPtr
+void
 XactUndoReplay(XLogReaderState *xlog_record, RmgrId rmid, uint8 rec_type,
 			   void *rec_data, size_t rec_size)
 {
@@ -327,7 +341,7 @@ XactUndoReplay(XLogReaderState *xlog_record, RmgrId rmid, uint8 rec_type,
 	initStringInfo(&ctx.data);
 	SerializeUndoData(&ctx.data, rmid, rec_type, &rdata);
 
-	return UndoReplay(xlog_record, ctx.data.data, ctx.data.len);
+	UndoReplay(xlog_record, ctx.data.data, ctx.data.len);
 }
 
 /*
@@ -415,7 +429,6 @@ PerformUndoActions(int nestingLevel)
 		 p < NUndoPersistenceLevels; p++)
 	{
 		UndoRecPtr	start_location;
-		UndoRecPtr	end_location;
 		char		relpersistence;
 
 		/* XXX Do we need a separate function for this conversion? */
@@ -430,19 +443,20 @@ PerformUndoActions(int nestingLevel)
 		}
 
 		start_location = mysubxact->start_location[p];
-		if (!UndoRecPtrIsValid(start_location))
-			continue;
-		end_location = XactUndo.end_location[p];
+		if (UndoRecPtrIsValid(start_location))
+		{
+			UndoRecPtr	end_location = XactUndo.end_location[p];
 
-		elog(DEBUG1, "executing undo: persistence: %s, nestingLevel: %d, bytes: %lu start: %lu end: %lu",
-			 UndoPersistenceLevelString(p),
-			 nestingLevel,
-			 end_location - start_location,
-			 start_location, end_location
-			);
+			elog(DEBUG1, "executing undo: persistence: %s, nestingLevel: %d, bytes: %lu start: %lu end: %lu",
+				 UndoPersistenceLevelString(p),
+				 nestingLevel,
+				 end_location - start_location,
+				 start_location, end_location
+				);
 
-		PerformUndoActionsRange(start_location, end_location, relpersistence,
-								nestingLevel);
+			PerformUndoActionsRange(start_location, end_location, relpersistence,
+									nestingLevel);
+		}
 
 		/*
 		 * If this is the top-level transaction, mark the URS applied, so its
@@ -452,13 +466,8 @@ PerformUndoActions(int nestingLevel)
 		{
 			UndoRecPtr	begin,
 						end;
-			uint16		off;
 
 			GetCurrentUndoRange(&begin, &end, p);
-
-			/* Compute the offset of the "applied" flag in the chunk. */
-			off = SizeOfUndoRecordSetChunkHeader +
-				offsetof(XactUndoRecordSetHeader, applied);
 
 			/*
 			 * UndoSetFlag() scans the chain of chunks backwards, so if we
@@ -469,44 +478,19 @@ PerformUndoActions(int nestingLevel)
 			 * If this operation does not complete due to server crash,
 			 * ApplyPendingUndo() will do it during restart.
 			 */
-			UndoSetFlag(begin, off, relpersistence);
+			if (UndoRecPtrIsValid(begin))
+			{
+				uint16		off;
+
+				/* Compute the offset of the "applied" flag in the chunk. */
+				off = SizeOfUndoRecordSetChunkHeader +
+					offsetof(XactUndoRecordSetHeader, applied);
+
+				UndoSetFlag(begin, off, relpersistence);
+			}
 		}
 	}
 }
-
-/*
- * Perform the undo actions with no active transaction.
- */
-void
-PerformBackgroundUndo(UndoRecPtr begin, UndoRecPtr end,
-					  UndoPersistenceLevel plevel)
-{
-	UndoRecPtr	first_rec;
-
-	/* We pretend to do a regular transaction, but there's no DO in it. */
-	StartTransactionCommand();
-
-	/*
-	 * Initialize XactUndo so that the undo actios can be applied simply by
-	 * aborting the current transaction.
-	 */
-	first_rec = UndoRecPtrPlusUsableBytes(begin,
-										  SizeOfUndoRecordSetChunkHeader +
-										  SizeOfXactUndoRecordSetHeader);
-	ResetXactUndo();
-	XactUndo.has_undo = true;
-	XactUndo.subxact->start_location[plevel] = first_rec;
-	XactUndo.end_location[plevel] = end;
-
-	/*
-	 * Abort the transaction. This includes the UNDO stage.
-	 *
-	 * XXX Downside of this approach is that if the undo fails, the background
-	 * worker exits without processing the remaining sets. Is that o.k.?
-	 */
-	AbortCurrentTransaction();
-}
-
 
 /*
  * Post-commit cleanup of the undo state.
@@ -531,8 +515,6 @@ AtCommit_XactUndo(void)
 void
 AtAbort_XactUndo(void)
 {
-	bool		has_temporary_undo = false;
-
 	/* Exit quickly if this transaction generated no undo. */
 	if (!XactUndo.has_undo)
 		return;
@@ -540,50 +522,15 @@ AtAbort_XactUndo(void)
 	/* This is a toplevel abort, so collapse all subtransaction state. */
 	CollapseXactUndoSubTransactions();
 
-	/* Figure out whether there any relevant temporary undo. */
-	has_temporary_undo =
-		UndoRecPtrIsValid(XactUndo.subxact->start_location[UNDOPERSISTENCE_TEMP]);
-
 	if (XactUndo.is_undo)
 	{
 		/*
 		 * Regrettably, we seem to have failed when attempting to perform undo
-		 * actions.
+		 * actions. If we can fix anything, let's try during startup. TODO
+		 * Consider if the discard worker can recognize the failed undo and
+		 * retry.
 		 */
-
-		/*
-		 * This can happen when aborting a transaction which hasn't failed
-		 * itself but abort of its subtransaction was tried and it failed.
-		 */
-		if (proc_exit_inprogress)
-		{
-			/*
-			 * Try to avoid additional errors by our proc_exit() hooks.
-			 *
-			 * Shared memory shouldn't probably be accessed at this stage and
-			 * the backend is going to exit, so cleanup is not critical here.
-			 */
-			ResetXactUndo();
-
-			/*
-			 * When called from proc_exit(), elevel >= ERROR would cause
-			 * recursion.
-			 */
-			elog(WARNING, "failed to undo transaction");
-		}
-
-		/*
-		 * XXX. If we have any temporary undo, we're in big trouble, because
-		 * we're unable to process it.  Should we throw FATAL?  Just leave the
-		 * undo unapplied and somehow retry at a later point in the session?
-		 */
-		if (has_temporary_undo)
-			elog(WARNING, "experience_intense_sadness");
-
-		/* Reset the undo state, unless done above. */
-		if (!proc_exit_inprogress)
-			ResetXactUndo();
-		return;
+		ereport(PANIC, (errmsg("failed to apply undo")));
 	}
 
 	XactUndo.is_undo = true;
@@ -794,30 +741,20 @@ CollapseXactUndoSubTransactions(void)
  * Set *begin and *end to the beginning and end of the undo record set
  * corresponding to the current top-level transaction.
  *
- * If false is returned, the current transaction has no undo and the output
- * values are undefined.
+ * If false is returned, neither the top-level transaction nor any
+ * subtransaction has no undo.
  */
 bool
 GetCurrentUndoRange(UndoRecPtr *begin, UndoRecPtr *end,
 					UndoPersistenceLevel plevel)
 {
-	UndoRecPtr	first_rec;
+	*begin = InvalidUndoRecPtr;
+	*end = InvalidUndoRecPtr;
 
 	if (!XactUndo.has_undo)
 		return false;
 
-	/* This is where the first record starts, but we need the chunk header. */
-	first_rec = XactUndoTopState.start_location[plevel];
-
-	/* The first record immediately follows the chunk headers. */
-	if (first_rec > 0)
-	{
-		Assert(first_rec >= (SizeOfUndoRecordSetChunkHeader +
-							 SizeOfXactUndoRecordSetHeader));
-		*begin = UndoRecPtrMinusUsableBytes(first_rec,
-											SizeOfUndoRecordSetChunkHeader +
-											SizeOfXactUndoRecordSetHeader);
-	}
+	*begin = XactUndo.urs_header[plevel];
 	*end = XactUndo.end_location[plevel];
 
 	return true;

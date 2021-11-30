@@ -15,7 +15,6 @@
 #include "access/twophase.h"
 #include "access/undodefs.h"
 #include "access/xlogdefs.h"
-#include "common/zheapam_undo.h"
 #include "datatype/timestamp.h"
 #include "lib/stringinfo.h"
 #include "storage/buf.h"
@@ -40,16 +39,14 @@ extern void SetXactUndoPageLSNs(XactUndoContext *ctx, XLogRecPtr lsn);
 extern void CleanupXactUndoInsertion(XactUndoContext *ctx);
 
 /* undo re-insertion during recovery */
-extern UndoRecPtr XactUndoReplay(XLogReaderState *xlog_record, RmgrId rmid,
-								 uint8 rec_type, void *rec_data,
-								 size_t rec_size);
+extern void XactUndoReplay(XLogReaderState *xlog_record, RmgrId rmid,
+						   uint8 rec_type, void *rec_data,
+						   size_t rec_size);
 
 /* undo execution */
 extern void PerformUndoActionsRange(UndoRecPtr begin, UndoRecPtr end,
 									char relpersistence, int nestingLevel);
 extern void PerformUndoActions(int nestingLevel);
-extern void PerformBackgroundUndo(UndoRecPtr begin, UndoRecPtr end,
-								  UndoPersistenceLevel plevel);
 
 /* transaction integration */
 extern void AtCommit_XactUndo(void);

@@ -1,9 +1,9 @@
 /*
  * rmgrdesc.h
  *
- * pg_undo_dump resource managers declaration
+ * pg_undodump resource managers declaration
  *
- * src/bin/pg_undo_dump/rmgrdesc.h
+ * src/bin/pg_undodump/rmgrdesc.h
  */
 #ifndef RMGRDESC_H
 #define RMGRDESC_H

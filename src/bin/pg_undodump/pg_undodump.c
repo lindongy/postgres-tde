@@ -1,11 +1,11 @@
 /*-------------------------------------------------------------------------
  *
- * pg_undo_dump.c - decode and display UNDO log
+ * pg_undodump.c - decode and display UNDO log
  *
  * Copyright (c) 2013-2020, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
- *		  src/bin/pg_undo_dump/pg_undo_dump.c
+ *		  src/bin/pg_undodump/pg_undodump.c
  *-------------------------------------------------------------------------
  */
 
@@ -23,6 +23,7 @@
 #include "common/logging.h"
 #include "common/fe_memutils.h"
 #include "common/undo_parser.h"
+#include "fe_utils/simple_list.h"
 #include "rmgrdesc.h"
 
 #include "getopt_long.h"
@@ -119,8 +120,8 @@ print_chunk_info(UndoLogChunkInfo * chunk, UndoRecPtr location)
 		 * Print out t/f rather than true/false as if it was the bool SQL
 		 * type. (Other monitoring code does use bool.)
 		 */
-		printf("type: transaction (xid=%u, dboid=%u, applied=%s)",
-			   xid, hdr->dboid, hdr->applied ? "t" : "f");
+		printf("type: transaction (xid=%u, applied=%s)",
+			   xid, hdr->applied ? "t" : "f");
 	}
 	else if (chunk->type == URST_FOO)
 	{
@@ -169,14 +170,36 @@ print_record_info(UndoNode *node, UndoRecPtr location)
  *
  * 'segbuf' points to memory containing the segment contents
  * 'seg' points to information about the segment.
+ * 'is_first' tells whether this is the first segment in the log.
  */
 static void
-process_log_segment(UndoLogParserState *s, char *segbuf, UndoSegFile *seg)
+process_log_segment(UndoLogParserState *s, char *segbuf, UndoSegFile *seg,
+					bool is_first)
 {
 	char	   *p = segbuf;
-	int			i;
+	int			i = 0;
 
-	for (i = 0; i < UndoLogSegmentSize / BLCKSZ; i++)
+	/*
+	 * The first segment of the log can contain empty pages, due to
+	 * discarding. Those need to be skipped.
+	 */
+	if (is_first)
+	{
+		while (true)
+		{
+			UndoPageHeaderData pghdr;
+
+			/* The segment is not loaded aligned. */
+			memcpy(&pghdr, p, SizeOfUndoPageHeaderData);
+			if (pghdr.ud_insertion_point > 0)
+				break;
+
+			p += BLCKSZ;
+			i++;
+		}
+	}
+
+	for (; i < UndoLogSegmentSize / BLCKSZ; i++)
 	{
 		int			j;
 
@@ -206,9 +229,6 @@ process_log_segment(UndoLogParserState *s, char *segbuf, UndoSegFile *seg)
 /*
  * Process segments of a single log file. Return prematurely if any error is
  * encountered.
- *
- * prev_chunk is in/out argument that helps to maintain the pointer to the
- * previous chunk across calls.
  */
 static void
 process_log(UndoSegFile *first, int count)
@@ -218,6 +238,8 @@ process_log(UndoSegFile *first, int count)
 	UndoLogOffset off_expected = 0;
 	char		buf[UndoLogSegmentSize];
 	UndoLogParserState state;
+	bool		processing_started = false;
+	bool		first_segment = true;
 
 	/* This is very unlikely, but easy to check. */
 	if (count > (UndoLogMaxSize / UndoLogSegmentSize))
@@ -242,15 +264,27 @@ process_log(UndoSegFile *first, int count)
 
 		/*
 		 * Since the UNDO log is a continuous stream of changes, any hole
-		 * terminates processing. A missing segment at the beginning is
-		 * accepted though.
+		 * terminates processing.
 		 */
-		if (seg->offset != off_expected && off_expected != 0)
+		if (seg->offset != off_expected)
 		{
+			/*
+			 * However it might be o.k. if the initial part of the log is
+			 * missing - this typically happens due to discarding and segment
+			 * recycling.
+			 */
+			if (!processing_started)
+			{
+				off_expected += UndoLogSegmentSize;
+				continue;
+			}
+
 			pg_log_error("segment %010zX missing in log %d", off_expected,
 						 seg->logno);
 			return;
 		}
+
+		processing_started = true;
 
 		/* Open the segment file and read it. */
 		seg_file = open_file(seg);
@@ -271,12 +305,10 @@ process_log(UndoSegFile *first, int count)
 		}
 
 		/* Process pages of the segment. */
-		process_log_segment(&state, buf, seg);
+		process_log_segment(&state, buf, seg, first_segment);
+		first_segment = false;
 
 		close(seg_file);
-
-		if (off_expected == 0)
-			off_expected = seg->offset;
 		off_expected += UndoLogSegmentSize;
 		seg++;
 	}
@@ -285,7 +317,7 @@ process_log(UndoSegFile *first, int count)
 }
 
 static void
-process_logs(const char *dir_path)
+process_logs(const char *dir_path, bool missing_ok)
 {
 	DIR		   *dir;
 	struct dirent *de;
@@ -296,16 +328,20 @@ process_logs(const char *dir_path)
 				nseg_max,
 				i;
 
+	errno = 0;
 	dir = opendir(dir_path);
 	if (dir == NULL)
 	{
+		if (errno == ENOENT && missing_ok)
+			return;
+
 		pg_log_error("could not open directory \"%s\": %m", dir_path);
 		exit(1);
 	}
 
 	nseg_max = 8;
 	nseg = 0;
-	segments = (UndoSegFile *) palloc(nseg_max * sizeof(UndoSegFile));
+	segments = (UndoSegFile *) palloc0(nseg_max * sizeof(UndoSegFile));
 
 	/* First, collect information on all segments. */
 	while (errno = 0, (de = readdir(dir)) != NULL)
@@ -319,6 +355,14 @@ process_logs(const char *dir_path)
 			(strcmp(de->d_name, "..") == 0))
 			continue;
 
+		/*
+		 * TODO Consider if we also need to process temporary logs, i.e.
+		 * segments with the .PID suffix. These are rather short-lived and
+		 * disappear as soon as the server stops. Another problem is that that
+		 * the same logno can appear for two PIDs if one backend is going to
+		 * delete its segments (during exit) and another backend could already
+		 * acquire the same log slot.
+		 */
 		if (strlen(de->d_name) != 17 ||
 			sscanf(de->d_name, "%06X.%02X%08X",
 				   &logno, &offset_high, &offset_low) != 3)
@@ -362,8 +406,8 @@ process_logs(const char *dir_path)
 	seg = log_start = segments;
 	for (i = 0; i < nseg; i++)
 	{
-		/* Reached the end or a new log? */
-		if (i == nseg || seg->logno != log_start->logno)
+		/* Reached a new log? */
+		if (seg->logno != log_start->logno)
 		{
 			process_log(log_start, seg - log_start);
 			log_start = seg;
@@ -371,6 +415,7 @@ process_logs(const char *dir_path)
 
 		seg++;
 	}
+	/* Process the last log. */
 	if (seg > log_start)
 		process_log(log_start, seg - log_start);
 
@@ -417,6 +462,18 @@ process_metadata(const char *dir_path)
 
 		if (last == InvalidXLogRecPtr || current > last)
 			last = current;
+	}
+
+	if (errno)
+	{
+		pg_log_error("could not read directory \"%s\": %m", dir_path);
+		exit(1);
+	}
+
+	if (closedir(dir))
+	{
+		pg_log_error("could not close directory \"%s\": %m", dir_path);
+		exit(1);
 	}
 
 	if (last == InvalidXLogRecPtr)
@@ -469,13 +526,13 @@ process_metadata(const char *dir_path)
 			exit(1);
 		}
 
-		/* TODO Print out all the fields. */
 		printf("logno: %d, discard: " UndoRecPtrFormat
-			   ", insert: " UndoRecPtrFormat ", size: %lu \n",
+			   ", insert: " UndoRecPtrFormat ", size: %lu, persistence: %c \n",
 			   slot.logno,
 			   MakeUndoRecPtr(slot.logno, slot.discard),
 			   MakeUndoRecPtr(slot.logno, slot.insert),
-			   slot.size);
+			   slot.size,
+			   slot.persistence);
 	}
 
 	nread = read(fd, &crc, sizeof(pg_crc32c));
@@ -516,7 +573,7 @@ main(int argc, char **argv)
 	int			optindex = 0;
 
 	pg_logging_init(argv[0]);
-	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_undo_dump"));
+	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_undodump"));
 	progname = get_progname(argv[0]);
 
 	if (argc > 1)
@@ -528,7 +585,7 @@ main(int argc, char **argv)
 		}
 		if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0)
 		{
-			puts("pg_undo_dump (PostgreSQL) " PG_VERSION);
+			puts("pg_und_dump (PostgreSQL) " PG_VERSION);
 			exit(0);
 		}
 	}
@@ -577,8 +634,7 @@ main(int argc, char **argv)
 	}
 
 	/*
-	 * The 'l' option is not required to show logs, but if 'r' or 's' is
-	 * specified,
+	 * Not all the options can be used at the same time.
 	 */
 	if (show_metadata)
 	{
@@ -594,10 +650,15 @@ main(int argc, char **argv)
 			exit(1);
 		}
 	}
+	if (show_chunks && show_records)
+	{
+		pg_log_error("the '-c' and '-r' options are mutually exclusive");
+		exit(1);
+	}
 
-	/* List of logs is the default output. */
+	/* List of records is the default output. */
 	if (!(show_chunks || show_records || show_metadata))
-		show_chunks = true;
+		show_records = true;
 
 	if (chdir(DataDir) < 0)
 	{
@@ -607,8 +668,73 @@ main(int argc, char **argv)
 	}
 
 	if (show_chunks || show_records)
-		/* TODO Process tablespaces too. */
-		process_logs("base/undo");
+	{
+		DIR		   *dir;
+		struct dirent *de;
+		const char *tbspc_dir = "pg_tblspc";
+		SimpleOidList tablespaces = {NULL, NULL};
+		SimpleOidListCell *cell;
+
+		process_logs("base/undo", false);
+
+		/* Undo data can also be in non-default tablespaces. */
+		dir = opendir(tbspc_dir);
+		if (dir == NULL)
+		{
+			pg_log_error("could not open directory \"%s\": %m", tbspc_dir);
+			exit(1);
+		}
+
+		while (errno = 0, (de = readdir(dir)) != NULL)
+		{
+			Oid			tbspid;
+
+			if ((strcmp(de->d_name, ".") == 0) ||
+				(strcmp(de->d_name, "..") == 0))
+				continue;
+
+			if (sscanf(de->d_name, "%u", &tbspid) != 1)
+			{
+				pg_log_info("unexpected tablespace OID \"%s\" in \"%s\"",
+							de->d_name, tbspc_dir);
+				continue;
+			}
+
+			simple_oid_list_append(&tablespaces, tbspid);
+		}
+		if (errno)
+		{
+			pg_log_error("could not read directory \"%s\": %m", tbspc_dir);
+			exit(1);
+		}
+
+		if (closedir(dir))
+		{
+			pg_log_error("could not close directory \"%s\": %m", tbspc_dir);
+			exit(1);
+		}
+
+		cell = tablespaces.head;
+		while (cell != NULL)
+		{
+			SimpleOidListCell *next;
+			char		dir[MAXPGPATH];
+
+			/* UndoLogDirectory() is not exposed to frontend. */
+			snprintf(dir, MAXPGPATH, "pg_tblspc/%u/%s/undo",
+					 cell->val, TABLESPACE_VERSION_DIRECTORY);
+
+			/*
+			 * Although the tablespace should exist, we don't know whether it
+			 * contains the 'undo' directory.
+			 */
+			process_logs(dir, true);
+			next = cell->next;
+			cell = next;
+		}
+
+		simple_oid_list_destroy(&tablespaces);
+	}
 	else
 		process_metadata("pg_undo");
 

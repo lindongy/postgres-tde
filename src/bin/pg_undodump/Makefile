@@ -1,11 +1,13 @@
-# src/bin/pg_undo_dump/Makefile
+# src/bin/pg_undodump/Makefile
 
-PGFILEDESC = "pg_undo_dump - decode and display UNDO log"
+PGFILEDESC = "pg_undodump - decode and display UNDO log"
 PGAPPICON=win32
 
-subdir = src/bin/pg_undo_dump
+subdir = src/bin/pg_undodump
 top_builddir = ../../..
 include $(top_builddir)/src/Makefile.global
+
+LDFLAGS_INTERNAL += -L$(top_builddir)/src/fe_utils -lpgfeutils
 
 override CPPFLAGS := -DFRONTEND $(CPPFLAGS)
 
@@ -15,20 +17,21 @@ RMGRDESCOBJS = $(patsubst %.c,%.o,$(RMGRDESCSOURCES))
 OBJS = \
 	$(RMGRDESCOBJS) \
 	$(WIN32RES) \
-	pg_undo_dump.o \
+	pg_undodump.o \
 	rmgrdesc.o \
-	undoxacttestdesc.o
+	undoxacttestdesc.o \
+	zheapamdesc.o
 
-all: pg_undo_dump
+all: pg_undodump
 
-pg_undo_dump: $(OBJS)
+pg_undodump: $(OBJS)
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o $@$(X)
 
 undoxacttestdesc.c: % : $(top_srcdir)/src/backend/access/undoxacttest/%
 	rm -f $@ && $(LN_S) $< .
 
 install: all installdirs
-	$(INSTALL_PROGRAM) pg_undo_dump$(X) '$(DESTDIR)$(bindir)/pg_undo_dump$(X)'
+	$(INSTALL_PROGRAM) pg_undodump$(X) '$(DESTDIR)$(bindir)/pg_undodump$(X)'
 
 $(RMGRDESCSOURCES): % : $(top_srcdir)/src/backend/access/rmgrdesc/%
 	rm -f $@ && $(LN_S) $< .
@@ -37,14 +40,11 @@ installdirs:
 	$(MKDIR_P) '$(DESTDIR)$(bindir)'
 
 uninstall:
-	rm -f '$(DESTDIR)$(bindir)/pg_undo_dump$(X)'
+	rm -f '$(DESTDIR)$(bindir)/pg_undodump$(X)'
 
 clean distclean maintainer-clean:
-	rm -f pg_undo_dump$(X) $(OBJS) $(RMGRDESCSOURCES) undoxacttestdesc.c
+	rm -f pg_undodump$(X) $(OBJS) $(RMGRDESCSOURCES) undoxacttestdesc.c
 	rm -rf tmp_check
-
-check:
-	$(prove_check)
 
 installcheck:
 	$(prove_installcheck)

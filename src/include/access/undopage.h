@@ -88,27 +88,6 @@ UndoLogOffsetPlusUsableBytes(UndoLogOffset offset, uint64 n)
 	return result;
 }
 
-/* Like above but decrement. */
-static inline UndoLogOffset
-UndoLogOffsetMinusUsableBytes(UndoLogOffset offset, uint64 n)
-{
-	uint64		ubo;
-	UndoLogOffset result;
-
-	/* Convert offset to usable byte offset. */
-	ubo = (offset / BLCKSZ) * UsableBytesPerUndoPage;
-	ubo += (offset % BLCKSZ) - SizeOfUndoPageHeaderData;
-
-	/* Add decrement. */
-	ubo -= n;
-
-	/* Convert back to UndoLogOffset. */
-	result = (ubo / UsableBytesPerUndoPage) * BLCKSZ;
-	result += (ubo % UsableBytesPerUndoPage) + SizeOfUndoPageHeaderData;
-
-	return result;
-}
-
 /*
  * Increment an UndoRecPtr by a given number of bytes, stepping over page
  * headers.
@@ -126,33 +105,19 @@ UndoRecPtrPlusUsableBytes(UndoRecPtr urp, uint64 n)
 	return result;
 }
 
-/* Like above but decrement. */
-static inline UndoRecPtr
-UndoRecPtrMinusUsableBytes(UndoRecPtr urp, uint64 n)
-{
-	UndoLogNumber logno = UndoRecPtrGetLogNo(urp);
-	UndoLogOffset offset = UndoRecPtrGetOffset(urp);
-	UndoRecPtr	result;
-
-	offset = UndoLogOffsetMinusUsableBytes(offset, n);
-	result = MakeUndoRecPtr(logno, offset);
-	Assert(UndoRecPtrGetLogNo(result) == logno);
-	return result;
-}
-
 extern void UndoPageInit(Page page);
 
 extern int	UndoPageInsertHeader(Page page, int page_offset, int header_offset,
 								 UndoRecordSetChunkHeader *header,
 								 Size type_header_size, char *type_header,
 								 UndoRecPtr chunk_start);
-extern int	UndoPageSkipHeader(Page page, int page_offset, int header_offset,
+extern int	UndoPageSkipHeader(int page_offset, int header_offset,
 							   size_t type_header_size);
 extern int	UndoPageInsertRecord(Page page, int page_offset, int data_offset,
 								 Size data_size, char *data,
 								 UndoRecPtr chunk_start,
 								 UndoRecordSetType chunk_type);
-extern int	UndoPageSkipRecord(Page page, int page_offset, int data_offset,
+extern int	UndoPageSkipRecord(int page_offset, int data_offset,
 							   size_t data_size);
 extern int	UndoPageOverwrite(Page page, int page_offset, int data_offset,
 							  Size data_size, char *data);

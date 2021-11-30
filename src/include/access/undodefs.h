@@ -48,21 +48,6 @@ typedef enum
 	UNDOPERSISTENCE_TEMP = 2
 } UndoPersistenceLevel;
 
-/*
- * Convert from relpersistence ('p', 'u', 't') to an UndoPersistence
- * enumerator.
- */
-#define UndoPersistenceForRelPersistence(rp)						\
-	((rp) == RELPERSISTENCE_PERMANENT ? UNDOPERSISTENCE_PERMANENT :			\
-	 (rp) == RELPERSISTENCE_UNLOGGED ? UNDOPERSISTENCE_UNLOGGED : \
-	 UNDOPERSISTENCE_TEMP)
-
-/*
- * Get the appropriate UndoPersistence value from a Relation.
- */
-#define UndoPersistenceForRelation(rel)									\
-	(UndoPersistenceForRelPersistence((rel)->rd_rel->relpersistence))
-
 /* Number of supported persistence levels for undo. */
 #define NUndoPersistenceLevels 3
 
@@ -72,6 +57,18 @@ struct UndoRecordSet;
 struct UndoRequest;
 typedef struct UndoCheckpointContext UndoCheckpointContext;
 typedef struct UndoRecordSet UndoRecordSet;
+
+/*
+ * PrepareXactUndoData() receives a chain of UndoRecData structs and turns it
+ * int the actual record. This is the same concept that xloginsert.c uses to
+ * construct the record out of XLogRecData items.
+ */
+typedef struct UndoRecData
+{
+	struct UndoRecData *next;	/* next struct in chain, or NULL */
+	char	   *data;			/* start of rmgr data to include */
+	Size		len;			/* length of rmgr data to include */
+}			UndoRecData;
 
 typedef struct UndoNode
 {

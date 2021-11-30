@@ -27,7 +27,7 @@ SUBDIRS = \
 	pg_rewind \
 	pg_test_fsync \
 	pg_test_timing \
-	pg_undo_dump \
+	pg_undodump \
 	pg_upgrade \
 	pg_verifybackup \
 	pg_waldump \

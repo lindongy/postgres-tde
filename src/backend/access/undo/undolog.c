@@ -68,6 +68,9 @@ undologtable_hash *undologtable_cache;
 /* The per-backend lowest known undo log number, for cache invalidation. */
 UndoLogNumber undologtable_low_logno;
 
+/* The per-backend list of UndoLogSlotTemp structures, for cleanup. */
+List	   *temp_undo_logs = NIL;
+
 /* GUC variables */
 char	   *undo_tablespaces = NULL;
 
@@ -78,6 +81,9 @@ static void discard_undo_buffers(int logno, UndoLogOffset old_discard,
 								 bool drop_tail);
 static void scan_physical_range(void);
 static bool choose_undo_tablespace(Oid *tablespace);
+static UndoLogSlot **get_full_undo_logs_from_free_lists(int *nlogs);
+static void register_temp_undo(UndoLogSlot *slot);
+
 
 /*
  * How many undo logs can be active at a time?  This creates a theoretical
@@ -176,9 +182,13 @@ UndoLogDirectory(Oid tablespace, char *dir)
 
 /*
  * Compute the pathname to use for an undo log segment file.
+ *
+ * 'pid' indicates that the segment should be removed as soon as backend with
+ * this PID exits. It's only valid for temporary undo.
  */
 void
-UndoLogSegmentPath(UndoLogNumber logno, int segno, Oid tablespace, char *path)
+UndoLogSegmentPath(UndoLogNumber logno, int segno, Oid tablespace, int pid,
+				   char *path)
 {
 	char		dir[MAXPGPATH];
 
@@ -190,8 +200,12 @@ UndoLogSegmentPath(UndoLogNumber logno, int segno, Oid tablespace, char *path)
 	 * UndoRecPtr of the first byte in the segment in hexadecimal, with a
 	 * period inserted between the components.
 	 */
-	snprintf(path, MAXPGPATH, "%s/%06X.%010zX", dir, logno,
-			 segno * UndoLogSegmentSize);
+	if (pid == InvalidPid)
+		snprintf(path, MAXPGPATH, "%s/%06X.%010zX", dir, logno,
+				 segno * UndoLogSegmentSize);
+	else
+		snprintf(path, MAXPGPATH, "%s/%06X.%010zX.%d", dir, logno,
+				 segno * UndoLogSegmentSize, pid);
 }
 
 /*
@@ -278,20 +292,75 @@ clear_private_free_lists(void)
 }
 
 /*
+ * Unlink segments of given temporary undo file, but stop early enough so that
+ * the the 'preserve' offset is not affected.
+ */
+static void
+unlink_temporary_undo_segments(UndoLogFile *file, UndoLogOffset preserve)
+{
+	UndoLogOffset seg_begin = file->begin;
+	UndoLogOffset seg_end = seg_begin + UndoLogSegmentSize;
+
+	/*
+	 * seg_end actually points at the beginning of the next segment, thus we
+	 * can unlink even the file whose 'seg_end' is equal to 'preserve'.
+	 */
+	while (seg_end <= preserve)
+	{
+		char		path[MAXPGPATH];
+
+		UndoLogSegmentPath(file->logno,
+						   seg_begin / UndoLogSegmentSize,
+						   file->tablespace, file->pid, path);
+
+		if (unlink(path) == 0)
+			elog(DEBUG1, "unlinked undo segment \"%s\"", path);
+		else if (errno != ENOENT)
+			ereport(ERROR,
+					(errcode_for_file_access(),
+					 errmsg("could not unlink \"%s\": %m",
+							path)));
+
+		seg_begin += UndoLogSegmentSize;
+		seg_end = seg_begin + UndoLogSegmentSize;
+	}
+}
+
+/* Delete all the temporary file segments created by the backend. */
+static void
+unlink_temporary_undo(void)
+{
+	ListCell   *lc;
+
+	foreach(lc, temp_undo_logs)
+	{
+		UndoLogTemp *log = (UndoLogTemp *) lfirst(lc);
+		UndoLogFile *file = &log->file;
+
+		/* Delete the segments. */
+		unlink_temporary_undo_segments(file, file->end);
+	}
+}
+
+/*
  * Return all undo logs from our private free lists to the shared free lists.
  */
 void
 AtProcExit_UndoLog(void)
 {
+	unlink_temporary_undo();
 	clear_private_free_lists();
 }
 
 /*
  * Create a new empty segment file on disk for the byte starting at 'end'.
+ *
+ * 'pid' has the same meaning as explained by the comment of
+ * UndoLogSegmentPath().
  */
 static void
 allocate_empty_undo_segment(UndoLogNumber logno, Oid tablespace,
-							UndoLogOffset end)
+							UndoLogOffset end, int pid)
 {
 	struct stat stat_buffer;
 	off_t		size;
@@ -299,8 +368,10 @@ allocate_empty_undo_segment(UndoLogNumber logno, Oid tablespace,
 	void	   *zeroes;
 	size_t		nzeroes = 8192;
 	int			fd;
+	bool		temp = pid != InvalidPid;
 
-	UndoLogSegmentPath(logno, end / UndoLogSegmentSize, tablespace, path);
+	UndoLogSegmentPath(logno, end / UndoLogSegmentSize, tablespace, pid,
+					   path);
 
 	/*
 	 * Create and fully allocate a new file.  If we crashed and recovered then
@@ -397,7 +468,8 @@ allocate_empty_undo_segment(UndoLogNumber logno, Oid tablespace,
 	 * Ask the checkpointer to flush the contents of the file to disk before
 	 * the next checkpoint.
 	 */
-	undofile_request_sync(logno, end / UndoLogSegmentSize, tablespace);
+	if (!temp)
+		undofile_request_sync(logno, end / UndoLogSegmentSize, tablespace);
 
 	CloseTransientFile(fd);
 
@@ -413,7 +485,10 @@ void
 UndoLogNewSegment(UndoLogNumber logno, Oid tablespace, int segno)
 {
 	Assert(InRecovery);
-	allocate_empty_undo_segment(logno, tablespace, segno * UndoLogSegmentSize);
+
+	Assert(UndoLogNumberGetPersistence(logno) != RELPERSISTENCE_TEMP);
+	allocate_empty_undo_segment(logno, tablespace, segno * UndoLogSegmentSize,
+								InvalidPid);
 
 	/*
 	 * Ask the checkpointer to flush the new directory entry before next
@@ -521,6 +596,76 @@ scan_physical_range(void)
 }
 
 /*
+ * Common code for both UndoLogAdjustPhysicalRange() and
+ * UndoLogAdjustPhysicalRangeTemp().
+ */
+static void
+adjust_discard_pointer(UndoLogFile *file, UndoLogOffset new_begin, bool temp)
+{
+	int			recycle = 0;
+	UndoLogOffset begin;
+
+	/*
+	 * Can we try to recycle an old segment to become a new one?  For now we
+	 * only consider creating one spare segment.
+	 */
+	if (new_begin > file->begin &&
+		(file->end + UndoLogSegmentSize) <= file->size)
+		recycle = 1;
+
+	for (begin = file->begin;
+		 begin < new_begin;
+		 begin += UndoLogSegmentSize)
+	{
+		char		old_path[MAXPGPATH];
+		int			pid = temp ? file->pid : InvalidPid;
+
+		/* Tell the checkpointer that the file is going away. */
+		if (!temp)
+			undofile_forget_sync(file->logno, begin / UndoLogSegmentSize,
+								 file->tablespace);
+
+		UndoLogSegmentPath(file->logno, begin / UndoLogSegmentSize,
+						   file->tablespace, pid, old_path);
+
+		/*
+		 * Rename or unlink as required.  Tolerate ENOENT, because some crash
+		 * scenarios could leave holes in the sequence of segment files.
+		 */
+		if (recycle > 0)
+		{
+			char		new_path[MAXPGPATH];
+
+			UndoLogSegmentPath(file->logno, file->end / UndoLogSegmentSize,
+							   file->tablespace, pid, new_path);
+
+			if (rename(old_path, new_path) == 0)
+			{
+				elog(DEBUG1, "recycled undo segment \"%s\" -> \"%s\"",
+					 old_path, new_path);
+				--recycle;
+				file->end += UndoLogSegmentSize;
+			}
+			else if (errno != ENOENT)
+				ereport(ERROR,
+						(errcode_for_file_access(),
+						 errmsg("could not rename \"%s\" to \"%s\": %m",
+								old_path, new_path)));
+		}
+		else
+		{
+			if (unlink(old_path) == 0)
+				elog(DEBUG1, "unlinked undo segment \"%s\"", old_path);
+			else if (errno != ENOENT)
+				ereport(ERROR,
+						(errcode_for_file_access(),
+						 errmsg("could not unlink \"%s\": %m",
+								old_path)));
+		}
+	}
+}
+
+/*
  * Make sure that we have physical files to cover the range new_discard up to
  * but not including new_insert.  This unlinks unnecessary files, or renames
  * them to become new files, or creates new zero-filled files as appropriate
@@ -534,13 +679,10 @@ UndoLogAdjustPhysicalRange(UndoLogNumber logno,
 						   UndoLogOffset new_insert)
 {
 	UndoLogSlot *slot;
+	UndoLogFile file;
 	UndoLogOffset new_begin = 0;
 	UndoLogOffset new_end = 0;
-	UndoLogOffset begin;
-	UndoLogOffset end;
-	UndoLogOffset insert,
-				size;
-	int			recycle = 0;
+	UndoLogOffset insert;
 
 	/*
 	 * Round new_discard down to the nearest segment boundary.  That's the
@@ -568,9 +710,18 @@ UndoLogAdjustPhysicalRange(UndoLogNumber logno,
 	/* Fetch information that will be needed below. */
 	LWLockAcquire(&slot->meta_lock, LW_SHARED);
 	insert = slot->meta.insert;
-	size = slot->meta.size;
-	end = slot->end;
+	file.size = slot->meta.size;
+	file.tablespace = slot->meta.tablespace;
 	LWLockRelease(&slot->meta_lock);
+
+	/*
+	 * Fill-in the fields of the 'file' structure that don't require
+	 * meta_lock.
+	 */
+	file.logno = logno;
+	file.pid = slot->pid;
+	file.begin = slot->begin;
+	file.end = slot->end;
 
 	if (new_insert == 0)
 		new_insert = insert;
@@ -584,64 +735,7 @@ UndoLogAdjustPhysicalRange(UndoLogNumber logno,
 
 	/* First, deal with advancing 'begin', if we were asked to do that. */
 	if (new_discard != 0)
-	{
-		/*
-		 * Can we try to recycle an old segment to become a new one?  For now
-		 * we only consider creating one spare segment.
-		 */
-		if (new_begin > slot->begin && (end + UndoLogSegmentSize) <= size)
-			recycle = 1;
-
-		for (begin = slot->begin;
-			 begin < new_begin;
-			 begin += UndoLogSegmentSize)
-		{
-			char		old_path[MAXPGPATH];
-
-			/* Tell the checkpointer that the file is going away. */
-			undofile_forget_sync(logno, begin / UndoLogSegmentSize,
-								 slot->meta.tablespace);
-
-			UndoLogSegmentPath(logno, begin / UndoLogSegmentSize,
-							   slot->meta.tablespace, old_path);
-
-			/*
-			 * Rename or unlink as required.  Tolerate ENOENT, because some
-			 * crash scenarios could leave holes in the sequence of segment
-			 * files.
-			 */
-			if (recycle > 0)
-			{
-				char		new_path[MAXPGPATH];
-
-				UndoLogSegmentPath(logno, end / UndoLogSegmentSize,
-								   slot->meta.tablespace, new_path);
-
-				if (rename(old_path, new_path) == 0)
-				{
-					elog(DEBUG1, "recycled undo segment \"%s\" -> \"%s\"",
-						 old_path, new_path);
-					--recycle;
-					end += UndoLogSegmentSize;
-				}
-				else if (errno != ENOENT)
-					ereport(ERROR,
-							(errcode_for_file_access(),
-							 errmsg("could not rename \"%s\" to \"%s\": %m",
-									old_path, new_path)));
-			}
-			else
-			{
-				if (unlink(old_path) == 0)
-					elog(DEBUG1, "unlinked undo segment \"%s\"", old_path);
-				else if (errno != ENOENT)
-					ereport(ERROR,
-							(errcode_for_file_access(),
-							 errmsg("could not unlink \"%s\": %m",
-									old_path)));
-			}
-		}
-	}
+		adjust_discard_pointer(&file, new_begin, false);
 
 	/*
 	 * Next, deal with advancing 'end', if we were asked to do that.
@@ -651,15 +745,16 @@ UndoLogAdjustPhysicalRange(UndoLogNumber logno,
 	 * first write. XXX pg_undo_dump will report errors if it hits the old
 	 * contents - is that a serious issue?
 	 */
-	for (; end < new_end; end += UndoLogSegmentSize)
-		allocate_empty_undo_segment(logno, UndoLogNumberGetTablespace(logno), end);
+	for (; file.end < new_end; file.end += UndoLogSegmentSize)
+		allocate_empty_undo_segment(logno, UndoLogNumberGetTablespace(logno),
+									file.end, InvalidPid);
 
 	/*
 	 * If recycling added more space than required, make sure the slot
 	 * metadata reflects that.
 	 */
-	if (end > new_end)
-		new_end = end;
+	if (file.end > new_end)
+		new_end = file.end;
 
 	/*
 	 * Ask the checkpointer to flush the directory entries before next
@@ -675,6 +770,62 @@ UndoLogAdjustPhysicalRange(UndoLogNumber logno,
 	LWLockRelease(&slot->meta_lock);
 
 	LWLockRelease(&slot->file_lock);
+}
+
+/*
+ * Like UndoLogAdjustPhysicalRange(), but for temporary undo, so a lot
+ * simpler. The undo segments are fully managed by the backend, so there's no
+ * need to use locks. Even the logno should not change concurrently because no
+ * one else should discard the undo produced by the backend that calls this
+ * function.
+ */
+void
+UndoLogAdjustPhysicalRangeTemp(UndoLogTemp *log,
+							   UndoLogOffset new_discard,
+							   UndoLogOffset new_insert)
+{
+	UndoLogFile *file = &log->file;
+	UndoLogOffset new_begin = 0;
+	UndoLogOffset new_end = 0;
+
+	/*
+	 * Round new_discard down to the nearest segment boundary.  That's the
+	 * lowest-numbered segment we need to keep.
+	 */
+	new_begin = new_discard - new_discard % UndoLogSegmentSize;
+
+	if (new_insert == 0)
+		new_insert = log->insert;
+
+	/*
+	 * Round new_insert up to the nearest segment boundary, to make a valid
+	 * end offset. This will be one past the highest-numbered setgment we need
+	 * to keep, but we may decide to keep more, below.
+	 */
+	new_end = new_insert + UndoLogSegmentSize - new_insert % UndoLogSegmentSize;
+
+	/* First, deal with advancing 'begin', if we were asked to do that. */
+	if (new_discard != 0)
+		adjust_discard_pointer(file, new_begin, true);
+
+	/*
+	 * Next, deal with advancing 'end', if we were asked to do that.
+	 */
+	for (; file->end < new_end; file->end += UndoLogSegmentSize)
+		allocate_empty_undo_segment(file->logno,
+									UndoLogNumberGetTablespace(file->logno),
+									file->end, MyProcPid);
+
+	/*
+	 * If recycling added more space than required, make sure the slot
+	 * metadata reflects that.
+	 */
+	if (file->end > new_end)
+		new_end = file->end;
+
+	if (new_begin != 0)
+		file->begin = new_begin;
+	file->end = new_end;
 }
 
 /*
@@ -737,7 +888,11 @@ UndoLogAcquire(char persistence, UndoLogNumber min_logno)
 		LWLockRelease(&slot->meta_lock);
 
 		if (!dropped)
+		{
+			if (persistence == RELPERSISTENCE_TEMP)
+				register_temp_undo(slot);
 			return slot;
+		}
 	}
 
 	/*
@@ -773,6 +928,8 @@ UndoLogAcquire(char persistence, UndoLogNumber min_logno)
 			if (ts_lock_held)
 				LWLockRelease(TablespaceCreateLock);
 
+			if (persistence == RELPERSISTENCE_TEMP)
+				register_temp_undo(slot);
 			return slot;
 		}
 		LWLockRelease(&slot->meta_lock);
@@ -799,12 +956,26 @@ UndoLogAcquire(char persistence, UndoLogNumber min_logno)
 				 errhint("Consider increasing max_connections.")));
 	slot->logno = UndoLogShared->next_logno;
 	Assert(slot->logno >= min_logno);
-	slot->meta.insert = SizeOfUndoPageHeaderData;
-	slot->meta.discard = SizeOfUndoPageHeaderData;
+	if (persistence != RELPERSISTENCE_TEMP)
+	{
+		slot->meta.insert = SizeOfUndoPageHeaderData;
+		slot->meta.discard = SizeOfUndoPageHeaderData;
+		slot->meta.size = UndoLogMaxSize;
+	}
+	else
+	{
+		/*
+		 * The following fields are not maintained in the shared memory for
+		 * temporary undo, so set them to zeroes.
+		 */
+		slot->meta.insert = 0;
+		slot->meta.discard = 0;
+		slot->meta.size = 0;
+	}
 	slot->meta.logno = UndoLogShared->next_logno;
 	slot->meta.tablespace = tablespace;
 	slot->meta.persistence = persistence;
-	slot->meta.size = UndoLogMaxSize;
+
 	slot->pid = MyProcPid;
 	slot->xid = GetTopTransactionIdIfAny();
 	slot->state = UNDOLOGSLOT_IN_UNDO_RECORD_SET;
@@ -825,6 +996,8 @@ UndoLogAcquire(char persistence, UndoLogNumber min_logno)
 	if (ts_lock_held)
 		LWLockRelease(TablespaceCreateLock);
 
+	if (persistence == RELPERSISTENCE_TEMP)
+		register_temp_undo(slot);
 	return slot;
 }
 
@@ -934,7 +1107,7 @@ UndoDiscard(UndoRecPtr discard_point)
 	old_discard = slot->meta.discard;
 	insert = slot->meta.insert;
 	begin = slot->begin;
-	entirely_discarded = insert == slot->meta.size;
+	entirely_discarded = new_discard == slot->meta.size;
 	LWLockRelease(&slot->meta_lock);
 
 	/*
@@ -944,7 +1117,7 @@ UndoDiscard(UndoRecPtr discard_point)
 	 */
 	if (unlikely(new_discard < old_discard && !InRecovery))
 		elog(ERROR, "cannot move discard point backwards");
-	if (unlikely(new_discard > insert && !entirely_discarded))
+	if (unlikely(new_discard > insert))
 		elog(ERROR, "cannot move discard point past insert point");
 
 	/*
@@ -961,7 +1134,6 @@ UndoDiscard(UndoRecPtr discard_point)
 
 		xlrec.logno = logno;
 		xlrec.discard = new_discard;
-		xlrec.entirely_discarded = entirely_discarded;
 
 		XLogBeginInsert();
 		XLogRegisterData((char *) &xlrec, SizeOfUndologDiscard);
@@ -1017,6 +1189,73 @@ UndoDiscard(UndoRecPtr discard_point)
 }
 
 /*
+ * Discard all the temporary undo and unlink the segment files where possible.
+ *
+ * Besides the fact that we don't write WAL here, an important circumstance
+ * that makes things simpler is that this function is only called after
+ * transaction committed, or after undo of an aborted transaction has been
+ * executed. Given that the temporary undo is not visible by other
+ * transactions, and that even the following transaction of the current
+ * session should not need the temporary undo of the previous transactions, we
+ * can discard all the undo of the current session w/o reading the undo chunk
+ * headers.
+ *
+ * XXX Consider if there are better places to call this function from.
+ */
+void
+UndoDiscardTemp(void)
+{
+	ListCell   *lc;
+	int			n = list_length(temp_undo_logs);
+	int			i = 1;
+
+	foreach(lc, temp_undo_logs)
+	{
+		UndoLogTemp *log = (UndoLogTemp *) lfirst(lc);
+		bool		is_last = i == n;
+
+		/*
+		 * Given the assumptions in the function's header comment, we can
+		 * discard all the undo written so far. Naturally skip the logs for
+		 * which we've already done so.
+		 */
+		if (log->insert <= log->discard)
+		{
+			Assert(log->insert == log->discard);
+			i++;
+			continue;
+		}
+
+		/*
+		 * Preserve the last buffer of the last log because new data can be
+		 * inserted into it.
+		 */
+		discard_undo_buffers(log->file.logno, log->discard, log->insert,
+							 !is_last);
+
+		/* For the non-last or full logs, simply drop all the segments. */
+		if (!is_last || log->insert == log->file.size)
+			unlink_temporary_undo_segments(&log->file, log->file.end);
+		else
+		{
+			/*
+			 * Some space left in the last log. Only some segments can be
+			 * unlinked.
+			 */
+			UndoLogAdjustPhysicalRangeTemp(log, log->insert, 0);
+		}
+
+		/*
+		 * Do not process this log next time, unless new data is inserted
+		 * (which should only happen to the last log).
+		 */
+		log->discard = log->insert;
+
+		i++;
+	}
+}
+
+/*
  * Write out the undo log meta data to the pg_undo directory.  The actual
  * contents of undo logs is in shared buffers and therefore handled by
  * CheckPointBuffers(), but here we record the table of undo logs and their
@@ -1052,14 +1291,26 @@ CheckPointUndoLogs(UndoCheckpointContext *ctx)
 	serialized = (UndoLogMetaData *) palloc0(serialized_size);
 
 	/*
-	 * While we're scanning all slots, look for those that can now be freed
+	 * While we're holding UndoLogLock, look for slots that can now be freed
 	 * because they hold no data (all discarded) and the insert pointer has
 	 * reached 'size' (the end of this log).
 	 */
-	slots_to_free = palloc0(sizeof(UndoLogSlot *) * UndoLogNumSlots());
-	nslots_to_free = 0;
+	slots_to_free = get_full_undo_logs_from_free_lists(&nslots_to_free);
 
-	/* Scan through all slots looking for non-empty ones. */
+	/*
+	 * Scan through shared free lists looking for non-empty slots.
+	 *
+	 * XXX Consider freeing slots in other states during this iteration,
+	 * however that requires caution. For example, if a backend gets the slot
+	 * from its private cache, it might expect some fields to remain intact.
+	 * In any case, processing of the shared free lists above should stay as a
+	 * separate pass as long as we use slist. The point is that the slot must
+	 * be removed from the free list before it's passed to
+	 * free_undo_log_slot(), and the only viable way to delete item from the
+	 * slist is during the slist iteration (i.e. we don't want to iterate the
+	 * whole free lists multiple times, once per item of the shared slot
+	 * array).
+	 */
 	num_logs = 0;
 	for (i = 0; i < UndoLogNumSlots(); ++i)
 	{
@@ -1072,11 +1323,9 @@ CheckPointUndoLogs(UndoCheckpointContext *ctx)
 		/* Capture snapshot while holding each meta_lock. */
 		LWLockAcquire(&slot->meta_lock, LW_SHARED);
 		serialized[num_logs++] = slot->meta;
-		if (slot->meta.discard == slot->meta.insert &&
-			slot->meta.discard == slot->meta.size)
-			slots_to_free[nslots_to_free++] = slot;
 		LWLockRelease(&slot->meta_lock);
 	}
+
 	next_logno = UndoLogShared->next_logno;
 
 	LWLockRelease(UndoLogLock);
@@ -1202,7 +1451,7 @@ allocate_undo_log_slot(void)
 		{
 			memset(&slot->meta, 0, sizeof(slot->meta));
 			slot->pid = 0;
-			slot->logno = -1;
+			slot->begin = slot->end = 0;
 			return slot;
 		}
 	}
@@ -1214,6 +1463,11 @@ allocate_undo_log_slot(void)
  * Free an UndoLogSlot object in shared memory, so that it can be reused.
  * This is a rare event, and has complications for all code paths that access
  * slots.
+ *
+ * Before calling the function, make sure the slot is no longer in any shared
+ * freelist. The problem is that a free slot can be reused and added to the
+ * freelist again. Thus we can end up having multiple items for the same slot
+ * in the freelist, or the first item pointing to itself.
  */
 static void
 free_undo_log_slot(UndoLogSlot *slot)
@@ -1525,6 +1779,88 @@ choose_undo_tablespace(Oid *tablespace)
 }
 
 /*
+ * Remove full or dropped logs from the shared free lists and return array of
+ * those.
+ *
+ * Caller must hold UndoLogLock and is supposed to free the array.
+ */
+static UndoLogSlot **
+get_full_undo_logs_from_free_lists(int *nlogs)
+{
+	UndoLogSlot **result = palloc(sizeof(UndoLogSlot **) * UndoLogNumSlots());
+	int			i;
+
+	Assert(LWLockHeldByMeInMode(UndoLogLock, LW_EXCLUSIVE) ||
+		   LWLockHeldByMeInMode(UndoLogLock, LW_SHARED));
+
+	*nlogs = 0;
+	for (i = 0; i < NUndoPersistenceLevels; ++i)
+	{
+		UndoLogSlot *slot;
+		slist_mutable_iter iter;
+
+		slist_foreach_modify(iter, &UndoLogShared->shared_free_lists[i])
+		{
+			slot = slist_container(UndoLogSlot, next, iter.cur);
+
+			LWLockAcquire(&slot->meta_lock, LW_SHARED);
+			if (slot->meta.discard == slot->meta.insert &&
+				slot->meta.size == slot->meta.insert)
+			{
+				slist_delete_current(&iter);
+				result[(*nlogs)++] = slot;
+			}
+			LWLockRelease(&slot->meta_lock);
+		}
+	}
+	return result;
+}
+
+/*
+ * Add information about on temporary undo to a list so that it's freed when
+ * the backend exits. The same list is also used to discard the temporary
+ * undo.
+ */
+static void
+register_temp_undo(UndoLogSlot *slot)
+{
+	ListCell   *lc;
+	UndoLogTemp *tmp;
+	MemoryContext oldcxt;
+
+	/*
+	 * The function is called from UndoLogAcquire() when the slot has the PID
+	 * assigned, so no other backend should try to do changes concurrently.
+	 * Furthermore, the important information on temporary undo is stored in
+	 * the backend-local memory. Therefore no locking is needed here.
+	 */
+	Assert(slot->meta.persistence == RELPERSISTENCE_TEMP);
+
+	foreach(lc, temp_undo_logs)
+	{
+		tmp = (UndoLogTemp *) lfirst(lc);
+
+		/* The backend could have used this slot already. */
+		if (tmp->file.logno == slot->logno)
+			return;
+	}
+
+	/* We're dealing with a new slot. */
+	oldcxt = MemoryContextSwitchTo(TopMemoryContext);
+	tmp = (UndoLogTemp *) palloc(sizeof(UndoLogTemp));
+	tmp->file.logno = slot->logno;
+	tmp->file.tablespace = slot->meta.tablespace;
+	tmp->file.begin = tmp->file.end = 0;
+	tmp->file.size = UndoLogMaxSize;
+	Assert(slot->pid == MyProcPid);
+	tmp->file.pid = slot->pid;
+	tmp->insert = SizeOfUndoPageHeaderData;
+	tmp->discard = SizeOfUndoPageHeaderData;
+	temp_undo_logs = lappend(temp_undo_logs, tmp);
+	MemoryContextSwitchTo(oldcxt);
+}
+
+/*
  * Try to drop all undo logs in the given tablespace.  Return true if
  * successful, or false if that couldn't be done because we found undo logs
  * that were currently in use in an UndoRecordSet, or that held undiscarded
@@ -1536,7 +1872,6 @@ DropUndoLogsInTablespace(Oid tablespace)
 	DIR		   *dir;
 	char		undo_path[MAXPGPATH];
 	UndoLogSlot **dropped_slots;
-	UndoLogNumber *dropped_lognos;
 	int			ndropped;
 
 	/*
@@ -1699,32 +2034,9 @@ DropUndoLogsInTablespace(Oid tablespace)
 		FreeDir(dir);
 	}
 
-	dropped_slots = palloc(sizeof(UndoLogSlot *) * UndoLogNumSlots());
-	dropped_lognos = palloc(sizeof(UndoLogNumber) * UndoLogNumSlots());
-	ndropped = 0;
-
 	/* Remove all dropped undo logs from the free-lists. */
 	LWLockAcquire(UndoLogLock, LW_EXCLUSIVE);
-	for (int i = 0; i < NUndoPersistenceLevels; ++i)
-	{
-		UndoLogSlot *slot;
-		slist_mutable_iter iter;
-
-		slist_foreach_modify(iter, &UndoLogShared->shared_free_lists[i])
-		{
-			slot = slist_container(UndoLogSlot, next, iter.cur);
-
-			LWLockAcquire(&slot->meta_lock, LW_SHARED);
-			if (slot->meta.discard == slot->meta.insert &&
-				slot->meta.size == slot->meta.insert)
-			{
-				slist_delete_current(&iter);
-				dropped_lognos[ndropped] = slot->meta.logno;
-				dropped_slots[ndropped++] = slot;
-			}
-			LWLockRelease(&slot->meta_lock);
-		}
-	}
+	dropped_slots = get_full_undo_logs_from_free_lists(&ndropped);
 	LWLockRelease(UndoLogLock);
 
 	/* Free all the dropped slots. */
@@ -1732,7 +2044,6 @@ DropUndoLogsInTablespace(Oid tablespace)
 		free_undo_log_slot(dropped_slots[i]);
 
 	pfree(dropped_slots);
-	pfree(dropped_lognos);
 
 	return true;
 }
@@ -1745,11 +2056,8 @@ DropUndoLogsInTablespace(Oid tablespace)
  * logs, if there is a crash restart.
  */
 void
-ResetUndoLogs(char persistence)
+ResetUnloggedUndoLogs(void)
 {
-	Assert(persistence == RELPERSISTENCE_TEMP ||
-		   persistence == RELPERSISTENCE_UNLOGGED);
-
 	for (int i = 0; i < UndoLogNumSlots(); ++i)
 	{
 		DIR		   *dir;
@@ -1764,7 +2072,7 @@ ResetUndoLogs(char persistence)
 		if (slot->logno == InvalidUndoLogNumber)
 			continue;
 
-		if (slot->meta.persistence != persistence)
+		if (slot->meta.persistence != RELPERSISTENCE_UNLOGGED)
 			continue;
 
 		/* Scan the directory for files belonging to this undo log. */
@@ -1805,6 +2113,19 @@ ResetUndoLogs(char persistence)
 	}
 }
 
+static int
+slot_cmp(const void *left, const void *right)
+{
+	UndoLogTemp *log1 = (UndoLogTemp *) left;
+	UndoLogTemp *log2 = (UndoLogTemp *) right;
+
+	if (log1->file.logno < log2->file.logno)
+		return -1;
+	if (log1->file.logno > log2->file.logno)
+		return 1;
+	return 0;
+}
+
 Datum
 pg_stat_get_undo_logs(PG_FUNCTION_ARGS)
 {
@@ -1817,6 +2138,7 @@ pg_stat_get_undo_logs(PG_FUNCTION_ARGS)
 	char	   *tablespace_name = NULL;
 	Oid			last_tablespace = InvalidOid;
 	int			i;
+	UndoLogTemp *tmp_logs = NULL;
 
 	/* check to see if caller supports us returning a tuplestore */
 	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
@@ -1843,6 +2165,32 @@ pg_stat_get_undo_logs(PG_FUNCTION_ARGS)
 
 	MemoryContextSwitchTo(oldcontext);
 
+	/*
+	 * Put information on this backend's temporary undo logs into a sorted
+	 * array so that we can access them quickly.
+	 */
+	if (temp_undo_logs)
+	{
+		ListCell   *lc;
+		int			n = list_length(temp_undo_logs);
+
+		tmp_logs = (UndoLogTemp *) palloc(n * sizeof(UndoLogTemp));
+		i = 0;
+		foreach(lc, temp_undo_logs)
+		{
+			UndoLogTemp *log = (UndoLogTemp *) lfirst(lc);
+
+			tmp_logs[i++] = *log;
+		}
+
+		/*
+		 * The log numbers should be sorted (in an ascending order) within a
+		 * given transaction, however the list may contain logs used by
+		 * multiple transactions.
+		 */
+		qsort(tmp_logs, n, sizeof(UndoLogTemp), slot_cmp);
+	}
+
 	/* Scan all undo logs to build the results. */
 	for (i = 0; i < UndoLogShared->nslots; ++i)
 	{
@@ -1851,6 +2199,11 @@ pg_stat_get_undo_logs(PG_FUNCTION_ARGS)
 		Datum		values[PG_STAT_GET_UNDO_LOGS_COLS];
 		bool		nulls[PG_STAT_GET_UNDO_LOGS_COLS] = {false};
 		Oid			tablespace;
+		UndoLogNumber logno = slot->logno;
+		UndoLogOffset begin,
+					end,
+					insert,
+					discard;
 
 		/*
 		 * This won't be a consistent result overall, but the values for each
@@ -1873,18 +2226,56 @@ pg_stat_get_undo_logs(PG_FUNCTION_ARGS)
 										slot->meta.persistence == RELPERSISTENCE_TEMP ? "temporary" : "?");
 		tablespace = slot->meta.tablespace;
 
+		if (slot->meta.persistence != RELPERSISTENCE_TEMP)
+		{
+			begin = slot->begin;
+			end = slot->end;
+			insert = slot->meta.insert;
+			discard = slot->meta.discard;
+		}
+		/* Temporary undo of other backends is not visible to us. */
+		else if (slot->pid != MyProcPid)
+		{
+			nulls[3] = true;
+			nulls[4] = true;
+			nulls[5] = true;
+			nulls[6] = true;
+			/* Keep compiler quiet. */
+			begin = end = insert = discard = 0;
+		}
+		else
+		{
+			/* Find the information on this backend's log. */
+			UndoLogTemp key,
+					   *log;
+			UndoLogFile *file;
+
+			key.file.logno = slot->logno;
+
+			log = (UndoLogTemp *) bsearch((void *) &key, (void *) tmp_logs,
+										  list_length(temp_undo_logs),
+										  sizeof(UndoLogTemp),
+										  slot_cmp);
+			file = (UndoLogFile *) &log->file;
+			begin = file->begin;
+			end = file->end;
+			insert = log->insert;
+			discard = log->discard;
+		}
+
 		snprintf(buffer, sizeof(buffer), UndoRecPtrFormat,
-				 MakeUndoRecPtr(slot->logno, slot->begin));
+				 MakeUndoRecPtr(logno, begin));
 		values[3] = CStringGetTextDatum(buffer);
 		snprintf(buffer, sizeof(buffer), UndoRecPtrFormat,
-				 MakeUndoRecPtr(slot->logno, slot->meta.discard));
+				 MakeUndoRecPtr(logno, discard));
 		values[4] = CStringGetTextDatum(buffer);
 		snprintf(buffer, sizeof(buffer), UndoRecPtrFormat,
-				 MakeUndoRecPtr(slot->logno, slot->meta.insert));
+				 MakeUndoRecPtr(logno, insert));
 		values[5] = CStringGetTextDatum(buffer);
 		snprintf(buffer, sizeof(buffer), UndoRecPtrFormat,
-				 MakeUndoRecPtr(slot->logno, slot->end));
+				 MakeUndoRecPtr(logno, end));
 		values[6] = CStringGetTextDatum(buffer);
+
 		if (slot->xid == InvalidTransactionId)
 			nulls[7] = true;
 		else
@@ -1920,6 +2311,8 @@ pg_stat_get_undo_logs(PG_FUNCTION_ARGS)
 
 	if (tablespace_name)
 		pfree(tablespace_name);
+	if (tmp_logs)
+		pfree(tmp_logs);
 	tuplestore_donestoring(tupstore);
 
 	return (Datum) 0;
@@ -1957,6 +2350,8 @@ pg_force_discard_undo_log(PG_FUNCTION_ARGS)
 		elog(ERROR, "undo log not found (slot recycled)");
 	if (TransactionIdIsActive(slot->xid))
 		elog(ERROR, "undo log in use by an active transaction");
+	if (slot->meta.persistence == RELPERSISTENCE_TEMP)
+		elog(ERROR, "temporary undo is discarded by backends");
 	new_discard = slot->meta.insert;
 	LWLockRelease(&slot->meta_lock);
 
@@ -2056,7 +2451,7 @@ discard_undo_buffers(int logno, UndoLogOffset old_discard,
 	UndoRecPtrAssignRelFileNode(rnode, MakeUndoRecPtr(logno, old_discard));
 	old_blockno = old_discard / BLCKSZ;
 	new_blockno = new_discard / BLCKSZ;
-	if (drop_tail)
+	if (drop_tail && new_discard % BLCKSZ != 0)
 		++new_blockno;
 	if (UndoLogNumberGetPersistence(logno) == RELPERSISTENCE_TEMP)
 	{
@@ -2129,8 +2524,6 @@ undolog_redo(XLogReaderState *record)
 /*
  * Get the undo persistence level that corresponds to a relation persistence
  * level.
- *
- * TODO Remove, UndoPersistenceForRelPersistence() exists already.
  */
 UndoPersistenceLevel
 GetUndoPersistenceLevel(char relpersistence)

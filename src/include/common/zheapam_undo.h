@@ -129,18 +129,6 @@ typedef struct UndoRecordPayload
 	(offsetof(UndoRecordPayload, urec_tuple_len) + sizeof(uint16))
 
 /*
- * PrepareXactUndoData() receives a chain of UndoRecData structs and turns it
- * int the actual record. This is the same concept that xloginsert.c uses to
- * construct the record out of XLogRecData items.
- */
-typedef struct UndoRecData
-{
-	struct UndoRecData *next;	/* next struct in chain, or NULL */
-	char	   *data;			/* start of rmgr data to include */
-	Size		len;			/* length of rmgr data to include */
-}			UndoRecData;
-
-/*
  * Information that can be used to create an undo record or that can be
  * extracted from one previously created.  The raw undo record format is
  * difficult to manage, so this structure provides a convenient intermediate
@@ -178,7 +166,7 @@ typedef struct UnpackedUndoRecord
 	bool		data_copy;		/* do payload and tuple point to copies? */
 }			UnpackedUndoRecord;
 
-extern UndoRecData * PrepareZHeapUndoRecord(UnpackedUndoRecord * uur);
+extern UndoRecData *PrepareZHeapUndoRecord(UnpackedUndoRecord * uur);
 extern void UnpackZHeapUndoRecord(char *readptr, bool header_only, bool copy,
 								  UnpackedUndoRecord * uur);
 extern Size UnpackedUndoRecordSize(UnpackedUndoRecord * uur);

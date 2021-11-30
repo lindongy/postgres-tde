@@ -99,6 +99,7 @@ get_urs_type_header_size(UndoRecordSetType type)
 extern UndoRecordSet *UndoCreate(UndoRecordSetType type, char presistence,
 								 int nestingLevel, Size type_header_size,
 								 char *type_header);
+extern UndoRecPtr UndoGetFirstChunkPtr(UndoRecordSet *urs);
 extern bool UndoPrepareToMarkClosed(UndoRecordSet *urs);
 extern void UndoMarkClosed(UndoRecordSet *urs);
 extern void UndoPrepareToOverwriteChunkData(UndoRecPtr urp, int data_size,
@@ -113,7 +114,8 @@ extern void UndoPrepareToSetChunkHeaderFlag(UndoRecPtr chunk_hdr,
 											Buffer *buf);
 extern void UndoSetChunkHeaderFlag(UndoRecPtr chunk_hdr, uint16 off,
 								   Buffer buf,
-								   uint8 first_block_id);
+								   uint8 first_block_id,
+								   bool need_wal);
 extern void UndoPageSetLSN(UndoRecordSet *urs, XLogRecPtr lsn);
 extern void UndoRelease(UndoRecordSet *urs);
 extern void UndoDestroy(UndoRecordSet *urs);
