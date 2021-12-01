@@ -133,8 +133,13 @@ UndoWorkerMain(Datum main_arg)
 
 	BackgroundWorkerInitializeConnectionByOid(dboid, InvalidOid, 0);
 
-	/* Do the actual work. */
+	/*
+	 * Do the actual work. Do that in a transaction because we need to open
+	 * (and lock) relations, and also need a resource owner to access buffers.
+	 */
+	StartTransactionCommand();
 	ApplyPendingUndo();
+	CommitTransactionCommand();
 
 	elog(DEBUG2, "undo worker for database %u exiting", dboid);
 	proc_exit(0);
