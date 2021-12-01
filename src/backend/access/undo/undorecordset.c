@@ -2658,15 +2658,7 @@ ApplyPendingUndo(void)
 		}
 		else if (TransactionIdIsPrepared(xid))
 		{
-			/*
-			 * Prepared transactions may still need the undo log.
-			 *
-			 * Since no connection should exist at the moment, only prepared
-			 * transactions should be in the proc array now, so
-			 * TransactionIdIsInProgress() would normally reveal them. However
-			 * that function does not work in the startup worker, as it does
-			 * not have MyProc->pgxactoff set.
-			 */
+			/* Prepared transactions may still need the undo log. */
 		}
 		else
 		{
@@ -2679,14 +2671,7 @@ ApplyPendingUndo(void)
 			 */
 			if (!entry->applied)
 			{
-				/*
-				 * As we're not in a failed transaction now, we might want to
-				 * create a dummy transaction state. So far let's assume that
-				 * the RMGR specific undo routines only deal with shared
-				 * buffers and WAL, e.g. they do not open relations. Thus we
-				 * should not need transaction state like we don't need it for
-				 * WAL replay.
-				 */
+				/* Do the actual work. */
 				PerformUndoActionsRange(entry->begin, entry->end,
 										entry->persistence, 1);
 
