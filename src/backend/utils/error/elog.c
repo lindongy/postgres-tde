@@ -68,6 +68,7 @@
 
 #include "access/transam.h"
 #include "access/xact.h"
+#include "access/xactundo.h"
 #include "libpq/libpq.h"
 #include "libpq/pqformat.h"
 #include "mb/pg_wchar.h"
@@ -355,6 +356,21 @@ errstart(int elevel, const char *domain)
 		 * errors.  See miscadmin.h.
 		 */
 		if (CritSectionCount > 0)
+			elevel = PANIC;
+
+		/*
+		 * If FATAL, we shouldn't try to execute undo because the process
+		 * might be short of resources. However we also should not leave the
+		 * undo there because unapplied undo cannot be discarded, and
+		 * therefore undo segments would pile up in the file system until the
+		 * next restart. Therefore we choose to enforce crash and expect that
+		 * the undo will be applied during restart.
+		 *
+		 * TODO This is probably too brute force approach. Consider if the
+		 * discard worker can recognize the undo record sets left behind
+		 * FATALed backends and apply them.
+		 */
+		if (elevel >= FATAL && XactHasUndo())
 			elevel = PANIC;
 
 		/*
