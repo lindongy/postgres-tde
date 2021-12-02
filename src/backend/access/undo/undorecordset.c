@@ -2418,16 +2418,20 @@ GetAllUndoRecordSets(void)
 			Assert(cur <= insert);
 
 			/*
-			 * Callers of this function are not interested in open chunks.
-			 *
-			 * Note: this should only be possible if the inserting backend
-			 * crashed. On the other hand, if the URS is still being inserted,
-			 * all its buffers should be locked in exclusive mode so we cannot
-			 * include it in our result.
+			 * Open (i.e. possibly incomplete) chunks are not useful for the
+			 * callers of this function.
 			 */
 			if (size == 0)
 			{
-				/* Caller is not interested in incomplete URS as well. */
+				/*
+				 * If this is not the first chunk of the URS, there should
+				 * already be an entry for it in our hash table. Callers of
+				 * this function are not interested in not-yet-finished
+				 * transaction: 1) URS of such a transaction cannot be
+				 * discarded, 2) even AdvanceOldestXidHavingUndo() can ignore
+				 * such transaction because its definitely newer than
+				 * oldestXmin.
+				 */
 				if (chunk_hdr.previous_chunk != InvalidUndoRecPtr)
 				{
 					entry = chunktable_lookup(chunks,
@@ -2442,12 +2446,6 @@ GetAllUndoRecordSets(void)
 
 				break;
 			}
-
-			/*
-			 * TODO Can empty sets be there? If we want to skip them, consider
-			 * that UsableBytesPerUndoPage needs to be taken into account when
-			 * checking the minimum size (i.e. the total size of headers).
-			 */
 
 			/* The first chunk is followed by the type header. */
 			if (chunk_hdr.type == URST_TRANSACTION &&
@@ -2764,10 +2762,14 @@ AdvanceOldestXidHavingUndo(void)
 	 * stay available to all transactions that consider the deleting
 	 * transaction as running). The running lazy VACUUM processes do not
 	 * affect this value (see procarray.c for explanation), which is ok for us
-	 * because VACUUM does not produce any undo. (Conversely, VACUUM itself
-	 * does not need undo log of other backends. If it did, we couldn't
-	 * determine the horizon here and the VACUUM processes would have to get
-	 * involved in the computation.)
+	 * because even if VACUUM produces undo log, that log will prevent us from
+	 * advancing oldestXidHavingUndo too much - see the loop
+	 * below.
+	 *
+	 * (Conversely, VACUUM itself does not need undo log of other
+	 * backends. If it did, we might not be able to determine the horizon here
+	 * and the VACUUM processes would have to get involved in the
+	 * computation.)
 	 */
 	oldestXmin = GetOldestNonRemovableTransactionId(NULL);
 
@@ -2823,7 +2825,16 @@ AdvanceOldestXidHavingUndo(void)
 
 		if (TransactionIdDidCommit(xid))
 		{
-			/* Undo should never be needed, so mark the chunk discarded. */
+			/*
+			 * Undo should never be needed, so mark the chunk discarded.
+			 *
+			 * Even if the undo was produced by VACUUM which was still running
+			 * at the time we computed our oldestXmin, we can discard it
+			 * because those undo records only exist to change the status of
+			 * the item pointers from 'unused' back to 'dead'. In other words,
+			 * they contain no information that other transactions could be
+			 * interested in.
+			 */
 			UndoSetFlag(entry->last_chunk,
 						offsetof(UndoRecordSetChunkHeader, discarded),
 						entry->persistence);
