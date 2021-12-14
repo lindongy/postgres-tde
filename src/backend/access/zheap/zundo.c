@@ -1759,9 +1759,6 @@ UndoRecordBulkFetchPage(UndoRecPtr *from_urecptr, int undo_apply_size,
 		/* Remember the previous undo record pointer. */
 		prev_urec_ptr = urecptr;
 
-		/* Follow the blkprev chain of the page. */
-		urecptr = uur->uur_blkprev;
-
 		/* We have consumed all elements of the urp_array so expand its size. */
 		if (urp_index >= urp_array_size)
 		{
@@ -1772,6 +1769,9 @@ UndoRecordBulkFetchPage(UndoRecPtr *from_urecptr, int undo_apply_size,
 
 		/* Unpack the record. */
 		UnpackZHeapUndoRecord(node->data, false, true, uur);
+
+		/* Follow the blkprev chain of the page. */
+		urecptr = uur->uur_blkprev;
 
 		/* Add entry in the urp_array */
 		urp_array[urp_index].index = urp_index;
