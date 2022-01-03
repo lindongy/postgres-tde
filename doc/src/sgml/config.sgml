@@ -1664,7 +1664,9 @@ include_dir 'conf.d'
        <para>
         At present, this setting is supported only on Linux and Windows. The
         setting is ignored on other systems when set to
-        <literal>try</literal>.
+        <literal>try</literal>.  On Linux, it is only supported when
+        <varname>shared_memory_type</varname> is set to <literal>mmap</literal>
+        (the default).
        </para>
 
        <para>
@@ -8795,7 +8797,7 @@ COPY postgres_log FROM '/full/path/to/logfile.csv' WITH csv;
       </listitem>
      </varlistentry>
 
-     <varlistentry id="guc-multixact-failsafe-age" xreflabel="vacuum_multixact_failsafe_age">
+     <varlistentry id="guc-vacuum-multixact-failsafe-age" xreflabel="vacuum_multixact_failsafe_age">
       <term><varname>vacuum_multixact_failsafe_age</varname> (<type>integer</type>)
       <indexterm>
        <primary><varname>vacuum_multixact_failsafe_age</varname> configuration parameter</primary>

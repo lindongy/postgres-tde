@@ -1237,9 +1237,10 @@ sub _set_pg_version
 		# complain about that, too.
 		$pg_config = "$inst/bin/pg_config";
 		BAIL_OUT("pg_config not found: $pg_config")
-		  unless -e $pg_config;
+		  unless -e $pg_config
+		  or ($TestLib::windows_os and -e "$pg_config.exe");
 		BAIL_OUT("pg_config not executable: $pg_config")
-		  unless -x $pg_config;
+		  unless $TestLib::windows_os or -x $pg_config;
 
 		# Leave $pg_config install_path qualified, to be sure we get the right
 		# version information, below, or die trying
@@ -1942,6 +1943,92 @@ sub interactive_psql
 	die "psql startup timed out" if $timer->is_expired;
 
 	return $harness;
+}
+
+# Common sub of pgbench-invoking interfaces.  Makes any requested script files
+# and returns pgbench command-line options causing use of those files.
+sub _pgbench_make_files
+{
+	my ($self, $files) = @_;
+	my @file_opts;
+
+	if (defined $files)
+	{
+
+		# note: files are ordered for determinism
+		for my $fn (sort keys %$files)
+		{
+			my $filename = $self->basedir . '/' . $fn;
+			push @file_opts, '-f', $filename;
+
+			# cleanup file weight
+			$filename =~ s/\@\d+$//;
+
+			#push @filenames, $filename;
+			# filenames are expected to be unique on a test
+			if (-e $filename)
+			{
+				ok(0, "$filename must not already exist");
+				unlink $filename or die "cannot unlink $filename: $!";
+			}
+			TestLib::append_to_file($filename, $$files{$fn});
+		}
+	}
+
+	return @file_opts;
+}
+
+=pod
+
+=item $node->pgbench($opts, $stat, $out, $err, $name, $files, @args)
+
+Invoke B<pgbench>, with parameters and files.
+
+=over
+
+=item $opts
+
+Options as a string to be split on spaces.
+
+=item $stat
+
+Expected exit status.
+
+=item $out
+
+Reference to a regexp list that must match stdout.
+
+=item $err
+
+Reference to a regexp list that must match stderr.
+
+=item $name
+
+Name of test for error messages.
+
+=item $files
+
+Reference to filename/contents dictionary.
+
+=item @args
+
+Further raw options or arguments.
+
+=back
+
+=cut
+
+sub pgbench
+{
+	local $Test::Builder::Level = $Test::Builder::Level + 1;
+
+	my ($self, $opts, $stat, $out, $err, $name, $files, @args) = @_;
+	my @cmd = (
+		'pgbench',
+		split(/\s+/, $opts),
+		$self->_pgbench_make_files($files), @args);
+
+	$self->command_checks_all(\@cmd, $stat, $out, $err, $name);
 }
 
 =pod
