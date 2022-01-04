@@ -38,6 +38,7 @@ typedef struct SendKeyArgs
 	const unsigned char *encryption_key;
 
 	long pm_pid;
+	bool	pm_exited;
 #ifdef WIN32
 	/*
 	 * Set this *in addition to* pm_pid, otherwise it's hard to tell whether
