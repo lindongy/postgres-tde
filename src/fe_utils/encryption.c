@@ -310,10 +310,16 @@ send_key_to_postmaster(SendKeyArgs *args)
 
 			if (waitpid((pid_t) args->pm_pid, &exitstatus, WNOHANG) ==
 				(pid_t) args->pm_pid)
+			{
+				args->pm_exited = true;
 				return false;
+			}
 #else
 			if (WaitForSingleObject(args->pmProcess, 0) == WAIT_OBJECT_0)
+			{
+				args->pm_exited = true;
 				return false;
+			}
 #endif
 		}
 
