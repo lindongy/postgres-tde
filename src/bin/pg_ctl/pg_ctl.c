@@ -962,6 +962,7 @@ do_start(void)
 
 #ifdef USE_ENCRYPTION
 	sk_args.pm_pid = pm_pid;
+	sk_args.pm_exited = false;
 	if (encryption_key_command)
 	{
 		char	*keycmd_conf_file;
@@ -986,25 +987,45 @@ do_start(void)
 		sk_args.encryption_key = NULL;
 	}
 
-	/*
-	 * Send the key to the postmaster, or an empty message if we have no
-	 * key. The latter means that postmaster should have tried to get the key
-	 * using a command that it might find in postgresql.conf, so we shouldn't
-	 * send it again.
-	 */
 	get_postmaster_address(&sk_args.host, &sk_args.port);
 #ifndef HAVE_UNIX_SOCKETS
 	if (encr_key_port)
 		sk_args.port = encr_key_port;
 #endif
 	sk_args.error_msg = NULL;
+
+	/*
+	 * Send the key to the postmaster, or an empty message if we have no
+	 * key. The latter means that postmaster should have tried to get the key
+	 * using a command that it might find in postgresql.conf, so we shouldn't
+	 * send it again.
+	 */
 	if (!send_key_to_postmaster(&sk_args))
 	{
-		write_stderr(_("%s: could not send encryption key to postmaster\n"),
-					 progname);
-		if (sk_args.error_msg)
-			write_stderr("%s\n", sk_args.error_msg);
-		exit(1);
+		/*
+		 * Skip the waiting below if we are sure that postmaster is no longer
+		 * alive. (It wouldn't work anyway if we called waitpid() for an
+		 * already exited process again.)
+		 */
+		if (sk_args.pm_exited)
+		{
+			if (do_wait)
+				print_msg(_(" stopped waiting\n"));
+			write_stderr(_("%s: could not start server\n"
+						   "Examine the log output.\n"),
+						 progname);
+			exit(1);
+		}
+
+		/*
+		 * Some other problem in the communication between pg_ctl and the
+		 * postmaster. If postmaster does not receive the key, it will fail to
+		 * start and report the missing encryption key in the server log.
+		 *
+		 * Formerly we used to report an error here, but the error message was
+		 * rather confusing. We could emit a debug message, but there's
+		 * nothing like a debug logging in pg_ctl.
+		 */
 	}
 #endif	/* USE_ENCRYPTION */
 
