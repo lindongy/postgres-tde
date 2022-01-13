@@ -5075,8 +5075,12 @@ ReadControlFile(void)
 	 * Initialize encryption, but not if the current backend has already done
 	 * that.
 	 */
-	if (ControlFile->data_cipher > PG_CIPHER_NONE && !data_encrypted)
+	if (DATA_CIPHER_GET_KIND(ControlFile->data_cipher) != PG_CIPHER_NONE &&
+		!data_encrypted)
 	{
+		/* Save the data cipher. */
+		data_cipher = ControlFile->data_cipher;
+
 		/*
 		 * Set data_encryption for caller to know that he needs to retrieve
 		 * the key and initialize the encryption context.
@@ -5567,7 +5571,9 @@ BootStrapXLOG(void)
 	{
 		char	sample[ENCRYPTION_SAMPLE_SIZE];
 
-		ControlFile->data_cipher = PG_CIPHER_AES_CTR_128;
+		/* The bootstrap process should have initialized data_cipher. */
+		Assert(DATA_CIPHER_GET_KIND(data_cipher) != PG_CIPHER_NONE);
+		ControlFile->data_cipher = data_cipher;
 
 		sample_encryption(sample);
 
@@ -5576,7 +5582,8 @@ BootStrapXLOG(void)
 	}
 	else
 	{
-		ControlFile->data_cipher = PG_CIPHER_NONE;
+		DATA_CIPHER_CLEAR(data_cipher);
+		ControlFile->data_cipher = data_cipher;
 		memset(ControlFile->encryption_verification, 0,
 			   ENCRYPTION_SAMPLE_SIZE);
 	}

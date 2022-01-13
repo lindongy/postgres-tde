@@ -24,7 +24,10 @@
 #include <openssl/evp.h>
 #endif	/* USE_ENCRYPTION */
 
-unsigned char encryption_key[ENCRYPTION_KEY_LENGTH];
+unsigned char encryption_key[ENCRYPTION_KEY_MAX_LENGTH];
+
+/* Copy of the corresponding field of ControlFileData */
+uint8 data_cipher = 0;
 
 char	   *encryption_key_command = NULL;
 
@@ -32,23 +35,36 @@ char	   *encryption_key_command = NULL;
  * Run the command that is supposed to generate encryption key and store it
  * where encryption_key points to. If valid string is passed for data_dir,
  * it's used to replace '%D' pattern in the command.
+ *
+ * If *key_len_p is greater than zero, it specifies the expected key
+ * length. If it's zero, caller expects the actual length to be reported via
+ * this argument.
  */
 void
-run_encryption_key_command(char *data_dir)
+run_encryption_key_command(char *data_dir, int *key_len_p)
 {
 	FILE	   *fp;
+	int		dlen;
 	char	*cmd, *sp, *dp, *endp;
 
 	Assert(encryption_key_command != NULL &&
 		   strlen(encryption_key_command) > 0);
 
-	cmd = palloc(strlen(encryption_key_command) + 1);
+	dlen = strlen(encryption_key_command);
+	if (data_dir)
+		dlen += strlen(data_dir);
+	/*
+	 * The terminating '\0'. XXX Is it worth subtracting 2 for the "%D"
+	 * part?
+	 */
+	dlen += 1;
+	cmd = palloc(dlen);
 
 	/*
 	 * Replace %D pattern in the command with the actual data directory path.
 	 */
 	dp = cmd;
-	endp = cmd + strlen(encryption_key_command);
+	endp = cmd + dlen - 1;
 	*endp = '\0';
 	for (sp = encryption_key_command; *sp; sp++)
 	{
@@ -108,7 +124,7 @@ run_encryption_key_command(char *data_dir)
 	}
 
 	/* Read the key. */
-	read_encryption_key_f(fp, cmd);
+	read_encryption_key_f(fp, cmd, key_len_p);
 
 	if (pclose(fp) != 0)
 	{
@@ -125,24 +141,46 @@ run_encryption_key_command(char *data_dir)
 
 /*
  * Read the encryption key from a file stream.
+ *
+ * The header comment of run_encryption_key_command() explains the key_len_p
+ * argument.
  */
 void
-read_encryption_key_f(FILE *f, char *command)
+read_encryption_key_f(FILE *f, char *command, int *key_len_p)
 {
-	char	   buf[ENCRYPTION_KEY_CHARS];
+	char	   buf[ENCRYPTION_KEY_MAX_CHARS];
+	int		key_len = *key_len_p;
 	int		read_len, c;
+	int		key_chars = key_len * 2;
+
+	Assert(key_len == 0 || key_len == 16 || key_len == 24 || key_len == 32);
 
 	read_len = 0;
 	while ((c = fgetc(f)) != EOF && c != '\n')
 	{
-		if (read_len >= ENCRYPTION_KEY_CHARS)
+		if (read_len >= ENCRYPTION_KEY_MAX_CHARS)
 		{
 #ifdef FRONTEND
-			pg_log_fatal("encryption key is too long, should be a %d character hex key", ENCRYPTION_KEY_CHARS);
+			pg_log_fatal("encryption key is too long, should contain no more than %d hexadecimal characters",
+						 ENCRYPTION_KEY_MAX_CHARS);
 			exit(EXIT_FAILURE);
 #else
 			ereport(FATAL,
-					(errmsg("encryption key is too long, should be a %d character hex key", ENCRYPTION_KEY_CHARS)));
+					(errmsg("encryption key is too long, should contain no more than %d hexadecimal characters",
+							ENCRYPTION_KEY_MAX_CHARS)));
+#endif	/* FRONTEND */
+		}
+
+		if (key_len > 0 && read_len >= key_chars)
+		{
+#ifdef FRONTEND
+			pg_log_fatal("encryption key is too long, should be a %d character hex string",
+						 key_len * 2);
+			exit(EXIT_FAILURE);
+#else
+			ereport(FATAL,
+					(errmsg("encryption key is too long, should be a %d character hex string",
+						key_len * 2)));
 #endif	/* FRONTEND */
 		}
 
@@ -168,31 +206,40 @@ read_encryption_key_f(FILE *f, char *command)
 #endif	/* FRONTEND */
 	}
 
-	if (read_len < ENCRYPTION_KEY_CHARS)
+	if (key_chars > 0 && read_len < key_chars)
 	{
 #ifdef FRONTEND
-		pg_log_fatal("encryption key is too short, should be a %d character hex key", ENCRYPTION_KEY_CHARS);
+		pg_log_fatal("encryption key is too short, should be a %d character hex string",
+					 key_len * 2);
 		exit(EXIT_FAILURE);
 #else
 		ereport(FATAL,
-				(errmsg("encryption key is too short, should be a %d character hex key", ENCRYPTION_KEY_CHARS)));
+				(errmsg("encryption key is too short, should be a %d character hex string",
+					key_len * 2)));
 #endif	/* FRONTEND */
 	}
 
+	Assert(read_len % 2 == 0);
+	if (key_len == 0)
+	{
+		key_len = read_len / 2;
+		*key_len_p = key_len;
+	}
+
 	/* Turn the hexadecimal representation into an array of bytes. */
-	encryption_key_from_string(buf);
+	encryption_key_from_string(buf, key_len);
 }
 
 /*
  * Use the input hexadecimal string to initialize the encryption_key variable.
  */
 void
-encryption_key_from_string(char key_str[ENCRYPTION_KEY_CHARS])
+encryption_key_from_string(char key_str[ENCRYPTION_KEY_MAX_CHARS], int key_len)
 {
-	int	encr_key_int[ENCRYPTION_KEY_LENGTH];
+	int	encr_key_int[ENCRYPTION_KEY_MAX_LENGTH];
 	int	i;
 
-	for (i = 0; i < ENCRYPTION_KEY_LENGTH; i++)
+	for (i = 0; i < key_len; i++)
 	{
 		/*
 		 * The code would be simpler with %2hhx conversion, but it does not
@@ -210,6 +257,7 @@ encryption_key_from_string(char key_str[ENCRYPTION_KEY_CHARS])
 #endif	/* FRONTEND */
 		}
 	}
-	for (i = 0; i < ENCRYPTION_KEY_LENGTH; i++)
+	memset(encryption_key, 0, ENCRYPTION_KEY_MAX_LENGTH);
+	for (i = 0; i < key_len; i++)
 		encryption_key[i] = (char) encr_key_int[i];
 }

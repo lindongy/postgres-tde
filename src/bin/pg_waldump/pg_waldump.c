@@ -1089,7 +1089,15 @@ main(int argc, char **argv)
 	if (data_encrypted)
 #ifdef USE_ENCRYPTION
 	{
-		run_encryption_key_command(NULL);
+		/*
+		 * There's no easy way to get the key length, so don't let us issue
+		 * error messages about incorrect key length. A key of incorrect
+		 * length will simply cause a failure to decrypt the data.
+		 */
+		int	key_len = 0;
+
+		run_encryption_key_command(NULL, &key_len);
+		DATA_CIPHER_SET(data_cipher, PG_CIPHER_AES_CTR_CBC, key_len);
 		setup_encryption();
 	}
 #else

@@ -467,8 +467,9 @@ perform_base_backup(basebackup_options *opt)
 					Assert(statbuf.st_size == PG_CONTROL_FILE_SIZE);
 
 					cfile = get_controlfile(".", &crc_ok);
-					cfile->data_cipher = PG_CIPHER_NONE;
-					cfile->encryption_verification[0] = '\0';
+					DATA_CIPHER_CLEAR(cfile->data_cipher);
+					memset(cfile->encryption_verification, 0,
+						   ENCRYPTION_SAMPLE_SIZE);
 
 					/* Recalculate CRC of control file */
 					INIT_CRC32C(cfile->crc);

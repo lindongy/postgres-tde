@@ -214,7 +214,7 @@ typedef struct EncryptionKeyMsg
 
 	bool	empty;	 /* doesn't this message contain any key? */
 	unsigned char	version;	/* message format version. */
-	char	data[ENCRYPTION_KEY_LENGTH];	/* the key itself. */
+	char	data[ENCRYPTION_KEY_MAX_LENGTH];	/* the key itself. */
 } EncryptionKeyMsg;
 
 #endif							/* PQCOMM_H */

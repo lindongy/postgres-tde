@@ -18,6 +18,7 @@
 #include <dirent.h>
 #include <unistd.h>
 
+#include "common/controldata_utils.h"
 #include "common/fe_memutils.h"
 #include "common/logging.h"
 #include "fe_utils/encryption.h"
@@ -35,7 +36,7 @@
 
 static const char *progname;
 
-extern unsigned char encryption_key[ENCRYPTION_KEY_LENGTH];
+extern unsigned char encryption_key[ENCRYPTION_KEY_MAX_LENGTH];
 
 static void
 usage(const char *progname)
@@ -83,7 +84,8 @@ main(int argc, char **argv)
 	int			i, n;
 	int			optindex;
 	char		password[ENCRYPTION_PWD_MAX_LENGTH];
-	char		key_chars[ENCRYPTION_KEY_CHARS];
+	char		key_chars[ENCRYPTION_KEY_MAX_CHARS];
+	int		key_len, key_nchars;
 
 	static struct option long_options[] =
 	{
@@ -159,22 +161,27 @@ main(int argc, char **argv)
 			DataDir = pg_strdup(DataDir);
 	}
 
-	if (DataDir)
-		canonicalize_path(DataDir);
-
 	/*
-	 * The KDF file is needed to derive the key from password, and this file
-	 * is located in the data directory.
+	 * The key length is stored in the KDF file. Furthermore, the KDF file is
+	 * needed if we're going to derive the key from the password.
 	 */
-	if (expect_password && DataDir == NULL)
+	if (DataDir == NULL)
 	{
 		pg_log_error("%s: no data directory specified", progname);
 		pg_log_error("Try \"%s --help\" for more information.", progname);
 		exit(EXIT_FAILURE);
 	}
 
+	canonicalize_path(DataDir);
+
 	if ((host || port_str))
 		to_server = true;
+
+	/* Read the KDF parameters. */
+	key_len = read_kdf_file(DataDir);
+
+	/* Two (hexadecimal) chars per byte. */
+	key_nchars = key_len * 2;
 
 	/*
 	 * Read the credentials (key or password).
@@ -185,9 +192,10 @@ main(int argc, char **argv)
 	{
 		if (!expect_password)
 		{
-			if (n >= ENCRYPTION_KEY_CHARS)
+			if (n >= key_nchars)
 			{
-				pg_log_error("The key is too long");
+				pg_log_error("The key is too long, should be a %d character hex string",
+							 key_nchars);
 				exit(EXIT_FAILURE);
 			}
 
@@ -197,7 +205,8 @@ main(int argc, char **argv)
 		{
 			if (n >= ENCRYPTION_PWD_MAX_LENGTH)
 			{
-				pg_log_error("The password is too long");
+				pg_log_error("The password is too long, the maximum length is %d characters",
+							 ENCRYPTION_PWD_MAX_LENGTH);
 				exit(EXIT_FAILURE);
 			}
 
@@ -208,24 +217,23 @@ main(int argc, char **argv)
 	/* If password was received, turn it into encryption key. */
 	if (!expect_password)
 	{
-		if (n < ENCRYPTION_KEY_CHARS)
+		if (n < key_nchars)
 		{
-			pg_log_error("The key is too short");
+			pg_log_error("The key is too short, should be a %d character hex string",
+						 key_nchars);
 			exit(EXIT_FAILURE);
 		}
 
-		encryption_key_from_string(key_chars);
+		encryption_key_from_string(key_chars, key_len);
 	}
 	else
 	{
 		if (n < ENCRYPTION_PWD_MIN_LENGTH)
 		{
-			pg_log_error("The password is too short");
+			pg_log_error("The password is too short, the minimum length is %d characters",
+						 ENCRYPTION_PWD_MIN_LENGTH);
 			exit(EXIT_FAILURE);
 		}
-
-		/* Read the KDF parameters. */
-		read_kdf_file(DataDir);
 
 		/* Run the KDF. */
 		derive_key_from_password(encryption_key, password, n);
@@ -236,7 +244,7 @@ main(int argc, char **argv)
 	 */
 	if (!to_server)
 	{
-		for (i = 0; i < ENCRYPTION_KEY_LENGTH; i++)
+		for (i = 0; i < key_len; i++)
 			printf("%.2x", encryption_key[i]);
 		printf("\n");
 	}

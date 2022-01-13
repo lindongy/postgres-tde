@@ -438,9 +438,13 @@ main(int argc, char *argv[])
 	 * If the data is encrypted, we also might need to encrypt the XLOG record
 	 * below.
 	 */
-	if (ControlFile.data_cipher > PG_CIPHER_NONE && !noupdate)
+	data_cipher = ControlFile.data_cipher;
+	if (DATA_CIPHER_GET_KIND(data_cipher) != PG_CIPHER_NONE &&
+		!noupdate)
 #ifdef USE_ENCRYPTION
 	{
+		int	key_len = DATA_CIPHER_GET_KEY_LENGTH(data_cipher);
+
 		/*
 		 * Try to retrieve the command from environment variable. We do this
 		 * primarily to create encrypted clusters during automated tests. XXX
@@ -455,7 +459,21 @@ main(int argc, char *argv[])
 		}
 
 		if (encryption_key_command)
-			run_encryption_key_command(DataDir);
+		{
+			char	*path;
+
+			/*
+			 * Since we're already in DataDir, adjust the path if it's
+			 * relative.
+			 */
+			if (!is_absolute_path(DataDir))
+				path = psprintf("%s/..", DataDir);
+			else
+				path = DataDir;
+			run_encryption_key_command(path, &key_len);
+			if (!is_absolute_path(DataDir))
+				pfree(path);
+		}
 		else
 		{
 			/*
@@ -463,7 +481,7 @@ main(int argc, char *argv[])
 			 * encryption key command (possibly interactive application)
 			 * because we have no access to terminal.
 			 */
-			read_encryption_key_f(stdin, NULL);
+			read_encryption_key_f(stdin, NULL, &key_len);
 		}
 
 		setup_encryption();
@@ -865,12 +883,16 @@ PrintControlValues(bool guessed)
 		   (ControlFile.float8ByVal ? _("by value") : _("by reference")));
 	printf(_("Data page checksum version:           %u\n"),
 		   ControlFile.data_checksum_version);
-	if (ControlFile.data_cipher > PG_CIPHER_NONE)
+	if (DATA_CIPHER_GET_KIND(ControlFile.data_cipher) != PG_CIPHER_NONE)
+	{
+		printf(_("Encryption key length:                %d\n"),
+			   DATA_CIPHER_GET_KEY_LENGTH(ControlFile.data_cipher) * 8);
 		printf(_("Data encryption fingerprint:          %08X%08X%08X%08X\n"),
 			   htonl(((uint32 *) ControlFile.encryption_verification)[0]),
 			   htonl(((uint32 *) ControlFile.encryption_verification)[1]),
 			   htonl(((uint32 *) ControlFile.encryption_verification)[2]),
 			   htonl(((uint32 *) ControlFile.encryption_verification)[3]));
+	}
 }
 
 

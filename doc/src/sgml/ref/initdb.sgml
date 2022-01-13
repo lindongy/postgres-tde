@@ -218,6 +218,20 @@ PostgreSQL documentation
       </listitem>
      </varlistentry>
 
+     <varlistentry id="app-initdb-data-encr-key-length" xreflabel="data
+        encryption key length">
+      <term><option>--key-bits=<replaceable class="parameter">nbits</replaceable></option></term>
+      <listitem>
+       <para>
+         If the cluster should be encrypted, this option can be used to
+         specify the key length in bits. Accepted values
+         are <literal>128</literal> (the default), <literal>192</literal>
+         and <literal>256</literal>. See <xref linkend="encryption"/> for
+         information on the key format.
+       </para>
+      </listitem>
+     </varlistentry>
+
      <varlistentry id="app-initdb-data-checksums" xreflabel="data checksums">
       <term><option>-k</option></term>
       <term><option>--data-checksums</option></term>

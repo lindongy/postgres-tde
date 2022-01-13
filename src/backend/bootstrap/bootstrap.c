@@ -389,19 +389,28 @@ AuxiliaryProcessMain(int argc, char *argv[])
 
 	/*
 	 * If data_encryption is set because of command line option, do the setup
-	 * now. (If set by postmaster, postmaster should have performed the
-	 * setup.)
+	 * now.
 	 *
 	 * This should only be useful for the bootstrap process. Anyone else
 	 * detects the encryption via ReadControlFile().
 	 */
 	if (data_encrypted && MyAuxProcType == BootstrapProcess)
 	{
+		int		key_length = 0;
+
 		Assert(!IsUnderPostmaster);
 		Assert(encryption_key_command &&
 			   strlen(encryption_key_command) > 0);
 
-		run_encryption_key_command(DataDir);
+		/*
+		 * User of the auxiliary process (typically initdb) should have
+		 * checked that the command returns a key of valid length. Thus we
+		 * don't need an extra command line option for it.
+		 */
+		run_encryption_key_command(DataDir, &key_length);
+		Assert(key_length == 16 || key_length == 24 || key_length == 32);
+
+		DATA_CIPHER_SET(data_cipher, PG_CIPHER_AES_CTR_CBC, key_length);
 
 		setup_encryption();
 	}

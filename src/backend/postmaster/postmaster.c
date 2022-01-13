@@ -542,7 +542,8 @@ typedef struct
 	int			MaxBackends;
 #ifdef USE_ENCRYPTION
 	bool		data_encrypted;
-	unsigned char encryption_key[ENCRYPTION_KEY_LENGTH];
+	uint8		data_cipher;
+	unsigned char encryption_key[ENCRYPTION_KEY_MAX_LENGTH];
 #endif
 #ifdef WIN32
 	HANDLE		PostmasterHandle;
@@ -1434,13 +1435,14 @@ PostmasterMain(int argc, char *argv[])
 	if (data_encrypted && !encryption_setup_done)
 	{
 		char	sample[ENCRYPTION_SAMPLE_SIZE];
+		int		key_length = DATA_CIPHER_GET_KEY_LENGTH(data_cipher);
 
 		/*
 		 * If the key command is in the configuration file, just run it,
 		 * otherwise let frontend application deliver it via FE/BE protocol.
 		 */
 		if (encryption_key_command)
-			run_encryption_key_command(DataDir);
+			run_encryption_key_command(DataDir, &key_length);
 		else
 		{
 			status = ServerLoop(true);
@@ -1456,7 +1458,8 @@ PostmasterMain(int argc, char *argv[])
 			 * Take a local copy of the key so that we don't have to receive
 			 * it again if restarting after a crash.
 			 */
-			memcpy(encryption_key, encryption_key_shmem, ENCRYPTION_KEY_LENGTH);
+			memcpy(encryption_key, encryption_key_shmem,
+				   ENCRYPTION_KEY_MAX_LENGTH);
 		}
 
 		/* Finalize the setup. */
@@ -2699,7 +2702,7 @@ processEncryptionKeyMessage(void *pkt)
 		return true;
 	}
 
-	memcpy(encryption_key, msg->data, ENCRYPTION_KEY_LENGTH);
+	memcpy(encryption_key, msg->data, ENCRYPTION_KEY_MAX_LENGTH);
 
 	return true;
 }
@@ -2759,7 +2762,8 @@ shareEncryptionKey(void)
 		}
 
 		ereport(LOG, (errmsg_internal("encryption key received")));
-		memcpy(encryption_key_shmem->data, encryption_key, ENCRYPTION_KEY_LENGTH);
+		memcpy(encryption_key_shmem->data, encryption_key,
+			   ENCRYPTION_KEY_MAX_LENGTH);
 	}
 
 	/*
@@ -6617,7 +6621,8 @@ save_backend_variables(BackendParameters *param, Port *port,
 	param->MaxBackends = MaxBackends;
 #ifdef USE_ENCRYPTION
 	param->data_encrypted = data_encrypted;
-	memcpy(param->encryption_key, encryption_key, ENCRYPTION_KEY_LENGTH);
+	param->data_cipher = data_cipher;
+	memcpy(param->encryption_key, encryption_key, ENCRYPTION_KEY_MAX_LENGTH);
 #endif
 
 #ifdef WIN32
@@ -6856,7 +6861,8 @@ restore_backend_variables(BackendParameters *param, Port *port)
 
 #ifdef USE_ENCRYPTION
 	data_encrypted = param->data_encrypted;
-	memcpy(encryption_key, param->encryption_key, ENCRYPTION_KEY_LENGTH);
+	data_cipher = param->data_cipher;
+	memcpy(encryption_key, param->encryption_key, ENCRYPTION_KEY_MAX_LENGTH);
 #endif
 
 #ifdef WIN32

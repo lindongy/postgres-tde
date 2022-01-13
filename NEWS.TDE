@@ -1,7 +1,13 @@
 TDE_1.1.0
 =========
 
-Improved encryption of temporary files.
+1. Added an option to choose the encryption key length
+
+Initially we only supported 128-bit keys. Now the user can use the --key-bits
+command line option of the initdb application to specify the key length. The
+accepted values are 128, 192 and 256.
+
+2. Improved encryption of temporary files.
 
 A new, unpredictable value of the initialization vector (IV) is now used for
 each execution of encryption. This affects the use cases where (a part of) an

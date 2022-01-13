@@ -114,7 +114,7 @@ static volatile pgpid_t postmasterPID = -1;
  * Define encryption_key locally rather that linking to storage/encryption.c
  * only because of this one variable.
  */
-extern unsigned char encryption_key[ENCRYPTION_KEY_LENGTH];
+extern unsigned char encryption_key[ENCRYPTION_KEY_MAX_LENGTH];
 #ifndef HAVE_UNIX_SOCKETS
 /*
  * Port at which postmaster listens for encryption key message.
@@ -186,6 +186,7 @@ static void unlimit_core_size(void);
 #endif
 
 static DBState get_control_dbstate(void);
+static int get_control_key_length(void);
 
 
 #ifdef WIN32
@@ -859,9 +860,9 @@ do_init(void)
 	{
 		size_t		len;
 
-		len = strlen(encryption_key_command) + 5;
+		len = strlen(encryption_key_command) + 7;
 		encr_opt_str = (char *) pg_malloc(len);
-		snprintf(encr_opt_str, len, " -K %s",
+		snprintf(encr_opt_str, len, " -K \"%s\"",
 				 encryption_key_command);
 	}
 	else
@@ -942,11 +943,13 @@ do_start(void)
 	if (encryption_key_command)
 #ifdef USE_ENCRYPTION
 	{
+		int		key_len = get_control_key_length();
+
 		/*
 		 * If encryption key is needed, retrieve it before trying to start
 		 * postmaster.
 		 */
-		run_encryption_key_command(pg_data);
+		run_encryption_key_command(pg_data, &key_len);
 	}
 #else
 	{
@@ -2473,6 +2476,23 @@ get_control_dbstate(void)
 	return ret;
 }
 
+static int
+get_control_key_length(void)
+{
+	int			ret;
+	bool		crc_ok;
+	ControlFileData *control_file_data = get_controlfile(pg_data, &crc_ok);
+
+	if (!crc_ok)
+	{
+		write_stderr(_("%s: control file appears to be corrupt\n"), progname);
+		exit(1);
+	}
+
+	ret = DATA_CIPHER_GET_KEY_LENGTH(control_file_data->data_cipher);
+	pfree(control_file_data);
+	return ret;
+}
 
 int
 main(int argc, char **argv)

@@ -245,7 +245,8 @@ scan_file(const char *fn, BlockNumber segmentno)
 		 * New pages have no checksum yet, unless it's encrypted - see
 		 * PageSetChecksumCopy() for explanation.
 		 */
-		if (ControlFile->data_cipher == PG_CIPHER_NONE && PageIsNew(header))
+		if (DATA_CIPHER_GET_KIND(ControlFile->data_cipher) == PG_CIPHER_NONE &&
+			PageIsNew(header))
 			continue;
 
 		csum = pg_checksum_page(buf.data, blockno + segmentno * RELSEG_SIZE);

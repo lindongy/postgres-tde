@@ -108,26 +108,31 @@ EncryptionShmemInit(void)
  * encryption_key variable.
  */
 void
-read_encryption_key(read_encryption_key_cb read_char)
+read_encryption_key(read_encryption_key_cb read_char, int key_len)
 {
 #ifdef USE_ENCRYPTION
-	char	buf[ENCRYPTION_KEY_CHARS];
+	char	buf[ENCRYPTION_KEY_MAX_CHARS];
 	int		read_len, c;
+	int		key_chars = key_len * 2; /* 2 hexadecimal characters per byte */
 
 	read_len = 0;
 	while ((c = (*read_char)()) != EOF && c != '\n')
 	{
-		if (read_len >= ENCRYPTION_KEY_CHARS)
-			ereport(FATAL, (errmsg("Encryption key is too long")));
+		if (read_len >= key_chars)
+			ereport(FATAL,
+					(errmsg("encryption key is too long, should be a %d character hex string",
+							key_chars)));
 
 		buf[read_len++] = c;
 	}
 
-	if (read_len < ENCRYPTION_KEY_CHARS)
-		ereport(FATAL, (errmsg("Encryption key is too short")));
+	if (read_len < key_chars)
+		ereport(FATAL,
+				(errmsg("encryption key is too short, should be a %d character hex string",
+						key_chars)));
 
 	/* Turn the hexadecimal representation into an array of bytes. */
-	encryption_key_from_string(buf);
+	encryption_key_from_string(buf, key_len);
 
 #else  /* !USE_ENCRYPTION */
 	/*
@@ -161,6 +166,9 @@ setup_encryption(void)
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
 	OPENSSL_config(NULL);
 #endif
+
+	/* Currently we only use this one cipher. */
+	Assert(DATA_CIPHER_GET_KIND(data_cipher) == PG_CIPHER_AES_CTR_CBC);
 
 	init_encryption_context(&ctx_encrypt, true, false);
 	init_encryption_context(&ctx_decrypt, false, false);
@@ -502,12 +510,12 @@ decrypt_block(const char *input, char *output, Size size, char *tweak,
  * Initialize the OpenSSL context for passed cipher.
  *
  * On server side this happens during postmaster startup, so other processes
- * inherit the initialized context via fork(). There's no reason to this again
- * and again in encrypt_block() / decrypt_block(), also because we should not
- * handle out-of-memory conditions encountered by OpenSSL in another way than
- * ereport(FATAL). The OOM is much less likely to happen during postmaster
- * startup, and even if it happens, troubleshooting should be easier than if
- * it happened during normal operation.
+ * inherit the initialized context via fork(). There's no reason to do this
+ * again and again in encrypt_block() / decrypt_block(), also because we
+ * should not handle out-of-memory conditions encountered by OpenSSL in
+ * another way than ereport(FATAL). The OOM is much less likely to happen
+ * during postmaster startup, and even if it happens, troubleshooting should
+ * be easier than if it happened during normal operation.
  *
  * XXX Do we need to call EVP_CIPHER_CTX_cleanup() (via on_proc_exit callback
  * for server processes and other way for front-ends)? Not sure it's
@@ -518,14 +526,30 @@ static void
 init_encryption_context(EVP_CIPHER_CTX **ctx_p, bool encrypt, bool buffile)
 {
 	EVP_CIPHER_CTX *ctx;
-	const EVP_CIPHER *cipher;
+	const EVP_CIPHER *cipher = NULL;
+	int	key_length = DATA_CIPHER_GET_KEY_LENGTH(data_cipher);
 
 	/*
 	 * Currently we use CBC mode for buffile.c because CTR imposes much more
 	 * stringent requirements on IV (i.e. the same IV must not be used
 	 * repeatedly.)
 	 */
-	cipher = !buffile ? EVP_aes_128_ctr() : EVP_aes_128_cbc();
+	if (key_length == 16)
+		cipher = !buffile ? EVP_aes_128_ctr() : EVP_aes_128_cbc();
+	else if (key_length == 24)
+		cipher = !buffile ? EVP_aes_192_ctr() : EVP_aes_192_cbc();
+	else if (key_length == 32)
+		cipher = !buffile ? EVP_aes_256_ctr() : EVP_aes_256_cbc();
+	else
+	{
+#ifndef FRONTEND
+		ereport(ERROR, (errmsg("invalid key length %d", key_length)));
+#else
+		/* Front-end shouldn't actually get here, but be careful. */
+		fprintf(stderr, "invalid key length %d", key_length);
+		exit(EXIT_FAILURE);
+#endif	/* FRONTEND */
+	}
 
 	if ((*ctx_p = EVP_CIPHER_CTX_new()) == NULL)
 		evp_error();
@@ -559,7 +583,7 @@ init_encryption_context(EVP_CIPHER_CTX **ctx_p, bool encrypt, bool buffile)
 	EVP_CIPHER_CTX_set_padding(ctx, 0);
 
 	Assert(EVP_CIPHER_CTX_iv_length(ctx) == TWEAK_SIZE);
-	Assert(EVP_CIPHER_CTX_key_length(ctx) == ENCRYPTION_KEY_LENGTH);
+	Assert(EVP_CIPHER_CTX_key_length(ctx) == key_length);
 }
 
 #endif							/* USE_ENCRYPTION */

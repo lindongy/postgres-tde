@@ -33,12 +33,15 @@
 
  <para>
    The encryption key is expected in hexadecimal format, two characters
-   (hexadecimal digits) per byte. Since <productname>PostgreSQL</productname>
-   currently uses a key of length 16 bytes (128 bits), the expected length of
-   the key string is 32 characters. For example:
+   (hexadecimal digits) per byte. For the default key length of 128 bits (16
+   bytes), the expected length of the key string is 32 characters. For
+   example:
    <computeroutput>
      882fb7c12e80280fd664c69d2d636913
    </computeroutput>
+   Likewise, for the key lengths <literal>192</literal> and
+<literal>256</literal> bits, the key string length should
+   be <literal>48</literal> and <literal>64</literal> characters respectively.
  </para>
 
  <para>

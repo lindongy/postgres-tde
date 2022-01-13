@@ -14,9 +14,10 @@
  */
 #include "common/encryption.h"
 
-extern void init_kdf(void);
+extern void init_kdf(int key_len);
+extern void update_kdf_key_length(uint8 key_len);
 extern void write_kdf_file(char *dir);
-extern void read_kdf_file(char *dir);
+extern int read_kdf_file(char *dir);
 extern void derive_key_from_password(unsigned char *encryption_key,
 									 const char *password, int len);
 

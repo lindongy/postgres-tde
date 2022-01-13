@@ -345,9 +345,11 @@ main(int argc, char **argv)
 	 * Setup encryption if it's obvious that we'll have to deal with encrypted
 	 * XLOG.
 	 */
-	if (ControlFile_target.data_cipher > PG_CIPHER_NONE)
+	if (DATA_CIPHER_GET_KIND(ControlFile_target.data_cipher) != PG_CIPHER_NONE)
 #ifdef USE_ENCRYPTION
 	{
+		int		key_len;
+
 		/*
 		 * Try to retrieve the command from environment variable. We do this
 		 * primarily to make automated tests work for encrypted cluster w/o
@@ -372,7 +374,9 @@ main(int argc, char **argv)
 		 * directory. It should have been checked earlier that both clusters
 		 * are encrypted using the same key.
 		 */
-		run_encryption_key_command(datadir_source);
+		data_cipher = ControlFile_source.data_cipher;
+		key_len = DATA_CIPHER_GET_KEY_LENGTH(data_cipher);
+		run_encryption_key_command(datadir_source, &key_len);
 		setup_encryption();
 		data_encrypted = true;
 	}
@@ -782,14 +786,17 @@ sanityChecks(void)
 	 * differently encrypted clusters is not the typical use case for
 	 * pg_rewind. Yet we should check the encryption.
 	 */
-	if (ControlFile_source.data_cipher > PG_CIPHER_NONE ||
-		ControlFile_target.data_cipher > PG_CIPHER_NONE)
+	if (DATA_CIPHER_GET_KIND(ControlFile_source.data_cipher) != PG_CIPHER_NONE ||
+		DATA_CIPHER_GET_KIND(ControlFile_target.data_cipher) != PG_CIPHER_NONE)
 	{
-		if (ControlFile_source.data_cipher !=
-			ControlFile_target.data_cipher)
+		if (DATA_CIPHER_GET_KIND(ControlFile_source.data_cipher) !=
+			DATA_CIPHER_GET_KIND(ControlFile_target.data_cipher))
 			pg_fatal("source and target server must be both unencrypted or both encrypted\n");
 
-		if (memcmp(ControlFile_source.encryption_verification,
+		/* Keys should match. */
+		if (DATA_CIPHER_GET_KEY_LENGTH(ControlFile_source.data_cipher) !=
+			DATA_CIPHER_GET_KEY_LENGTH(ControlFile_target.data_cipher) ||
+			memcmp(ControlFile_source.encryption_verification,
 				   ControlFile_target.encryption_verification,
 				   ENCRYPTION_SAMPLE_SIZE))
 			pg_fatal("both source and target server must use the same encryption key");

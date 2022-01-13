@@ -57,7 +57,7 @@ static char *get_encryption_key_command(char *bindir, char *pgconfig);
 static void prepare_new_cluster(void);
 static void prepare_new_globals(void);
 static void create_new_objects(void);
-static void copy_xact_xlog_xid(void);
+static void copy_xact_xlog_xid(EncryptionKey *encryption_key);
 static void set_frozenxids(bool minmxid_only);
 static void setup(char *argv0, bool *live_check);
 static void cleanup(void);
@@ -84,7 +84,7 @@ char encryption_key_command_opt[MAXPGPATH];
  * here.
  */
 bool		encryption_setup_done = false;
-extern unsigned char encryption_key[ENCRYPTION_KEY_LENGTH];
+extern unsigned char encryption_key[ENCRYPTION_KEY_MAX_LENGTH];
 
 int
 main(int argc, char **argv)
@@ -93,6 +93,7 @@ main(int argc, char **argv)
 	bool		live_check = false;
 #ifdef USE_ENCRYPTION
 	char	*key_cmd_pgconf;
+	EncryptionKey	encr_key_arg;
 #endif
 
 	pg_logging_init(argv[0]);
@@ -110,6 +111,24 @@ main(int argc, char **argv)
 	adjust_data_dir(&new_cluster);
 
 	setup(argv[0], &live_check);
+
+	output_check_banner(live_check);
+
+	check_cluster_versions();
+
+	get_sock_dir(&old_cluster, live_check);
+	get_sock_dir(&new_cluster, false);
+
+	check_cluster_compatibility(live_check);
+
+	/* Set mask based on PGDATA permissions */
+	if (!GetDataDirectoryCreatePerm(new_cluster.pgdata))
+		pg_fatal("could not read permissions of directory \"%s\": %s\n",
+				 new_cluster.pgdata, strerror(errno));
+
+	umask(pg_mode_mask);
+
+	check_and_dump_old_cluster(live_check);
 
 #ifdef USE_ENCRYPTION
 	/* Try to get the encryption key command from postgresql.conf. */
@@ -147,11 +166,21 @@ main(int argc, char **argv)
 	 */
 	if (encryption_key_command)
 	{
+		int	key_len;
+
 		/*
-		 * Both clusters should have the same KDF parameters, so we can pass
-		 * pgdata of any one.
+		 * We've already checked that both clusters use encryption key of the
+		 * same length.
 		 */
-		run_encryption_key_command(old_cluster.pgdata);
+		key_len = DATA_CIPHER_GET_KEY_LENGTH(old_cluster.controldata.data_cipher);
+
+		/*
+		 * Both clusters should eventually have KDF parameters of the old one,
+		 * so pass the old cluster's pgdata here.
+		 */
+		run_encryption_key_command(old_cluster.pgdata, &key_len);
+		encr_key_arg.data = encryption_key;
+		encr_key_arg.length = key_len;
 		encryption_setup_done = true;
 	}
 
@@ -165,25 +194,6 @@ main(int argc, char **argv)
 		Assert(false);
 	}
 #endif	/* USE_ENCRYPTION */
-
-	output_check_banner(live_check);
-
-	check_cluster_versions();
-
-	get_sock_dir(&old_cluster, live_check);
-	get_sock_dir(&new_cluster, false);
-
-	check_cluster_compatibility(live_check);
-
-	/* Set mask based on PGDATA permissions */
-	if (!GetDataDirectoryCreatePerm(new_cluster.pgdata))
-		pg_fatal("could not read permissions of directory \"%s\": %s\n",
-				 new_cluster.pgdata, strerror(errno));
-
-	umask(pg_mode_mask);
-
-	check_and_dump_old_cluster(live_check);
-
 
 	/* -- NEW -- */
 	start_postmaster(&new_cluster, true);
@@ -204,7 +214,7 @@ main(int argc, char **argv)
 	 * Destructive Changes to New Cluster
 	 */
 
-	copy_xact_xlog_xid();
+	copy_xact_xlog_xid(encryption_setup_done ? &encr_key_arg : NULL);
 
 	if (encryption_setup_done)
 #ifdef USE_ENCRYPTION
@@ -254,7 +264,7 @@ main(int argc, char **argv)
 	 */
 	prep_status("Setting next OID for new cluster");
 	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
-			  encryption_setup_done ? encryption_key : NULL,
+			  encryption_setup_done ? &encr_key_arg : NULL,
 			  "\"%s/pg_resetwal\" -o %u \"%s\"",
 			  new_cluster.bindir,
 			  old_cluster.controldata.chkpnt_nxtoid,
@@ -587,7 +597,7 @@ copy_subdir_files(const char *old_subdir, const char *new_subdir)
 }
 
 static void
-copy_xact_xlog_xid(void)
+copy_xact_xlog_xid(EncryptionKey *encryption_key)
 {
 	/*
 	 * Copy old commit logs to new data dir. pg_clog has been renamed to
@@ -600,7 +610,7 @@ copy_xact_xlog_xid(void)
 
 	prep_status("Setting oldest XID for new cluster");
 	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
-			  encryption_setup_done ? encryption_key : NULL,
+			  encryption_key,
 			  "\"%s/pg_resetwal\" -f -u %u \"%s\"",
 			  new_cluster.bindir, old_cluster.controldata.chkpnt_oldstxid,
 			  new_cluster.pgdata);
@@ -609,20 +619,20 @@ copy_xact_xlog_xid(void)
 	/* set the next transaction id and epoch of the new cluster */
 	prep_status("Setting next transaction ID and epoch for new cluster");
 	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
-			  encryption_setup_done ? encryption_key : NULL,
+			  encryption_key,
 			  "\"%s/pg_resetwal\" -f -x %u \"%s\"",
 			  new_cluster.bindir,
 			  old_cluster.controldata.chkpnt_nxtxid,
 			  new_cluster.pgdata);
 	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
-			  encryption_setup_done ? encryption_key : NULL,
+			  encryption_key,
 			  "\"%s/pg_resetwal\" -f -e %u \"%s\"",
 			  new_cluster.bindir,
 			  old_cluster.controldata.chkpnt_nxtepoch,
 			  new_cluster.pgdata);
 	/* must reset commit timestamp limits also */
 	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
-			  encryption_setup_done ? encryption_key : NULL,
+			  encryption_key,
 			  "\"%s/pg_resetwal\" -f -c %u,%u \"%s\"",
 			  new_cluster.bindir,
 			  old_cluster.controldata.chkpnt_nxtxid,
@@ -649,7 +659,7 @@ copy_xact_xlog_xid(void)
 		 * counters here and the oldest multi present on system.
 		 */
 		exec_prog(UTILITY_LOG_FILE, NULL, true, true,
-				  encryption_setup_done ? encryption_key : NULL,
+				  encryption_key,
 				  "\"%s/pg_resetwal\" -O %u -m %u,%u \"%s\"",
 				  new_cluster.bindir,
 				  old_cluster.controldata.chkpnt_nxtmxoff,
@@ -678,7 +688,7 @@ copy_xact_xlog_xid(void)
 		 * next=MaxMultiXactId, but multixact.c can cope with that just fine.
 		 */
 		exec_prog(UTILITY_LOG_FILE, NULL, true, true,
-				  encryption_setup_done ? encryption_key : NULL,
+				  encryption_key,
 				  "\"%s/pg_resetwal\" -m %u,%u \"%s\"",
 				  new_cluster.bindir,
 				  old_cluster.controldata.chkpnt_nxtmulti + 1,
@@ -690,7 +700,7 @@ copy_xact_xlog_xid(void)
 	/* now reset the wal archives in the new cluster */
 	prep_status("Resetting WAL archives");
 	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
-			  encryption_setup_done ? encryption_key : NULL,
+			  encryption_key,
 	/* use timeline 1 to match controldata and no WAL history file */
 			  "\"%s/pg_resetwal\" -l 00000001%s \"%s\"", new_cluster.bindir,
 			  old_cluster.controldata.nextxlogfile + 8,

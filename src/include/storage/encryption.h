@@ -37,7 +37,7 @@ typedef int (*read_encryption_key_cb) (void);
  * not support encryption, so it's compiled regardless the value of
  * USE_ENCRYPTION. It's less invasive than if we had to ifdef each call.
  */
-extern void read_encryption_key(read_encryption_key_cb read_char);
+extern void read_encryption_key(read_encryption_key_cb read_char, int key_len);
 
 /*
  * Likewise, compile regardless USE_ENCRYPTION.
@@ -91,7 +91,7 @@ extern char *encrypt_buf_xlog;
  */
 typedef struct ShmemEncryptionKey
 {
-	char	data[ENCRYPTION_KEY_LENGTH]; /* the key */
+	char	data[ENCRYPTION_KEY_MAX_LENGTH]; /* the key */
 	bool	received;				/* received the key message? */
 	bool	empty;					/* was the key message empty? */
 } ShmemEncryptionKey;

@@ -83,7 +83,8 @@ get_bin_version(ClusterInfo *cluster)
  */
 bool
 exec_prog(const char *log_file, const char *opt_log_file,
-		  bool report_error, bool exit_on_error, unsigned char *encryption_key,
+		  bool report_error, bool exit_on_error,
+		  EncryptionKey *encryption_key,
 		  const char *fmt,...)
 {
 	int			result = 0;
@@ -189,8 +190,8 @@ exec_prog(const char *log_file, const char *opt_log_file,
 				pg_fatal("Failed to execute \"%s\"\n", cmd);
 
 			/* Send the key. */
-			for (i = 0; i < ENCRYPTION_KEY_LENGTH; i++)
-				fprintf(fp, "%.2x", encryption_key[i]);
+			for (i = 0; i < encryption_key->length; i++)
+				fprintf(fp, "%.2x", encryption_key->data[i]);
 			fputc('\n', fp);
 
 			if (pclose(fp))

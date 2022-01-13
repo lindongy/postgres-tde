@@ -231,10 +231,8 @@ typedef struct ControlFileData
 	char		mock_authentication_nonce[MOCK_AUTH_NONCE_LEN];
 
 	/*
-	 * Cipher used to encrypt data. Zero if unencrypted.
-	 *
-	 * The data type is actually CipherKind, but we don't want to include
-	 * encryption.h just because of this field.
+	 * Cipher used to encrypt data - see the DATA_CIPHER_SET macro for
+	 * details.
 	 */
 	uint8		data_cipher;
 	/* Sample value for encryption key verification */
