@@ -1438,9 +1438,9 @@ bootstrap_template1(void)
 	{
 		size_t		len;
 
-		len = strlen(encryption_key_command) + 4;
+		len = strlen(encryption_key_command) + 6;
 		encr_opt_str = (char *) pg_malloc(len);
-		snprintf(encr_opt_str, len, "-K %s",
+		snprintf(encr_opt_str, len, "-K \"%s\"",
 				 encryption_key_command);
 	}
 	else

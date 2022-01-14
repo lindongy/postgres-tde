@@ -931,9 +931,9 @@ do_init(void)
 	{
 		size_t		len;
 
-		len = strlen(encryption_key_command) + 5;
+		len = strlen(encryption_key_command) + 7;
 		encr_opt_str = (char *) pg_malloc(len);
-		snprintf(encr_opt_str, len, " -K %s",
+		snprintf(encr_opt_str, len, " -K \"%s\"",
 				 encryption_key_command);
 	}
 	else
