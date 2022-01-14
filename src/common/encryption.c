@@ -37,18 +37,27 @@ void
 run_encryption_key_command(char *data_dir)
 {
 	FILE	   *fp;
+	int		dlen;
 	char	*cmd, *sp, *dp, *endp;
 
 	Assert(encryption_key_command != NULL &&
 		   strlen(encryption_key_command) > 0);
 
-	cmd = palloc(strlen(encryption_key_command) + 1);
+	dlen = strlen(encryption_key_command);
+	if (data_dir)
+		dlen += strlen(data_dir);
+	/*
+	 * The terminating '\0'. XXX Is it worth subtracting 2 for the "%D"
+	 * part?
+	 */
+	dlen += 1;
+	cmd = palloc(dlen);
 
 	/*
 	 * Replace %D pattern in the command with the actual data directory path.
 	 */
 	dp = cmd;
-	endp = cmd + strlen(encryption_key_command);
+	endp = cmd + dlen - 1;
 	*endp = '\0';
 	for (sp = encryption_key_command; *sp; sp++)
 	{
