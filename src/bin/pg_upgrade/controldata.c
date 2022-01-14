@@ -505,14 +505,8 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 			int			i;
 			int	sample_int[ENCRYPTION_SAMPLE_SIZE];
 
-			p = strchr(p, ':');
-
-			if (p == NULL || strlen(p) <= 1)
-				pg_fatal("%d: controldata retrieval problem\n", __LINE__);
-
 			cluster->controldata.data_encrypted = true;
 
-			/* Skip the colon and any whitespace after it */
 			p = strchr(p, ':');
 			if (p == NULL || strlen(p) <= 1)
 				pg_fatal("%d: controldata retrieval problem\n", __LINE__);
