@@ -2988,7 +2988,6 @@ initialize_data_directory(void)
 
 	PG_CMD_OPEN;
 
-	/* If the cluster is encrypted, first send the encryption key. */
 	setup_auth(cmdfd);
 
 	setup_depend(cmdfd);
