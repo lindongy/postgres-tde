@@ -459,21 +459,7 @@ main(int argc, char *argv[])
 		}
 
 		if (encryption_key_command)
-		{
-			char	*path;
-
-			/*
-			 * Since we're already in DataDir, adjust the path if it's
-			 * relative.
-			 */
-			if (!is_absolute_path(DataDir))
-				path = psprintf("%s/..", DataDir);
-			else
-				path = DataDir;
-			run_encryption_key_command(path, &key_len);
-			if (!is_absolute_path(DataDir))
-				pfree(path);
-		}
+			run_encryption_key_command(DataDir, &key_len);
 		else
 		{
 			/*
