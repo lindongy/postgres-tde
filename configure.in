@@ -30,7 +30,7 @@ AC_PREFIX_DEFAULT(/usr/local/pgsql)
 AC_DEFINE_UNQUOTED(CONFIGURE_ARGS, ["$ac_configure_args"], [Saved arguments from configure])
 
 [PG_MAJORVERSION=`expr "$PACKAGE_VERSION" : '\([0-9][0-9]*\)'`]
-[PG_MINORVERSION=`expr "$PACKAGE_VERSION" : '.*\.\([0-9][0-9]*\)'`]
+[PG_MINORVERSION=`expr "$PACKAGE_VERSION" : '.*\.\([0-9][0-9]*\)_'`]
 test -n "$PG_MINORVERSION" || PG_MINORVERSION=0
 AC_SUBST(PG_MAJORVERSION)
 AC_DEFINE_UNQUOTED(PG_MAJORVERSION, "$PG_MAJORVERSION", [PostgreSQL major version as a string])
