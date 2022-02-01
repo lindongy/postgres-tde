@@ -157,25 +157,6 @@ BufFilePhysicalToLogicalPos(off_t pos)
 }
 
 /*
- * The portion of the encryption tweak that does not depend on position within
- * the encrypted file.
- *
- * Note that the first byte of this word is reserved for a value of
- * TransientBufFileKind.
- */
-#define TWEAK_BASE_SIZE	8
-
-/*
- * Value to be included in TransientBufFile.tweakBase. It helps to ensure that
- * the encryption tweak is always unique.
- */
-typedef enum TransientBufFileKind
-{
-	TRANS_BUF_FILE_REORDERBUFFER, /* reorderbuffer.c */
-	TRANS_BUF_FILE_PGSTATS		  /* pgstat.c */
-} TransientBufFileKind;
-
-/*
  * prototypes for functions in buffile.c
  */
 extern void BufFileAdjustConfiguration(int buffile_seg_blocks);
