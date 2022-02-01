@@ -1266,7 +1266,7 @@ BufFileSegmentSize(BufFileSegment *seg)
 		return seg->size;
 
 	size = FileSize(seg->vfd);
-	if (seg < 0)
+	if (size < 0)
 		ereport(ERROR,
 				(errcode_for_file_access(),
 				 errmsg("could not determine size of temporary file \"%s\": %m",
