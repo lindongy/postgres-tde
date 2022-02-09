@@ -3,7 +3,7 @@
  *
  * reads the data from $PGDATA/global/pg_control
  *
- * Portions Copyright (c) 2019-2021, CYBERTEC PostgreSQL International GmbH
+ * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
  * copyright (c) Oliver Elphick <olly@lfix.co.uk>, 2001;
  * license: BSD
  *

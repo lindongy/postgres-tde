@@ -3,8 +3,8 @@
  *
  *	options functions
  *
- *	Portions Copyright (c) 2019-2021, CYBERTEC PostgreSQL International GmbH
- *	Copyright (c) 2010-2021, PostgreSQL Global Development Group
+ *	Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
+ *	Copyright (c) 2010-2022, PostgreSQL Global Development Group
  *	src/bin/pg_upgrade/option.c
  */
 

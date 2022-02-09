@@ -2,8 +2,8 @@
  *
  * pg_waldump.c - decode and display WAL
  *
- * Portions Copyright (c) 2019-2021, CYBERTEC PostgreSQL International GmbH
- * Copyright (c) 2013-2021, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
+ * Copyright (c) 2013-2022, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		  src/bin/pg_waldump/pg_waldump.c

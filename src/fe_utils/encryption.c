@@ -4,8 +4,8 @@
  *	  Front-end code to handle keys for full cluster encryption. The actual
  *	  encryption is not performed here.
  *
- * Portions Copyright (c) 2019-2021, CYBERTEC PostgreSQL International GmbH
- * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
+ * Portions Copyright (c) 1996-2022, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION

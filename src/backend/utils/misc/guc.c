@@ -6,8 +6,8 @@
  * See src/backend/utils/misc/README for more information.
  *
  *
- * Portions Copyright (c) 2019-2021, CYBERTEC PostgreSQL International GmbH
- * Copyright (c) 2000-2021, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
+ * Copyright (c) 2000-2022, PostgreSQL Global Development Group
  * Written by Peter Eisentraut <peter_e@gmx.net>.
  *
  * IDENTIFICATION

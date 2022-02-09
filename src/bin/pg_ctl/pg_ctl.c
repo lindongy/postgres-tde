@@ -2,8 +2,8 @@
  *
  * pg_ctl --- start/stops/restarts the PostgreSQL server
  *
- * Portions Copyright (c) 2019-2021, CYBERTEC PostgreSQL International GmbH
- * Portions Copyright (c) 1996-2021, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
+ * Portions Copyright (c) 1996-2022, PostgreSQL Global Development Group
  *
  * src/bin/pg_ctl/pg_ctl.c
  *

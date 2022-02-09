@@ -4,8 +4,8 @@
  *	  Checks, enables or disables page level checksums for an offline
  *	  cluster
  *
- * Portions Copyright (c) 2019-2021, CYBERTEC PostgreSQL International GmbH
- * Copyright (c) 2010-2021, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
+ * Copyright (c) 2010-2022, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/bin/pg_checksums/pg_checksums.c

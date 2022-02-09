@@ -4,7 +4,7 @@
  *	  Transparent Data Encryption specific code usable by both frontend and
  *	  backend.
  *
- * Portions Copyright (c) 2019-2021, CYBERTEC PostgreSQL International GmbH
+ * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
  *
  * IDENTIFICATION
  *	  src/include/common/encryption.c
