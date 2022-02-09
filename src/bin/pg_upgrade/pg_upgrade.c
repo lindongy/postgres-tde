@@ -214,7 +214,11 @@ main(int argc, char **argv)
 	 * Destructive Changes to New Cluster
 	 */
 
+#ifdef USE_ENCRYPTION
 	copy_xact_xlog_xid(encryption_setup_done ? &encr_key_arg : NULL);
+#else
+	copy_xact_xlog_xid(NULL);
+#endif	/* USE_ENCRYPTION */
 
 	if (encryption_setup_done)
 #ifdef USE_ENCRYPTION
@@ -264,7 +268,11 @@ main(int argc, char **argv)
 	 */
 	prep_status("Setting next OID for new cluster");
 	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
+#ifdef USE_ENCRYPTION
 			  encryption_setup_done ? &encr_key_arg : NULL,
+#else
+			  NULL,
+#endif	/* USE_ENCRYPTION */
 			  "\"%s/pg_resetwal\" -o %u \"%s\"",
 			  new_cluster.bindir,
 			  old_cluster.controldata.chkpnt_nxtoid,

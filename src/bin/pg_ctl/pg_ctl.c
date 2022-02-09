@@ -186,8 +186,9 @@ static void unlimit_core_size(void);
 #endif
 
 static DBState get_control_dbstate(void);
+#ifdef USE_ENCRYPTION
 static int get_control_key_length(void);
-
+#endif	/* USE_ENCRYPTION */
 
 #ifdef WIN32
 static void
@@ -2476,6 +2477,7 @@ get_control_dbstate(void)
 	return ret;
 }
 
+#ifdef USE_ENCRYPTION
 static int
 get_control_key_length(void)
 {
@@ -2493,6 +2495,7 @@ get_control_key_length(void)
 	pfree(control_file_data);
 	return ret;
 }
+#endif	/* USE_ENCRYPTION */
 
 int
 main(int argc, char **argv)
