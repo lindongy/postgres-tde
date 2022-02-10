@@ -867,10 +867,10 @@ BufFileRead(BufFile *file, void *ptr, size_t size)
  * Like fwrite() except we assume 1-byte element size and report errors via
  * ereport().
  */
-void
+size_t
 BufFileWrite(BufFile *file, void *ptr, size_t size)
 {
-	BufFileWriteCommon(&file->common, ptr, size, false);
+	return BufFileWriteCommon(&file->common, ptr, size, false);
 }
 
 /*
