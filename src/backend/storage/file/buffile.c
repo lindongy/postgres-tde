@@ -1965,6 +1965,14 @@ BufFileAdjustUsefulBytes(BufFileCommon *file, BufFileSegment *segments)
 	{
 		/* Maintain the convention that nbytes accounts for the header. */
 		file->nbytes = SizeOfBufFilePageHeader;
+
+		/*
+		 * If the caller couldn't read any data, we should erase the existing
+		 * contents. We might be past the end of the file due to seek now, and
+		 * therefore the next write is not guaranteed to overwrite the leading
+		 * part of the buffer.
+		 */
+		memset(file->buffer.data + file->nbytes, 0, BLCKSZ - file->nbytes);
 	}
 	else if (!is_transient && IsAllZero(file->buffer.data, BLCKSZ))
 	{
