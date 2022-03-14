@@ -510,8 +510,9 @@ pg_logdir_ls_internal(FunctionCallInfo fcinfo)
 	DIR		   *dirdesc;
 	struct dirent *de;
 	MemoryContext oldcontext;
+	LogStream  *stream = &log_streams[0];
 
-	if (strcmp(Log_filename, "postgresql-%Y-%m-%d_%H%M%S.log") != 0)
+	if (strcmp(stream->filename, "postgresql-%Y-%m-%d_%H%M%S.log") != 0)
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 				 errmsg("the log_filename parameter must equal 'postgresql-%%Y-%%m-%%d_%%H%%M%%S.log'")));
@@ -545,8 +546,8 @@ pg_logdir_ls_internal(FunctionCallInfo fcinfo)
 
 	attinmeta = TupleDescGetAttInMetadata(tupdesc);
 
-	dirdesc = AllocateDir(Log_directory);
-	while ((de = ReadDir(dirdesc, Log_directory)) != NULL)
+	dirdesc = AllocateDir(stream->directory);
+	while ((de = ReadDir(dirdesc, stream->directory)) != NULL)
 	{
 		char	   *values[2];
 		HeapTuple	tuple;
@@ -583,7 +584,7 @@ pg_logdir_ls_internal(FunctionCallInfo fcinfo)
 		/* Seems the timestamp is OK; prepare and return tuple */
 
 		values[0] = timestampbuf;
-		values[1] = psprintf("%s/%s", Log_directory, de->d_name);
+		values[1] = psprintf("%s/%s", stream->directory, de->d_name);
 
 		tuple = BuildTupleFromCStrings(attinmeta, values);
 

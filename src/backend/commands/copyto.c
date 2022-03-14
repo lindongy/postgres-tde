@@ -43,6 +43,9 @@
 #include "utils/rel.h"
 #include "utils/snapmgr.h"
 
+/* hook to for query output data masking */
+datamask_hook_type datamask_hook = NULL;
+
 /*
  * Represents the different dest cases we need to worry about at
  * the bottom level
@@ -972,6 +975,12 @@ CopyOneRowTo(CopyToState cstate, TupleTableSlot *slot)
 			{
 				string = OutputFunctionCall(&out_functions[attnum - 1],
 											value);
+
+				if (datamask_hook)
+					string = (* datamask_hook)(string, cstate->rel ?
+											   RelationGetRelid(cstate->rel) :
+											   InvalidOid, attnum);
+
 				if (cstate->opts.csv_mode)
 					CopyAttributeOutCSV(cstate, string,
 										cstate->opts.force_quote_flags[attnum - 1],

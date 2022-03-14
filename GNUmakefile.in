@@ -84,7 +84,7 @@ update-unicode: | submake-generated-headers submake-libpgport
 
 ##########################################################################
 
-distdir	= postgresql-$(VERSION)
+distdir	= postgresql-cybertec-$(VERSION)
 dummy	= =install=
 
 dist: $(distdir).tar.gz $(distdir).tar.bz2

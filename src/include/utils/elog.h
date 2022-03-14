@@ -218,6 +218,7 @@ extern int	internalerrposition(int cursorpos);
 extern int	internalerrquery(const char *query);
 
 extern int	err_generic_string(int field, const char *str);
+extern int	errstream(const int stream_id);
 
 extern int	geterrcode(void);
 extern int	geterrposition(void);
@@ -370,6 +371,7 @@ typedef struct ErrorData
 {
 	int			elevel;			/* error level */
 	bool		output_to_server;	/* will report to server log? */
+	int			syslogger_stream;	/* stream identifier. > 0 for extension */
 	bool		output_to_client;	/* will report to client? */
 	bool		hide_stmt;		/* true to prevent STATEMENT: inclusion */
 	bool		hide_ctx;		/* true to prevent CONTEXT: inclusion */
@@ -424,10 +426,8 @@ typedef enum
 	PGERROR_VERBOSE				/* all the facts, ma'am */
 }			PGErrorVerbosity;
 
-extern int	Log_error_verbosity;
-extern char *Log_line_prefix;
-extern int	Log_destination;
 extern char *Log_destination_string;
+
 extern bool syslog_sequence_numbers;
 extern bool syslog_split_messages;
 

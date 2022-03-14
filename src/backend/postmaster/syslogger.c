@@ -49,6 +49,7 @@
 #include "storage/pg_shmem.h"
 #include "tcop/tcopprot.h"
 #include "utils/guc.h"
+#include "utils/memutils.h"
 #include "utils/ps_status.h"
 #include "utils/timestamp.h"
 
@@ -68,26 +69,21 @@
  * start, but the rest can change at SIGHUP.
  */
 bool		Logging_collector = false;
-int			Log_RotationAge = HOURS_PER_DAY * MINS_PER_HOUR;
-int			Log_RotationSize = 10 * 1024;
-char	   *Log_directory = NULL;
-char	   *Log_filename = NULL;
-bool		Log_truncate_on_rotation = false;
-int			Log_file_mode = S_IRUSR | S_IWUSR;
 
 extern bool redirection_done;
 
 /*
  * Private state
  */
-static pg_time_t next_rotation_time;
+
 static bool pipe_eof_seen = false;
 static bool rotation_disabled = false;
-static FILE *syslogFile = NULL;
-static FILE *csvlogFile = NULL;
-NON_EXEC_STATIC pg_time_t first_syslogger_file_time = 0;
-static char *last_file_name = NULL;
-static char *last_csv_file_name = NULL;
+NON_EXEC_STATIC pg_time_t first_syslogger_file_time;
+
+LogStream	log_streams[MAXLOGSTREAMS];
+
+/* At least the core log stream should be active. */
+int			log_streams_active = 1;
 
 /*
  * Buffers for saving partial messages from different backends.
@@ -97,12 +93,15 @@ static char *last_csv_file_name = NULL;
  * the number of entries we have to examine for any one incoming message.
  * There must never be more than one entry for the same source pid.
  *
+ * stream_id is needed because of flush_pipe_input.
+ *
  * An inactive buffer is not removed from its list, just held for re-use.
  * An inactive buffer has pid == 0 and undefined contents of data.
  */
 typedef struct
 {
 	int32		pid;			/* PID of source process */
+	int32		stream_id;		/* Stream identifier. */
 	StringInfoData data;		/* accumulated data, as a StringInfo */
 } save_buffer;
 
@@ -124,26 +123,29 @@ static CRITICAL_SECTION sysloggerSection;
 /*
  * Flags set by interrupt handlers for later service in the main loop.
  */
+
+/* Rotation of all logs requested by pg_rotate_logfile? */
 static volatile sig_atomic_t rotation_requested = false;
 
 
 /* Local subroutines */
 #ifdef EXEC_BACKEND
 static pid_t syslogger_forkexec(void);
-static void syslogger_parseArgs(int argc, char *argv[]);
 #endif
 NON_EXEC_STATIC void SysLoggerMain(int argc, char *argv[]) pg_attribute_noreturn();
 static void process_pipe_input(char *logbuffer, int *bytes_in_logbuffer);
 static void flush_pipe_input(char *logbuffer, int *bytes_in_logbuffer);
 static FILE *logfile_open(const char *filename, const char *mode,
-						  bool allow_errors);
+			 bool allow_errors, int stream_id);
 
 #ifdef WIN32
 static unsigned int __stdcall pipeThread(void *arg);
 #endif
-static void logfile_rotate(bool time_based_rotation, int size_rotation_for);
-static char *logfile_getname(pg_time_t timestamp, const char *suffix);
-static void set_next_rotation_time(void);
+static void logfile_rotate(bool time_based_rotation, int size_rotation_for,
+			   int stream_id);
+static char *logfile_getname(pg_time_t timestamp, const char *suffix,
+				int stream_id);
+static void set_next_rotation_time(int stream_id);
 static void sigUsr1Handler(SIGNAL_ARGS);
 static void update_metainfo_datafile(void);
 
@@ -159,16 +161,53 @@ SysLoggerMain(int argc, char *argv[])
 	char		logbuffer[READ_BUF_SIZE];
 	int			bytes_in_logbuffer = 0;
 #endif
-	char	   *currentLogDir;
-	char	   *currentLogFilename;
-	int			currentLogRotationAge;
 	pg_time_t	now;
+	int			i;
+	bool		timeout_valid;
+
 	WaitEventSet *wes;
 
 	now = MyStartTime;
 
+	/*
+	 * Initialize configuration parameters and status info.
+	 *
+	 * XXX Should we only do this for log_stream[0]? get_log_stream() does so
+	 * for the extension streams.
+	 */
+	for (i = 0; i < log_streams_active; i++)
+	{
+		LogStream  *stream = &log_streams[i];
+
+		stream->rotation_needed = false;
+		stream->last_file_name = NULL;
+		stream->last_csv_file_name = NULL;
+	}
+
 #ifdef EXEC_BACKEND
-	syslogger_parseArgs(argc, argv);
+	for (i = 0; i < log_streams_active; i++)
+	{
+		LogStream  *stream = &log_streams[i];
+		int			fd = stream->syslog_fd;
+
+#ifndef WIN32
+		if (fd != -1)
+		{
+			stream->syslog_file = fdopen(fd, "a");
+			setvbuf(stream->syslog_file, NULL, PG_IOLBF, 0);
+		}
+#else							/* WIN32 */
+		if (fd != 0)
+		{
+			fd = _open_osfhandle(fd, _O_APPEND | _O_TEXT);
+			if (fd > 0)
+			{
+				stream->syslog_file = fdopen(fd, "a");
+				setvbuf(stream->syslog_file, NULL, PG_IOLBF, 0);
+			}
+		}
+#endif							/* WIN32 */
+	}
 #endif							/* EXEC_BACKEND */
 
 	MyBackendType = B_LOGGER;
@@ -271,16 +310,24 @@ SysLoggerMain(int argc, char *argv[])
 	 * time because passing down just the pg_time_t is a lot cheaper than
 	 * passing a whole file path in the EXEC_BACKEND case.
 	 */
-	last_file_name = logfile_getname(first_syslogger_file_time, NULL);
-	if (csvlogFile != NULL)
-		last_csv_file_name = logfile_getname(first_syslogger_file_time, ".csv");
+	for (i = 0; i < log_streams_active; i++)
+	{
+		LogStream  *stream = &log_streams[i];
 
-	/* remember active logfile parameters */
-	currentLogDir = pstrdup(Log_directory);
-	currentLogFilename = pstrdup(Log_filename);
-	currentLogRotationAge = Log_RotationAge;
-	/* set next planned rotation time */
-	set_next_rotation_time();
+		stream->last_file_name = logfile_getname(first_syslogger_file_time,
+												 NULL, i);
+		if (stream->csvlog_file != NULL)
+			stream->last_csv_file_name = logfile_getname(first_syslogger_file_time,
+														 ".csv", i);
+
+		/* remember active logfile parameters */
+		stream->current_dir = pstrdup(stream->directory);
+		stream->current_filename = pstrdup(stream->filename);
+		stream->current_rotation_age = stream->rotation_age;
+
+		/* set next planned rotation time */
+		set_next_rotation_time(i);
+	}
 	update_metainfo_datafile();
 
 	/*
@@ -309,10 +356,9 @@ SysLoggerMain(int argc, char *argv[])
 	/* main worker loop */
 	for (;;)
 	{
-		bool		time_based_rotation = false;
-		int			size_rotation_for = 0;
 		long		cur_timeout;
 		WaitEvent	event;
+		int	i;
 
 #ifndef WIN32
 		int			rc;
@@ -329,45 +375,51 @@ SysLoggerMain(int argc, char *argv[])
 			ConfigReloadPending = false;
 			ProcessConfigFile(PGC_SIGHUP);
 
-			/*
-			 * Check if the log directory or filename pattern changed in
-			 * postgresql.conf. If so, force rotation to make sure we're
-			 * writing the logfiles in the right place.
-			 */
-			if (strcmp(Log_directory, currentLogDir) != 0)
+			for (i = 0; i < log_streams_active; i++)
 			{
-				pfree(currentLogDir);
-				currentLogDir = pstrdup(Log_directory);
-				rotation_requested = true;
+				LogStream  *stream = &log_streams[i];
 
 				/*
-				 * Also, create new directory if not present; ignore errors
+				 * Check if the log directory or filename pattern changed in
+				 * postgresql.conf. If so, force rotation to make sure we're
+				 * writing the logfiles in the right place.
 				 */
-				(void) MakePGDirectory(Log_directory);
-			}
-			if (strcmp(Log_filename, currentLogFilename) != 0)
-			{
-				pfree(currentLogFilename);
-				currentLogFilename = pstrdup(Log_filename);
-				rotation_requested = true;
-			}
+				if (strcmp(stream->directory, stream->current_dir) != 0)
+				{
+					pfree(stream->current_dir);
+					stream->current_dir = pstrdup(stream->directory);
+					stream->rotation_needed = true;
 
-			/*
-			 * Force a rotation if CSVLOG output was just turned on or off and
-			 * we need to open or close csvlogFile accordingly.
-			 */
-			if (((Log_destination & LOG_DESTINATION_CSVLOG) != 0) !=
-				(csvlogFile != NULL))
-				rotation_requested = true;
+					/*
+					 * Also, create new directory if not present; ignore
+					 * errors
+					 */
+					(void) MakePGDirectory(stream->directory);
+				}
+				if (strcmp(stream->filename, stream->current_filename) != 0)
+				{
+					pfree(stream->current_filename);
+					stream->current_filename = pstrdup(stream->filename);
+					stream->rotation_needed = true;
+				}
 
-			/*
-			 * If rotation time parameter changed, reset next rotation time,
-			 * but don't immediately force a rotation.
-			 */
-			if (currentLogRotationAge != Log_RotationAge)
-			{
-				currentLogRotationAge = Log_RotationAge;
-				set_next_rotation_time();
+				/*
+				 * Force a rotation if CSVLOG output was just turned on or off
+				 * and we need to open or close csvlog_file accordingly.
+				 */
+				if (((stream->destination & LOG_DESTINATION_CSVLOG) != 0) !=
+					(stream->csvlog_file != NULL))
+					stream->rotation_needed = true;
+
+				/*
+				 * If rotation time parameter changed, reset next rotation
+				 * time, but don't immediately force a rotation.
+				 */
+				if (stream->current_rotation_age != stream->rotation_age)
+				{
+					stream->current_rotation_age = stream->rotation_age;
+					set_next_rotation_time(i);
+				}
 			}
 
 			/*
@@ -388,40 +440,64 @@ SysLoggerMain(int argc, char *argv[])
 			update_metainfo_datafile();
 		}
 
-		if (Log_RotationAge > 0 && !rotation_disabled)
+		for (i = 0; i < log_streams_active; i++)
 		{
-			/* Do a logfile rotation if it's time */
-			now = (pg_time_t) time(NULL);
-			if (now >= next_rotation_time)
-				rotation_requested = time_based_rotation = true;
-		}
+			bool		time_based_rotation = false;
+			int			size_rotation_for = 0;
+			LogStream  *stream = &log_streams[i];
 
-		if (!rotation_requested && Log_RotationSize > 0 && !rotation_disabled)
-		{
-			/* Do a rotation if file is too big */
-			if (ftell(syslogFile) >= Log_RotationSize * 1024L)
+			if (stream->current_rotation_age > 0 && !rotation_disabled)
 			{
-				rotation_requested = true;
-				size_rotation_for |= LOG_DESTINATION_STDERR;
+				/* Do a logfile rotation if it's time */
+				now = (pg_time_t) time(NULL);
+				if (now >= stream->next_rotation_time)
+				{
+					time_based_rotation = true;
+					stream->rotation_needed = true;
+				}
 			}
-			if (csvlogFile != NULL &&
-				ftell(csvlogFile) >= Log_RotationSize * 1024L)
+
+			if (!rotation_requested && stream->rotation_size > 0 &&
+				!rotation_disabled)
 			{
-				rotation_requested = true;
-				size_rotation_for |= LOG_DESTINATION_CSVLOG;
+				/* Do a rotation if file is too big */
+				if (ftell(stream->syslog_file) >=
+					stream->rotation_size * 1024L)
+				{
+					stream->rotation_needed = true;
+					size_rotation_for |= LOG_DESTINATION_STDERR;
+				}
+				if (stream->csvlog_file != NULL &&
+					ftell(stream->csvlog_file) >=
+					stream->rotation_size * 1024L)
+				{
+					stream->rotation_needed = true;
+					size_rotation_for |= LOG_DESTINATION_CSVLOG;
+				}
+			}
+
+			/*
+			 * Consider rotation if the current file needs it or if rotation
+			 * of all files has been requested explicitly.
+			 */
+			if (stream->rotation_needed || rotation_requested)
+			{
+				/*
+				 * Force rotation when both values are zero. It means the
+				 * request was sent by pg_rotate_logfile() or "pg_ctl
+				 * logrotate".
+				 */
+				if (rotation_requested && !time_based_rotation &&
+					size_rotation_for == 0)
+					size_rotation_for = LOG_DESTINATION_STDERR |
+						LOG_DESTINATION_CSVLOG;
+
+				logfile_rotate(time_based_rotation, size_rotation_for, i);
 			}
 		}
 
 		if (rotation_requested)
-		{
-			/*
-			 * Force rotation when both values are zero. It means the request
-			 * was sent by pg_rotate_logfile() or "pg_ctl logrotate".
-			 */
-			if (!time_based_rotation && size_rotation_for == 0)
-				size_rotation_for = LOG_DESTINATION_STDERR | LOG_DESTINATION_CSVLOG;
-			logfile_rotate(time_based_rotation, size_rotation_for);
-		}
+			rotation_requested = false;
 
 		/*
 		 * Calculate time till next time-based rotation, so that we don't
@@ -431,25 +507,42 @@ SysLoggerMain(int argc, char *argv[])
 		 * next_rotation_time.
 		 *
 		 * Also note that we need to beware of overflow in calculation of the
-		 * timeout: with large settings of Log_RotationAge, next_rotation_time
-		 * could be more than INT_MAX msec in the future.  In that case we'll
-		 * wait no more than INT_MAX msec, and try again.
+		 * timeout: with large settings of current_rotation_age,
+		 * next_rotation_time could be more than INT_MAX msec in the future.
+		 * In that case we'll wait no more than INT_MAX msec, and try again.
 		 */
-		if (Log_RotationAge > 0 && !rotation_disabled)
+		timeout_valid = false;
+		for (i = 0; i < log_streams_active; i++)
 		{
-			pg_time_t	delay;
+			LogStream  *stream = &log_streams[i];
 
-			delay = next_rotation_time - now;
-			if (delay > 0)
+			if (stream->current_rotation_age > 0 && !rotation_disabled)
 			{
-				if (delay > INT_MAX / 1000)
-					delay = INT_MAX / 1000;
-				cur_timeout = delay * 1000L;	/* msec */
+				pg_time_t	delay;
+				long		timeout_tmp;
+
+				delay = stream->next_rotation_time - now;
+				if (delay > 0)
+				{
+					if (delay > INT_MAX / 1000)
+						delay = INT_MAX / 1000;
+					timeout_tmp = delay * 1000L;	/* msec */
+				}
+				else
+					timeout_tmp = 0;
+
+				/* Looking for the nearest timeout across log files. */
+				if (!timeout_valid)
+				{
+					/* cur_timeout not defined yet. */
+					cur_timeout = timeout_tmp;
+					timeout_valid = true;
+				}
+				else
+					cur_timeout = Min(cur_timeout, timeout_tmp);
 			}
-			else
-				cur_timeout = 0;
 		}
-		else
+		if (!timeout_valid)
 			cur_timeout = -1L;
 
 		/*
@@ -523,8 +616,8 @@ SysLoggerMain(int argc, char *argv[])
 
 			/*
 			 * Normal exit from the syslogger is here.  Note that we
-			 * deliberately do not close syslogFile before exiting; this is to
-			 * allow for the possibility of elog messages being generated
+			 * deliberately do not close syslog_file before exiting; this is
+			 * to allow for the possibility of elog messages being generated
 			 * inside proc_exit.  Regular exit() will take care of flushing
 			 * and closing stdio channels.
 			 */
@@ -540,7 +633,8 @@ int
 SysLogger_Start(void)
 {
 	pid_t		sysloggerPid;
-	char	   *filename;
+	int			i;
+	LogStream  *stream;
 
 	if (!Logging_collector)
 		return 0;
@@ -587,42 +681,61 @@ SysLogger_Start(void)
 #endif
 
 	/*
-	 * Create log directory if not present; ignore errors
+	 * Although we can't check here if the streams are initialized in a
+	 * sensible way, check at least if user (typically extension) messed any
+	 * setting up.
 	 */
-	(void) MakePGDirectory(Log_directory);
-
-	/*
-	 * The initial logfile is created right in the postmaster, to verify that
-	 * the Log_directory is writable.  We save the reference time so that the
-	 * syslogger child process can recompute this file name.
-	 *
-	 * It might look a bit strange to re-do this during a syslogger restart,
-	 * but we must do so since the postmaster closed syslogFile after the
-	 * previous fork (and remembering that old file wouldn't be right anyway).
-	 * Note we always append here, we won't overwrite any existing file.  This
-	 * is consistent with the normal rules, because by definition this is not
-	 * a time-based rotation.
-	 */
-	first_syslogger_file_time = time(NULL);
-
-	filename = logfile_getname(first_syslogger_file_time, NULL);
-
-	syslogFile = logfile_open(filename, "a", false);
-
-	pfree(filename);
-
-	/*
-	 * Likewise for the initial CSV log file, if that's enabled.  (Note that
-	 * we open syslogFile even when only CSV output is nominally enabled,
-	 * since some code paths will write to syslogFile anyway.)
-	 */
-	if (Log_destination & LOG_DESTINATION_CSVLOG)
+	for (i = 0; i < log_streams_active; i++)
 	{
-		filename = logfile_getname(first_syslogger_file_time, ".csv");
+		stream = &log_streams[i];
+		if (stream->directory == NULL || stream->filename == NULL ||
+			stream->rotation_age == 0)
+			ereport(FATAL,
+					(errmsg("Log stream %d is not properly initialized", i)));
+	}
 
-		csvlogFile = logfile_open(filename, "a", false);
+	/*
+	 * Create log directories if not present; ignore errors
+	 */
+	for (i = 0; i < log_streams_active; i++)
+		(void) MakePGDirectory(log_streams[i].directory);
 
+	first_syslogger_file_time = time(NULL);
+	for (i = 0; i < log_streams_active; i++)
+	{
+		char	   *filename;
+
+		stream = &log_streams[i];
+
+		/*
+		 * The initial logfile is created right in the postmaster, to verify
+		 * that the log directory is writable.  We save the reference time so
+		 * that the syslogger child process can recompute this file name.
+		 *
+		 * It might look a bit strange to re-do this during a syslogger
+		 * restart, but we must do so since the postmaster closed syslog_file
+		 * after the previous fork (and remembering that old file wouldn't be
+		 * right anyway).  Note we always append here, we won't overwrite any
+		 * existing file.  This is consistent with the normal rules, because
+		 * by definition this is not a time-based rotation.
+		 */
+		filename = logfile_getname(first_syslogger_file_time, NULL, i);
+		stream->syslog_file = logfile_open(filename, "a", false, i);
 		pfree(filename);
+
+		/*
+		 * Likewise for the initial CSV log file, if that's enabled.  (Note
+		 * that we open syslogFile even when only CSV output is nominally
+		 * enabled, since some code paths will write to syslogFile anyway.)
+		 */
+		if (stream->destination & LOG_DESTINATION_CSVLOG)
+		{
+			filename = logfile_getname(first_syslogger_file_time, ".csv", i);
+
+			stream->csvlog_file = logfile_open(filename, "a", false, i);
+
+			pfree(filename);
+		}
 	}
 
 #ifdef EXEC_BACKEND
@@ -667,11 +780,14 @@ SysLogger_Start(void)
 				 * Leave a breadcrumb trail when redirecting, in case the user
 				 * forgets that redirection is active and looks only at the
 				 * original stderr target file.
+				 *
+				 * TODO Also list the extension log directories if there are
+				 * some?
 				 */
 				ereport(LOG,
 						(errmsg("redirecting log output to logging collector process"),
 						 errhint("Future log output will appear in directory \"%s\".",
-								 Log_directory)));
+								 log_streams[0].directory)));
 
 #ifndef WIN32
 				fflush(stdout);
@@ -714,13 +830,19 @@ SysLogger_Start(void)
 				redirection_done = true;
 			}
 
-			/* postmaster will never write the file(s); close 'em */
-			fclose(syslogFile);
-			syslogFile = NULL;
-			if (csvlogFile != NULL)
+			/* postmaster will never write the files; close them */
+			for (i = 0; i < log_streams_active; i++)
 			{
-				fclose(csvlogFile);
-				csvlogFile = NULL;
+				LogStream  *stream = &log_streams[i];
+
+				fclose(stream->syslog_file);
+				stream->syslog_file = NULL;
+
+				if (stream->csvlog_file != NULL)
+				{
+					fclose(stream->csvlog_file);
+					stream->csvlog_file = NULL;
+				}
 			}
 			return (int) sysloggerPid;
 	}
@@ -742,62 +864,17 @@ syslogger_forkexec(void)
 {
 	char	   *av[10];
 	int			ac = 0;
-	char		filenobuf[32];
-	char		csvfilenobuf[32];
+	int			i;
 
 	av[ac++] = "postgres";
 	av[ac++] = "--forklog";
 	av[ac++] = NULL;			/* filled in by postmaster_forkexec */
-
-	/* static variables (those not passed by write_backend_variables) */
-#ifndef WIN32
-	if (syslogFile != NULL)
-		snprintf(filenobuf, sizeof(filenobuf), "%d",
-				 fileno(syslogFile));
-	else
-		strcpy(filenobuf, "-1");
-#else							/* WIN32 */
-	if (syslogFile != NULL)
-		snprintf(filenobuf, sizeof(filenobuf), "%ld",
-				 (long) _get_osfhandle(_fileno(syslogFile)));
-	else
-		strcpy(filenobuf, "0");
-#endif							/* WIN32 */
-	av[ac++] = filenobuf;
-
-#ifndef WIN32
-	if (csvlogFile != NULL)
-		snprintf(csvfilenobuf, sizeof(csvfilenobuf), "%d",
-				 fileno(csvlogFile));
-	else
-		strcpy(csvfilenobuf, "-1");
-#else							/* WIN32 */
-	if (csvlogFile != NULL)
-		snprintf(csvfilenobuf, sizeof(csvfilenobuf), "%ld",
-				 (long) _get_osfhandle(_fileno(csvlogFile)));
-	else
-		strcpy(csvfilenobuf, "0");
-#endif							/* WIN32 */
-	av[ac++] = csvfilenobuf;
-
 	av[ac] = NULL;
 	Assert(ac < lengthof(av));
 
-	return postmaster_forkexec(ac, av);
-}
-
-/*
- * syslogger_parseArgs() -
- *
- * Extract data from the arglist for exec'ed syslogger process
- */
-static void
-syslogger_parseArgs(int argc, char *argv[])
-{
-	int			fd;
-
-	Assert(argc == 5);
-	argv += 3;
+	for (i = 0; i < log_streams_active; i++)
+	{
+		LogStream  *stream = &log_streams[i];
 
 	/*
 	 * Re-open the error output files that were opened by SysLogger_Start().
@@ -807,40 +884,20 @@ syslogger_parseArgs(int argc, char *argv[])
 	 * coded, we'll just crash on a null pointer dereference after failure...
 	 */
 #ifndef WIN32
-	fd = atoi(*argv++);
-	if (fd != -1)
-	{
-		syslogFile = fdopen(fd, "a");
-		setvbuf(syslogFile, NULL, PG_IOLBF, 0);
-	}
-	fd = atoi(*argv++);
-	if (fd != -1)
-	{
-		csvlogFile = fdopen(fd, "a");
-		setvbuf(csvlogFile, NULL, PG_IOLBF, 0);
-	}
+		if (stream->syslog_file != NULL)
+			stream->syslog_fd = fileno(stream->syslog_file);
+		else
+			stream->syslog_fd = -1;
 #else							/* WIN32 */
-	fd = atoi(*argv++);
-	if (fd != 0)
-	{
-		fd = _open_osfhandle(fd, _O_APPEND | _O_TEXT);
-		if (fd > 0)
-		{
-			syslogFile = fdopen(fd, "a");
-			setvbuf(syslogFile, NULL, PG_IOLBF, 0);
-		}
-	}
-	fd = atoi(*argv++);
-	if (fd != 0)
-	{
-		fd = _open_osfhandle(fd, _O_APPEND | _O_TEXT);
-		if (fd > 0)
-		{
-			csvlogFile = fdopen(fd, "a");
-			setvbuf(csvlogFile, NULL, PG_IOLBF, 0);
-		}
-	}
+		if (stream->syslog_file != NULL)
+			stream->syslog_fd = (long)
+				_get_osfhandle(_fileno(stream->syslog_file));
+		else
+			stream->syslog_fd = 0;
 #endif							/* WIN32 */
+	}
+
+	return postmaster_forkexec(ac, av);
 }
 #endif							/* EXEC_BACKEND */
 
@@ -857,13 +914,18 @@ syslogger_parseArgs(int argc, char *argv[])
  * (hopefully atomic) chunks - such chunks are detected and reassembled here.
  *
  * The protocol has a header that starts with two nul bytes, then has a 16 bit
- * length, the pid of the sending process, and a flag to indicate if it is
- * the last chunk in a message. Incomplete chunks are saved until we read some
- * more, and non-final chunks are accumulated until we get the final chunk.
+ * length, the pid of the sending process, stream identifier, and a flag to
+ * indicate if it is the last chunk in a message. Incomplete chunks are saved
+ * until we read some more, and non-final chunks are accumulated until we get
+ * the final chunk.
  *
  * All of this is to avoid 2 problems:
  * . partial messages being written to logfiles (messes rotation), and
  * . messages from different backends being interleaved (messages garbled).
+ *
+ * The stream identifier is in the header to ensure correct routing into log
+ * files, however message chunks of different streams sent by the same backend
+ * are not expected to be interleaved.
  *
  * Any non-protocol messages are written out directly. These should only come
  * from non-PostgreSQL sources, however (e.g. third party libraries writing to
@@ -891,6 +953,7 @@ process_pipe_input(char *logbuffer, int *bytes_in_logbuffer)
 		if (p.nuls[0] == '\0' && p.nuls[1] == '\0' &&
 			p.len > 0 && p.len <= PIPE_MAX_PAYLOAD &&
 			p.pid != 0 &&
+			p.stream_id >= 0 && p.stream_id < MAXLOGSTREAMS &&
 			(p.is_last == 't' || p.is_last == 'f' ||
 			 p.is_last == 'T' || p.is_last == 'F'))
 		{
@@ -951,6 +1014,7 @@ process_pipe_input(char *logbuffer, int *bytes_in_logbuffer)
 						buffer_lists[p.pid % NBUFFER_LISTS] = buffer_list;
 					}
 					free_slot->pid = p.pid;
+					free_slot->stream_id = p.stream_id;
 					str = &(free_slot->data);
 					initStringInfo(str);
 					appendBinaryStringInfo(str,
@@ -970,7 +1034,8 @@ process_pipe_input(char *logbuffer, int *bytes_in_logbuffer)
 					appendBinaryStringInfo(str,
 										   cursor + PIPE_HEADER_SIZE,
 										   p.len);
-					write_syslogger_file(str->data, str->len, dest);
+					write_syslogger_file(str->data, str->len, dest,
+										 existing_slot->stream_id);
 					/* Mark the buffer unused, and reclaim string storage */
 					existing_slot->pid = 0;
 					pfree(str->data);
@@ -979,7 +1044,7 @@ process_pipe_input(char *logbuffer, int *bytes_in_logbuffer)
 				{
 					/* The whole message was one chunk, evidently. */
 					write_syslogger_file(cursor + PIPE_HEADER_SIZE, p.len,
-										 dest);
+										 dest, p.stream_id);
 				}
 			}
 
@@ -1006,7 +1071,7 @@ process_pipe_input(char *logbuffer, int *bytes_in_logbuffer)
 					break;
 			}
 			/* fall back on the stderr log as the destination */
-			write_syslogger_file(cursor, chunklen, LOG_DESTINATION_STDERR);
+			write_syslogger_file(cursor, chunklen, LOG_DESTINATION_STDERR, 0);
 			cursor += chunklen;
 			count -= chunklen;
 		}
@@ -1044,7 +1109,7 @@ flush_pipe_input(char *logbuffer, int *bytes_in_logbuffer)
 				StringInfo	str = &(buf->data);
 
 				write_syslogger_file(str->data, str->len,
-									 LOG_DESTINATION_STDERR);
+									 LOG_DESTINATION_STDERR, buf->stream_id);
 				/* Mark the buffer unused, and reclaim string storage */
 				buf->pid = 0;
 				pfree(str->data);
@@ -1058,10 +1123,9 @@ flush_pipe_input(char *logbuffer, int *bytes_in_logbuffer)
 	 */
 	if (*bytes_in_logbuffer > 0)
 		write_syslogger_file(logbuffer, *bytes_in_logbuffer,
-							 LOG_DESTINATION_STDERR);
+							 LOG_DESTINATION_STDERR, 0);
 	*bytes_in_logbuffer = 0;
 }
-
 
 /* --------------------------------
  *		logfile routines
@@ -1076,10 +1140,12 @@ flush_pipe_input(char *logbuffer, int *bytes_in_logbuffer)
  * even though its stderr does not point at the syslog pipe.
  */
 void
-write_syslogger_file(const char *buffer, int count, int destination)
+write_syslogger_file(const char *buffer, int count, int destination,
+					 int stream_id)
 {
 	int			rc;
 	FILE	   *logfile;
+	LogStream  *stream = &log_streams[stream_id];
 
 	/*
 	 * If we're told to write to csvlogFile, but it's not open, dump the data
@@ -1094,7 +1160,8 @@ write_syslogger_file(const char *buffer, int count, int destination)
 	 * failure in that would lead to recursion.
 	 */
 	logfile = (destination == LOG_DESTINATION_CSVLOG &&
-			   csvlogFile != NULL) ? csvlogFile : syslogFile;
+			   stream->csvlog_file != NULL) ?
+		stream->csvlog_file : stream->syslog_file;
 
 	rc = fwrite(buffer, 1, count, logfile);
 
@@ -1107,6 +1174,123 @@ write_syslogger_file(const char *buffer, int count, int destination)
 	if (rc != count)
 		write_stderr("could not write to log file: %s\n", strerror(errno));
 }
+
+/*
+ * Extensions can use this function to write their output to separate log
+ * files. The value returned is to be used as an argument in the errstream()
+ * function, for example:
+ *
+ * ereport(ERROR,
+ *				(errcode(ERRCODE_UNDEFINED_CURSOR),
+ *				 errmsg("portal \"%s\" not found", stmt->portalname),
+ *				 errstream(stream_id),
+ *				 ... other errxxx() fields as needed ...));
+ *
+ * Caller is expected to pass a pointer to which the function writes a pointer
+ * to LogStream structure, which is pre-initialized according to the core log
+ * stream. Caller is expected to ensure that the log file path is eventually
+ * different from that of the postgres core log.
+ *
+ * CAUTION: Use adjust_log_stream_attr() to set string attributes of the log
+ * stream, as opposed to assigning arbitrary (char *) pointers directly.
+ *
+ * Note: The "id" argument is necessary so that repeated call of the function
+ * from the same library makes no harm. The particular scenario is that shared
+ * library can be re-loaded during child process startup due to EXEC_BACKEND
+ * technique. Once we have the identifier, we can use it to make error
+ * messages more convenient.
+ *
+ * XXX Do we need a function that validates the log stream after changes are
+ * done? Probably not, as shared library developer should know what he is
+ * doing.
+ */
+extern int
+get_log_stream(char *id, LogStream **stream_p)
+{
+	int			result = -1;
+	LogStream  *stream,
+			   *stream_core;
+	int			i;
+
+	if (!process_shared_preload_libraries_in_progress)
+		ereport(ERROR,
+				(errmsg("get_log_stream() can only be called during shared "
+						"library preload"),
+				 errhint("Please check if your extension library is in "
+						 "\"shared_preload_libraries\"")));
+
+	if (log_streams_active >= MAXLOGSTREAMS)
+		ereport(ERROR,
+				(errmsg("The maximum number of log streams exceeded")));
+
+	if (id == NULL || strlen(id) == 0)
+		ereport(ERROR, (errmsg("stream id must be a non-empty string.")));
+
+	/*
+	 * The function is called twice in the EXEC_BACKEND case.
+	 */
+#ifdef EXEC_BACKEND
+	if (log_streams_initialized)
+	{
+		/*
+		 * If 2nd time here, only find the existing id among the extension
+		 * streams.
+		 */
+		Assert(log_streams_active >= 1);
+		for (i = 1; i < log_streams_active; i++)
+		{
+			LogStream  *stream = &log_streams[i];
+
+			if (strcmp(id, stream->id) == 0)
+			{
+				result = i;
+				break;
+			}
+		}
+		Assert(result >= 0);
+		*stream_p = &log_streams[result];
+		return result;
+	}
+#endif
+
+	/*
+	 * Make sure the id is unique. (The core stream is not supposed to have
+	 * id.)
+	 */
+	for (i = 1; i < log_streams_active; i++)
+	{
+		LogStream  *stream = &log_streams[i];
+
+		if (strcmp(id, stream->id))
+			ereport(ERROR, (errmsg("\"%s\" stream already exists", id)));
+	}
+
+	result = log_streams_active++;
+	stream = &log_streams[result];
+	memset(stream, 0, sizeof(LogStream));
+
+	/*
+	 * Set the default values.
+	 *
+	 * Duplicate the strings so that GUC does not break anything if it frees
+	 * the core values.
+	 */
+	stream_core = &log_streams[0];
+	stream->verbosity = stream_core->verbosity;
+	stream->destination = stream_core->destination;
+	adjust_log_stream_attr(&stream->id, id);
+	adjust_log_stream_attr(&stream->filename, stream_core->filename);
+	adjust_log_stream_attr(&stream->directory, stream_core->directory);
+	adjust_log_stream_attr(&stream->line_prefix, stream_core->line_prefix);
+	stream->file_mode = stream_core->file_mode;
+	stream->rotation_age = stream_core->rotation_age;
+	stream->rotation_size = stream_core->rotation_size;
+	stream->truncate_on_rotation = stream_core->truncate_on_rotation;
+
+	*stream_p = stream;
+	return result;
+}
+
 
 #ifdef WIN32
 
@@ -1162,11 +1346,23 @@ pipeThread(void *arg)
 		 * If we've filled the current logfile, nudge the main thread to do a
 		 * log rotation.
 		 */
-		if (Log_RotationSize > 0)
+		int	i;
+
+		for (i = 0; i < log_streams_active; i++)
 		{
-			if (ftell(syslogFile) >= Log_RotationSize * 1024L ||
-				(csvlogFile != NULL && ftell(csvlogFile) >= Log_RotationSize * 1024L))
+			LogStream  *stream = &log_streams[i];
+
+			if (stream->rotation_size <= 0) {
+				continue;
+			}
+
+			if (ftell(stream->syslog_file) >= stream->rotation_size * 1024L ||
+				(stream->csvlog_file != NULL &&
+					ftell(stream->csvlog_file) >= stream->rotation_size * 1024L))
+			{
 				SetLatch(MyLatch);
+				break;
+			}
 		}
 		LeaveCriticalSection(&sysloggerSection);
 	}
@@ -1189,21 +1385,30 @@ pipeThread(void *arg)
 /*
  * Open a new logfile with proper permissions and buffering options.
  *
- * If allow_errors is true, we just log any open failure and return NULL
- * (with errno still correct for the fopen failure).
- * Otherwise, errors are treated as fatal.
+ * If allow_errors is true, we just log any open failure and return NULL (with
+ * errno still correct for the fopen failure).  Otherwise, errors are treated
+ * as fatal.
+ *
+ * TODO Should we check that no other stream uses the same file? If so,
+ * consider the best portable way. (Comparison of the file path is not good
+ * because some of the paths may be symlinks.) Can we rely on fileno() to
+ * return the same number if the same file is opened by the same process
+ * multiple times?
  */
 static FILE *
-logfile_open(const char *filename, const char *mode, bool allow_errors)
+logfile_open(const char *filename, const char *mode, bool allow_errors,
+			 int stream_id)
 {
 	FILE	   *fh;
 	mode_t		oumask;
+	LogStream  *stream = &log_streams[stream_id];
+	int			file_mode = stream->file_mode;
 
 	/*
 	 * Note we do not let Log_file_mode disable IWUSR, since we certainly want
 	 * to be able to write the files ourselves.
 	 */
-	oumask = umask((mode_t) ((~(Log_file_mode | S_IWUSR)) & (S_IRWXU | S_IRWXG | S_IRWXO)));
+	oumask = umask((mode_t) ((~(file_mode | S_IWUSR)) & (S_IRWXU | S_IRWXG | S_IRWXO)));
 	fh = fopen(filename, mode);
 	umask(oumask);
 
@@ -1234,14 +1439,17 @@ logfile_open(const char *filename, const char *mode, bool allow_errors)
  * perform logfile rotation
  */
 static void
-logfile_rotate(bool time_based_rotation, int size_rotation_for)
+logfile_rotate(bool time_based_rotation, int size_rotation_for, int stream_id)
 {
 	char	   *filename;
 	char	   *csvfilename = NULL;
 	pg_time_t	fntime;
 	FILE	   *fh;
+	LogStream  *stream = &log_streams[stream_id];
 
-	rotation_requested = false;
+	Assert(stream_id < log_streams_active);
+
+	stream->rotation_needed = false;
 
 	/*
 	 * When doing a time-based rotation, invent the new logfile name based on
@@ -1249,12 +1457,12 @@ logfile_rotate(bool time_based_rotation, int size_rotation_for)
 	 * file name when we don't do the rotation immediately.
 	 */
 	if (time_based_rotation)
-		fntime = next_rotation_time;
+		fntime = stream->next_rotation_time;
 	else
 		fntime = time(NULL);
-	filename = logfile_getname(fntime, NULL);
-	if (Log_destination & LOG_DESTINATION_CSVLOG)
-		csvfilename = logfile_getname(fntime, ".csv");
+	filename = logfile_getname(fntime, NULL, stream_id);
+	if (stream->destination & LOG_DESTINATION_CSVLOG)
+		csvfilename = logfile_getname(fntime, ".csv", stream_id);
 
 	/*
 	 * Decide whether to overwrite or append.  We can overwrite if (a)
@@ -1266,19 +1474,19 @@ logfile_rotate(bool time_based_rotation, int size_rotation_for)
 	 */
 	if (time_based_rotation || (size_rotation_for & LOG_DESTINATION_STDERR))
 	{
-		if (Log_truncate_on_rotation && time_based_rotation &&
-			last_file_name != NULL &&
-			strcmp(filename, last_file_name) != 0)
-			fh = logfile_open(filename, "w", true);
+		if (stream->truncate_on_rotation && time_based_rotation &&
+			stream->last_file_name != NULL &&
+			strcmp(filename, stream->last_file_name) != 0)
+			fh = logfile_open(filename, "w", true, stream_id);
 		else
-			fh = logfile_open(filename, "a", true);
+			fh = logfile_open(filename, "a", true, stream_id);
 
 		if (!fh)
 		{
 			/*
 			 * ENFILE/EMFILE are not too surprising on a busy system; just
 			 * keep using the old file till we manage to get a new one.
-			 * Otherwise, assume something's wrong with Log_directory and stop
+			 * Otherwise, assume something's wrong with log directory and stop
 			 * trying to create files.
 			 */
 			if (errno != ENFILE && errno != EMFILE)
@@ -1295,40 +1503,40 @@ logfile_rotate(bool time_based_rotation, int size_rotation_for)
 			return;
 		}
 
-		fclose(syslogFile);
-		syslogFile = fh;
+		fclose(stream->syslog_file);
+		stream->syslog_file = fh;
 
 		/* instead of pfree'ing filename, remember it for next time */
-		if (last_file_name != NULL)
-			pfree(last_file_name);
-		last_file_name = filename;
+		if (stream->last_file_name != NULL)
+			pfree(stream->last_file_name);
+		stream->last_file_name = filename;
 		filename = NULL;
 	}
 
 	/*
 	 * Same as above, but for csv file.  Note that if LOG_DESTINATION_CSVLOG
-	 * was just turned on, we might have to open csvlogFile here though it was
-	 * not open before.  In such a case we'll append not overwrite (since
+	 * was just turned on, we might have to open csvlog_file here though it
+	 * was not open before.  In such a case we'll append not overwrite (since
 	 * last_csv_file_name will be NULL); that is consistent with the normal
 	 * rules since it's not a time-based rotation.
 	 */
-	if ((Log_destination & LOG_DESTINATION_CSVLOG) &&
-		(csvlogFile == NULL ||
+	if ((stream->destination & LOG_DESTINATION_CSVLOG) &&
+		(stream->csvlog_file == NULL ||
 		 time_based_rotation || (size_rotation_for & LOG_DESTINATION_CSVLOG)))
 	{
-		if (Log_truncate_on_rotation && time_based_rotation &&
-			last_csv_file_name != NULL &&
-			strcmp(csvfilename, last_csv_file_name) != 0)
-			fh = logfile_open(csvfilename, "w", true);
+		if (stream->truncate_on_rotation && time_based_rotation &&
+			stream->last_csv_file_name != NULL &&
+			strcmp(csvfilename, stream->last_csv_file_name) != 0)
+			fh = logfile_open(csvfilename, "w", true, stream_id);
 		else
-			fh = logfile_open(csvfilename, "a", true);
+			fh = logfile_open(csvfilename, "a", true, stream_id);
 
 		if (!fh)
 		{
 			/*
 			 * ENFILE/EMFILE are not too surprising on a busy system; just
 			 * keep using the old file till we manage to get a new one.
-			 * Otherwise, assume something's wrong with Log_directory and stop
+			 * Otherwise, assume something's wrong with log directory and stop
 			 * trying to create files.
 			 */
 			if (errno != ENFILE && errno != EMFILE)
@@ -1345,25 +1553,25 @@ logfile_rotate(bool time_based_rotation, int size_rotation_for)
 			return;
 		}
 
-		if (csvlogFile != NULL)
-			fclose(csvlogFile);
-		csvlogFile = fh;
+		if (stream->csvlog_file != NULL)
+			fclose(stream->csvlog_file);
+		stream->csvlog_file = fh;
 
 		/* instead of pfree'ing filename, remember it for next time */
-		if (last_csv_file_name != NULL)
-			pfree(last_csv_file_name);
-		last_csv_file_name = csvfilename;
+		if (stream->last_csv_file_name != NULL)
+			pfree(stream->last_csv_file_name);
+		stream->last_csv_file_name = csvfilename;
 		csvfilename = NULL;
 	}
-	else if (!(Log_destination & LOG_DESTINATION_CSVLOG) &&
-			 csvlogFile != NULL)
+	else if (!(stream->destination & LOG_DESTINATION_CSVLOG) &&
+			 stream->csvlog_file != NULL)
 	{
 		/* CSVLOG was just turned off, so close the old file */
-		fclose(csvlogFile);
-		csvlogFile = NULL;
-		if (last_csv_file_name != NULL)
-			pfree(last_csv_file_name);
-		last_csv_file_name = NULL;
+		fclose(stream->csvlog_file);
+		stream->csvlog_file = NULL;
+		if (stream->last_csv_file_name != NULL)
+			pfree(stream->last_csv_file_name);
+		stream->last_csv_file_name = NULL;
 	}
 
 	if (filename)
@@ -1371,9 +1579,10 @@ logfile_rotate(bool time_based_rotation, int size_rotation_for)
 	if (csvfilename)
 		pfree(csvfilename);
 
-	update_metainfo_datafile();
+	if (stream_id == 0)
+		update_metainfo_datafile();
 
-	set_next_rotation_time();
+	set_next_rotation_time(stream_id);
 }
 
 
@@ -1386,19 +1595,20 @@ logfile_rotate(bool time_based_rotation, int size_rotation_for)
  * Result is palloc'd.
  */
 static char *
-logfile_getname(pg_time_t timestamp, const char *suffix)
+logfile_getname(pg_time_t timestamp, const char *suffix, int stream_id)
 {
 	char	   *filename;
 	int			len;
+	LogStream  *stream = &log_streams[stream_id];
 
 	filename = palloc(MAXPGPATH);
 
-	snprintf(filename, MAXPGPATH, "%s/", Log_directory);
+	snprintf(filename, MAXPGPATH, "%s/", stream->directory);
 
 	len = strlen(filename);
 
-	/* treat Log_filename as a strftime pattern */
-	pg_strftime(filename + len, MAXPGPATH - len, Log_filename,
+	/* treat log filename as a strftime pattern */
+	pg_strftime(filename + len, MAXPGPATH - len, stream->filename,
 				pg_localtime(&timestamp, log_timezone));
 
 	if (suffix != NULL)
@@ -1416,14 +1626,15 @@ logfile_getname(pg_time_t timestamp, const char *suffix)
  * Determine the next planned rotation time, and store in next_rotation_time.
  */
 static void
-set_next_rotation_time(void)
+set_next_rotation_time(int stream_id)
 {
 	pg_time_t	now;
 	struct pg_tm *tm;
 	int			rotinterval;
+	LogStream  *stream = &log_streams[stream_id];
 
 	/* nothing to do if time-based rotation is disabled */
-	if (Log_RotationAge <= 0)
+	if (stream->rotation_age <= 0)
 		return;
 
 	/*
@@ -1432,14 +1643,16 @@ set_next_rotation_time(void)
 	 * fairly loosely.  In this version we align to log_timezone rather than
 	 * GMT.
 	 */
-	rotinterval = Log_RotationAge * SECS_PER_MINUTE;	/* convert to seconds */
+	rotinterval = stream->rotation_age *
+		SECS_PER_MINUTE;		/* convert to seconds */
 	now = (pg_time_t) time(NULL);
 	tm = pg_localtime(&now, log_timezone);
 	now += tm->tm_gmtoff;
 	now -= now % rotinterval;
 	now += rotinterval;
 	now -= tm->tm_gmtoff;
-	next_rotation_time = now;
+
+	stream->next_rotation_time = now;
 }
 
 /*
@@ -1447,17 +1660,24 @@ set_next_rotation_time(void)
  * log messages.  Useful for finding the name(s) of the current log file(s)
  * when there is time-based logfile rotation.  Filenames are stored in a
  * temporary file and which is renamed into the final destination for
- * atomicity.  The file is opened with the same permissions as what gets
- * created in the data directory and has proper buffering options.
+ * atomicity.
+ *
+ * TODO Should the extension logs be included? If so, how can we generate a
+ * unique prefix for them? (stream_id is not suitable because an extension can
+ * receive different id after cluster restart).
  */
 static void
 update_metainfo_datafile(void)
 {
 	FILE	   *fh;
 	mode_t		oumask;
+	LogStream  *stream_core = &log_streams[0];
+	char	   *last_file_name = stream_core->last_file_name;
+	char	   *last_csv_file_name = stream_core->last_csv_file_name;
+	LogStream  *log = &log_streams[0];
 
-	if (!(Log_destination & LOG_DESTINATION_STDERR) &&
-		!(Log_destination & LOG_DESTINATION_CSVLOG))
+	if (!(log->destination & LOG_DESTINATION_STDERR) &&
+		!(log->destination & LOG_DESTINATION_CSVLOG))
 	{
 		if (unlink(LOG_METAINFO_DATAFILE) < 0 && errno != ENOENT)
 			ereport(LOG,
@@ -1490,7 +1710,7 @@ update_metainfo_datafile(void)
 		return;
 	}
 
-	if (last_file_name && (Log_destination & LOG_DESTINATION_STDERR))
+	if (last_file_name && (log->destination & LOG_DESTINATION_STDERR))
 	{
 		if (fprintf(fh, "stderr %s\n", last_file_name) < 0)
 		{
@@ -1503,7 +1723,7 @@ update_metainfo_datafile(void)
 		}
 	}
 
-	if (last_csv_file_name && (Log_destination & LOG_DESTINATION_CSVLOG))
+	if (last_csv_file_name && (log->destination & LOG_DESTINATION_CSVLOG))
 	{
 		if (fprintf(fh, "csvlog %s\n", last_csv_file_name) < 0)
 		{

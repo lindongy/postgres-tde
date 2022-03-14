@@ -105,11 +105,10 @@ extern bool redirection_done;
  */
 emit_log_hook_type emit_log_hook = NULL;
 
+
 /* GUC parameters */
-int			Log_error_verbosity = PGERROR_VERBOSE;
-char	   *Log_line_prefix = NULL; /* format for extra log line info */
-int			Log_destination = LOG_DESTINATION_STDERR;
 char	   *Log_destination_string = NULL;
+
 bool		syslog_sequence_numbers = true;
 bool		syslog_split_messages = true;
 
@@ -181,7 +180,7 @@ static const char *process_log_prefix_padding(const char *p, int *padding);
 static void log_line_prefix(StringInfo buf, ErrorData *edata);
 static void write_csvlog(ErrorData *edata);
 static void send_message_to_server_log(ErrorData *edata);
-static void write_pipe_chunks(char *data, int len, int dest);
+static void write_pipe_chunks(char *data, int len, int dest, int stream_id);
 static void send_message_to_frontend(ErrorData *edata);
 static const char *error_severity(int elevel);
 static void append_with_tabs(StringInfo buf, const char *str);
@@ -592,6 +591,12 @@ errfinish(const char *filename, int lineno, const char *funcname)
 		recursion_depth--;
 		PG_RE_THROW();
 	}
+
+	/*
+	 * A serious error should find its way to the core log.
+	 */
+	if (elevel >= FATAL)
+		edata->syslogger_stream = 0;
 
 	/* Emit the message to the right places */
 	EmitErrorReport();
@@ -1376,6 +1381,26 @@ err_generic_string(int field, const char *str)
 			elog(ERROR, "unsupported ErrorData field id: %d", field);
 			break;
 	}
+
+	return 0;					/* return value does not matter */
+}
+
+/*
+ * errstream --- set identifier of the server log file the message should be
+ * written into.
+ */
+int
+errstream(const int stream_id)
+{
+	ErrorData  *edata = &errordata[errordata_stack_depth];
+
+	/* we don't bother incrementing recursion_depth */
+	CHECK_STACK_DEPTH();
+
+	if (stream_id < 0 || stream_id >= log_streams_active)
+		elog(ERROR, "invalid syslogger stream: %d", stream_id);
+
+	edata->syslogger_stream = stream_id;
 
 	return 0;					/* return value does not matter */
 }
@@ -2386,6 +2411,7 @@ log_line_prefix(StringInfo buf, ErrorData *edata)
 	static int	log_my_pid = 0;
 	int			padding;
 	const char *p;
+	char	   *line_prefix = log_streams[edata->syslogger_stream].line_prefix;
 
 	/*
 	 * This is one of the few places where we'd rather not inherit a static
@@ -2401,10 +2427,10 @@ log_line_prefix(StringInfo buf, ErrorData *edata)
 	}
 	log_line_number++;
 
-	if (Log_line_prefix == NULL)
+	if (line_prefix == NULL)
 		return;					/* in case guc hasn't run yet */
 
-	for (p = Log_line_prefix; *p != '\0'; p++)
+	for (p = line_prefix; *p != '\0'; p++)
 	{
 		if (*p != '%')
 		{
@@ -2763,6 +2789,7 @@ write_csvlog(ErrorData *edata)
 {
 	StringInfoData buf;
 	bool		print_stmt = false;
+	LogStream  *log = &log_streams[edata->syslogger_stream];
 
 	/* static counter for line numbers */
 	static long log_line_number = 0;
@@ -2918,7 +2945,7 @@ write_csvlog(ErrorData *edata)
 	appendStringInfoChar(&buf, ',');
 
 	/* file error location */
-	if (Log_error_verbosity >= PGERROR_VERBOSE)
+	if (log->verbosity >= PGERROR_VERBOSE)
 	{
 		StringInfoData msgbuf;
 
@@ -2973,9 +3000,10 @@ write_csvlog(ErrorData *edata)
 
 	/* If in the syslogger process, try to write messages direct to file */
 	if (MyBackendType == B_LOGGER)
-		write_syslogger_file(buf.data, buf.len, LOG_DESTINATION_CSVLOG);
+		write_syslogger_file(buf.data, buf.len, LOG_DESTINATION_CSVLOG, 0);
 	else
-		write_pipe_chunks(buf.data, buf.len, LOG_DESTINATION_CSVLOG);
+		write_pipe_chunks(buf.data, buf.len, LOG_DESTINATION_CSVLOG,
+						  edata->syslogger_stream);
 
 	pfree(buf.data);
 }
@@ -3008,6 +3036,7 @@ static void
 send_message_to_server_log(ErrorData *edata)
 {
 	StringInfoData buf;
+	LogStream  *log = &log_streams[edata->syslogger_stream];
 
 	initStringInfo(&buf);
 
@@ -3017,7 +3046,7 @@ send_message_to_server_log(ErrorData *edata)
 	log_line_prefix(&buf, edata);
 	appendStringInfo(&buf, "%s:  ", _(error_severity(edata->elevel)));
 
-	if (Log_error_verbosity >= PGERROR_VERBOSE)
+	if (log->verbosity >= PGERROR_VERBOSE)
 		appendStringInfo(&buf, "%s: ", unpack_sql_state(edata->sqlerrcode));
 
 	if (edata->message)
@@ -3034,7 +3063,7 @@ send_message_to_server_log(ErrorData *edata)
 
 	appendStringInfoChar(&buf, '\n');
 
-	if (Log_error_verbosity >= PGERROR_DEFAULT)
+	if (log->verbosity >= PGERROR_DEFAULT)
 	{
 		if (edata->detail_log)
 		{
@@ -3071,7 +3100,7 @@ send_message_to_server_log(ErrorData *edata)
 			append_with_tabs(&buf, edata->context);
 			appendStringInfoChar(&buf, '\n');
 		}
-		if (Log_error_verbosity >= PGERROR_VERBOSE)
+		if (log->verbosity >= PGERROR_VERBOSE)
 		{
 			/* assume no newlines in funcname or filename... */
 			if (edata->funcname && edata->filename)
@@ -3112,7 +3141,7 @@ send_message_to_server_log(ErrorData *edata)
 
 #ifdef HAVE_SYSLOG
 	/* Write to syslog, if enabled */
-	if (Log_destination & LOG_DESTINATION_SYSLOG)
+	if (log->destination & LOG_DESTINATION_SYSLOG)
 	{
 		int			syslog_level;
 
@@ -3153,14 +3182,14 @@ send_message_to_server_log(ErrorData *edata)
 
 #ifdef WIN32
 	/* Write to eventlog, if enabled */
-	if (Log_destination & LOG_DESTINATION_EVENTLOG)
+	if (log->destination & LOG_DESTINATION_EVENTLOG)
 	{
 		write_eventlog(edata->elevel, buf.data, buf.len);
 	}
 #endif							/* WIN32 */
 
 	/* Write to stderr, if enabled */
-	if ((Log_destination & LOG_DESTINATION_STDERR) || whereToSendOutput == DestDebug)
+	if ((log->destination & LOG_DESTINATION_STDERR) || whereToSendOutput == DestDebug)
 	{
 		/*
 		 * Use the chunking protocol if we know the syslogger should be
@@ -3168,7 +3197,8 @@ send_message_to_server_log(ErrorData *edata)
 		 * Otherwise, just do a vanilla write to stderr.
 		 */
 		if (redirection_done && MyBackendType != B_LOGGER)
-			write_pipe_chunks(buf.data, buf.len, LOG_DESTINATION_STDERR);
+			write_pipe_chunks(buf.data, buf.len, LOG_DESTINATION_STDERR,
+							  edata->syslogger_stream);
 #ifdef WIN32
 
 		/*
@@ -3187,10 +3217,10 @@ send_message_to_server_log(ErrorData *edata)
 
 	/* If in the syslogger process, try to write messages direct to file */
 	if (MyBackendType == B_LOGGER)
-		write_syslogger_file(buf.data, buf.len, LOG_DESTINATION_STDERR);
+		write_syslogger_file(buf.data, buf.len, LOG_DESTINATION_STDERR, 0);
 
 	/* Write to CSV log if enabled */
-	if (Log_destination & LOG_DESTINATION_CSVLOG)
+	if (log->destination & LOG_DESTINATION_CSVLOG)
 	{
 		if (redirection_done || MyBackendType == B_LOGGER)
 		{
@@ -3207,7 +3237,7 @@ send_message_to_server_log(ErrorData *edata)
 			 * syslogger not up (yet), so just dump the message to stderr,
 			 * unless we already did so above.
 			 */
-			if (!(Log_destination & LOG_DESTINATION_STDERR) &&
+			if (!(log->destination & LOG_DESTINATION_STDERR) &&
 				whereToSendOutput != DestDebug)
 				write_console(buf.data, buf.len);
 			pfree(buf.data);
@@ -3240,7 +3270,7 @@ send_message_to_server_log(ErrorData *edata)
  * rc to void to shut up the compiler.
  */
 static void
-write_pipe_chunks(char *data, int len, int dest)
+write_pipe_chunks(char *data, int len, int dest, int stream_id)
 {
 	PipeProtoChunk p;
 	int			fd = fileno(stderr);
@@ -3248,8 +3278,11 @@ write_pipe_chunks(char *data, int len, int dest)
 
 	Assert(len > 0);
 
+	StaticAssertStmt(PIPE_MAX_PAYLOAD > 0, "PipeProtoHeader is too big");
+
 	p.proto.nuls[0] = p.proto.nuls[1] = '\0';
 	p.proto.pid = MyProcPid;
+	p.proto.stream_id = (unsigned char) stream_id;
 
 	/* write all but the last chunk */
 	while (len > PIPE_MAX_PAYLOAD)

@@ -485,6 +485,7 @@ typedef struct
 
 static pid_t backend_forkexec(Port *port);
 static pid_t internal_forkexec(int argc, char *argv[], Port *port);
+static Size get_backend_params_size(void);
 
 /* Type for a socket that can be inherited to a client process */
 #ifdef WIN32
@@ -503,7 +504,13 @@ typedef int InheritableSocket;
  */
 typedef struct
 {
+	/*
+	 * read_backend_variables() relies on size to be the first field, followed
+	 * by port.
+	 */
+	Size		size;
 	Port		port;
+
 	InheritableSocket portsocket;
 	char		DataDir[MAXPGPATH];
 	pgsocket	ListenSocket[MAXLISTEN];
@@ -555,6 +562,8 @@ typedef struct
 #endif
 	char		my_exec_path[MAXPGPATH];
 	char		pkglib_path[MAXPGPATH];
+	int			nlogstreams;
+	char		log_streams[FLEXIBLE_ARRAY_MEMBER];
 } BackendParameters;
 
 static void read_backend_variables(char *id, Port *port);
@@ -606,6 +615,7 @@ PostmasterMain(int argc, char *argv[])
 	bool		listen_addr_saved = false;
 	int			i;
 	char	   *output_config_variable = NULL;
+	LogStream  *log = &log_streams[0];
 
 	InitProcessGlobals();
 
@@ -1132,7 +1142,7 @@ PostmasterMain(int argc, char *argv[])
 	 * saying so, to provide a breadcrumb trail for users who may not remember
 	 * that their logging is configured to go somewhere else.
 	 */
-	if (!(Log_destination & LOG_DESTINATION_STDERR))
+	if (!(log->destination & LOG_DESTINATION_STDERR))
 		ereport(LOG,
 				(errmsg("ending log output to stderr"),
 				 errhint("Future log output will go to log destination \"%s\".",
@@ -4958,11 +4968,18 @@ internal_forkexec(int argc, char *argv[], Port *port)
 	static unsigned long tmpBackendFileNum = 0;
 	pid_t		pid;
 	char		tmpfilename[MAXPGPATH];
-	BackendParameters param;
+	Size		param_size;
+	BackendParameters *param;
 	FILE	   *fp;
 
-	if (!save_backend_variables(&param, port))
+	param_size = get_backend_params_size();
+	param = (BackendParameters *) palloc(param_size);
+	if (!save_backend_variables(param, port))
+	{
+		pfree(param);
 		return -1;				/* log made by save_backend_variables */
+	}
+	Assert(param->size == param_size);
 
 	/* Calculate name for temp file */
 	snprintf(tmpfilename, MAXPGPATH, "%s/%s.backend_var.%d.%lu",
@@ -4986,18 +5003,21 @@ internal_forkexec(int argc, char *argv[], Port *port)
 					(errcode_for_file_access(),
 					 errmsg("could not create file \"%s\": %m",
 							tmpfilename)));
+			pfree(param);
 			return -1;
 		}
 	}
 
-	if (fwrite(&param, sizeof(param), 1, fp) != 1)
+	if (fwrite(param, param_size, 1, fp) != 1)
 	{
 		ereport(LOG,
 				(errcode_for_file_access(),
 				 errmsg("could not write to file \"%s\": %m", tmpfilename)));
 		FreeFile(fp);
+		pfree(param);
 		return -1;
 	}
+	pfree(param);
 
 	/* Release file */
 	if (FreeFile(fp))
@@ -5086,7 +5106,8 @@ retry:
 		return -1;
 	}
 
-	param = MapViewOfFile(paramHandle, FILE_MAP_WRITE, 0, 0, sizeof(BackendParameters));
+	param = MapViewOfFile(paramHandle, FILE_MAP_WRITE, 0, 0,
+						  get_backend_params_size());
 	if (!param)
 	{
 		ereport(LOG,
@@ -5251,6 +5272,30 @@ retry:
 	return pi.dwProcessId;
 }
 #endif							/* WIN32 */
+
+/*
+ * The storage space depends on the log streams. Compute how much we need.
+ */
+static Size
+get_backend_params_size(void)
+{
+	int			i;
+	Size		result;
+
+	result = offsetof(BackendParameters, log_streams);
+	for (i = 0; i < log_streams_active; i++)
+	{
+		LogStream  *stream = &log_streams[i];
+
+		/*
+		 * At least the in-core value should be there.
+		 */
+		Assert(stream->line_prefix != NULL);
+
+		result += LOG_STREAM_FLAT_SIZE(stream);
+	}
+	return result;
+}
 
 
 /*
@@ -6552,6 +6597,8 @@ extern PMSignalData *PMSignalState;
 extern pgsocket pgStatSock;
 extern pg_time_t first_syslogger_file_time;
 
+bool		log_streams_initialized = false;
+
 #ifndef WIN32
 #define write_inheritable_socket(dest, src, childpid) ((*(dest) = (src)), true)
 #define read_inheritable_socket(dest, src) (*(dest) = *(src))
@@ -6573,6 +6620,11 @@ save_backend_variables(BackendParameters *param, Port *port,
 					   HANDLE childProcess, pid_t childPid)
 #endif
 {
+	int			i;
+	LogStreamFlat *flat = NULL;
+	Size		flat_size_max = 0;
+	char	   *cur;
+
 	memcpy(&param->port, port, sizeof(Port));
 	if (!write_inheritable_socket(&param->portsocket, port->sock, childPid))
 		return false;
@@ -6641,6 +6693,86 @@ save_backend_variables(BackendParameters *param, Port *port,
 	strlcpy(param->my_exec_path, my_exec_path, MAXPGPATH);
 
 	strlcpy(param->pkglib_path, pkglib_path, MAXPGPATH);
+
+	param->nlogstreams = log_streams_active;
+	cur = param->log_streams;
+	for (i = 0; i < param->nlogstreams; i++)
+	{
+		LogStream  *stream;
+		Size		flat_size;
+
+		stream = &log_streams[i];
+		flat_size = LOG_STREAM_FLAT_SIZE(stream);
+		if (flat_size_max == 0)
+		{
+			/* First time through? */
+			Assert(flat == NULL);
+			flat = (LogStreamFlat *) palloc(flat_size);
+			flat_size_max = flat_size;
+		}
+		else if (flat_size > flat_size_max)
+		{
+			/* New maximum size? */
+			Assert(flat != NULL);
+			flat = (LogStreamFlat *) repalloc(flat, flat_size);
+			flat_size_max = flat_size;
+		}
+
+		/* Serialize the stream info. */
+		memset(flat, 0, flat_size);
+		flat->size = flat_size;
+		flat->syslog_fd = stream->syslog_fd;
+
+		/*
+		 * As for the core stream, backend will read the settings as any other
+		 * GUCs.
+		 */
+		if (i > 0)
+		{
+			/*
+			 * Check string arguments.
+			 */
+			if (stream->filename == NULL || strlen(stream->filename) == 0 ||
+				stream->directory == NULL || strlen(stream->directory) == 0 ||
+				stream->line_prefix == NULL || stream->id == NULL)
+				ereport(ERROR, (errmsg("log stream is not initialized properly")));
+
+			if (strlen(stream->filename) >= MAXPGPATH ||
+				strlen(stream->directory) >= MAXPGPATH ||
+				strlen(stream->line_prefix) >= MAXPGPATH ||
+				strlen(stream->id) >= MAXPGPATH)
+				ereport(ERROR,
+						(errmsg("Both log director and file name must be shorter than MAXPGPATH")));
+
+			flat->verbosity = stream->verbosity;
+			flat->destination = stream->destination;
+			Assert(stream->filename != NULL && strlen(stream->filename) > 0);
+			strcpy(flat->id, stream->id);
+			strcpy(flat->filename, stream->filename);
+			Assert(stream->directory != NULL);
+			if (strlen(stream->directory) > 0)
+				strcpy(flat->directory, stream->directory);
+			flat->file_mode = stream->file_mode;
+			flat->rotation_age = stream->rotation_age;
+			flat->rotation_size = stream->rotation_size;
+			flat->truncate_on_rotation = stream->truncate_on_rotation;
+			Assert(stream->line_prefix != NULL);
+
+			if (strlen(stream->line_prefix) > 0)
+				strcpy(flat->line_prefix, stream->line_prefix);
+		}
+
+		/* Copy the data. */
+		memcpy(cur, flat, flat_size);
+		cur += flat_size;
+	}
+
+	/* At least one (the core) stream should always exist. */
+	Assert(flat != NULL);
+	pfree(flat);
+
+	/* File space needed. */
+	param->size = cur - (char *) param;
 
 	return true;
 }
@@ -6742,7 +6874,9 @@ read_inheritable_socket(SOCKET *dest, InheritableSocket *src)
 static void
 read_backend_variables(char *id, Port *port)
 {
-	BackendParameters param;
+	Size		param_size,
+				off;
+	BackendParameters *param;
 
 #ifndef WIN32
 	/* Non-win32 implementation reads from file */
@@ -6757,7 +6891,27 @@ read_backend_variables(char *id, Port *port)
 		exit(1);
 	}
 
-	if (fread(&param, sizeof(param), 1, fp) != 1)
+	/*
+	 * First, read only the size word.
+	 */
+	if (fread(&param_size, sizeof(Size), 1, fp) != 1)
+	{
+		write_stderr("could not read from backend variables file \"%s\": %s\n",
+					 id, strerror(errno));
+		exit(1);
+	}
+	/* At least one stream should be there. */
+	Assert(param_size > offsetof(BackendParameters, log_streams));
+
+	param = (BackendParameters *) palloc(param_size);
+	/* The size is needed here just for the sake of completeness. */
+	param->size = param_size;
+
+	/*
+	 * Now read the rest.
+	 */
+	off = offsetof(BackendParameters, port);
+	if (fread((char *) param + off, param_size - off, 1, fp) != 1)
 	{
 		write_stderr("could not read from backend variables file \"%s\": %s\n",
 					 id, strerror(errno));
@@ -6790,7 +6944,8 @@ read_backend_variables(char *id, Port *port)
 		exit(1);
 	}
 
-	memcpy(&param, paramp, sizeof(BackendParameters));
+	param = (BackendParameters *) palloc(paramp->size);
+	memcpy(&param, paramp, paramp->size);
 
 	if (!UnmapViewOfFile(paramp))
 	{
@@ -6807,13 +6962,20 @@ read_backend_variables(char *id, Port *port)
 	}
 #endif
 
-	restore_backend_variables(&param, port);
+	restore_backend_variables(param, port);
+
+	pfree(param);
 }
 
 /* Restore critical backend variables from the BackendParameters struct */
 static void
 restore_backend_variables(BackendParameters *param, Port *port)
 {
+	int			i;
+	LogStreamFlat *flat = NULL;
+	Size		flat_size_max = 0;
+	char	   *cur;
+
 	memcpy(port, &param->port, sizeof(Port));
 	read_inheritable_socket(&port->sock, &param->portsocket);
 
@@ -6878,6 +7040,84 @@ restore_backend_variables(BackendParameters *param, Port *port)
 	strlcpy(my_exec_path, param->my_exec_path, MAXPGPATH);
 
 	strlcpy(pkglib_path, param->pkglib_path, MAXPGPATH);
+
+	cur = param->log_streams;
+	for (i = 0; i < param->nlogstreams; i++)
+	{
+		Size		flat_size;
+		LogStream  *stream;
+
+		/* First, read the size word. */
+		memcpy(&flat_size, cur, sizeof(Size));
+
+		/* Make sure we have enough space. */
+		if (flat_size_max == 0)
+		{
+			/* First time through? */
+			Assert(flat == NULL);
+			flat = (LogStreamFlat *) palloc(flat_size);
+			flat_size_max = flat_size;
+		}
+		else if (flat_size > flat_size_max)
+		{
+			/* New maximum size? */
+			Assert(flat != NULL);
+			flat = (LogStreamFlat *) repalloc(flat, flat_size);
+			flat_size_max = flat_size;
+		}
+
+		/* Copy the data into an aligned address so we can access it. */
+		memcpy(flat, cur, flat_size);
+
+		/*
+		 * Copy the data into the regular LogStream instance.
+		 */
+		stream = &log_streams[i];
+		memset(stream, 0, sizeof(LogStream));
+		stream->syslog_fd = flat->syslog_fd;
+
+		/*
+		 * As for the core stream, backend will read the settings as any other
+		 * GUCs.
+		 */
+		if (i > 0)
+		{
+			stream->verbosity = flat->verbosity;
+			stream->destination = flat->destination;
+			stream->id = pstrdup(flat->id);
+			stream->filename = pstrdup(flat->filename);
+			if (strlen(flat->directory) > 0)
+				stream->directory = pstrdup(flat->directory);
+			stream->file_mode = flat->file_mode;
+			stream->rotation_age = flat->rotation_age;
+			stream->rotation_size = flat->rotation_size;
+			stream->truncate_on_rotation = flat->truncate_on_rotation;
+
+			if (strlen(flat->line_prefix) > 0)
+				stream->line_prefix = pstrdup(flat->line_prefix);
+		}
+
+		cur += flat_size;
+	}
+	log_streams_active = param->nlogstreams;
+
+	/*
+	 * SubPostmasterMain() will call process_shared_preload_libraries().  We
+	 * don't want get_log_stream to be called again and re-initialize the
+	 * existing streams.
+	 *
+	 * One problem is that there's no guarantee that extensions would receive
+	 * the same log stream ids: we should not expect that the same set of
+	 * libraries will be loaded as the set loaded earlier by postmaster, not
+	 * to mention the loading order. Besides that, the only way to receive
+	 * valid syslog_fd of particular LogStream needs is to receive it from
+	 * postmaster.
+	 */
+	log_streams_initialized = true;
+
+	/* At least one (the core) stream should always exist. */
+	Assert(flat != NULL);
+	pfree(flat);
 
 	/*
 	 * We need to restore fd.c's counts of externally-opened FDs; to avoid

@@ -54,6 +54,10 @@ typedef struct CopyFormatOptions
 typedef struct CopyFromStateData *CopyFromState;
 typedef struct CopyToStateData *CopyToState;
 
+typedef char *(*datamask_hook_type)(char *, Oid, int16);
+extern PGDLLIMPORT datamask_hook_type datamask_hook;
+#define HAS_DATAMASK
+
 typedef int (*copy_data_source_cb) (void *outbuf, int minread, int maxread);
 
 extern void DoCopy(ParseState *state, const CopyStmt *stmt,

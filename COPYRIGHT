@@ -1,4 +1,4 @@
-PostgreSQL-TDE Database Management System
+PostgreSQL-EE Database Management System
 
 Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
 Portions Copyright (c) 1996-2022, PostgreSQL Global Development Group
@@ -26,7 +26,7 @@ PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 History
 =======
 
-PostgreSQL-TDE is the PostgreSQL database server to which the Transparent Data
-Encryption (TDE) feature has been added. While TDE is copyrighted by CYBERTEC
-PostgreSQL International GmbH, all the prior work is copyrighted by the
-PostgreSQL Global Development Group.
+PostgreSQL-EE (Enterprise Edition) is the PostgreSQL database server to which
+some additional features have been added. While the EE is copyrighted by
+CYBERTEC PostgreSQL International GmbH, all the prior work is copyrighted by
+the PostgreSQL Global Development Group.
