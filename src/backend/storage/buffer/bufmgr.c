@@ -4067,7 +4067,9 @@ MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
 			 */
 			if (need_fpi)
 			{
-				MyProc->delayChkpt = delayChkpt = true;
+				Assert(!MyProc->delayChkpt);
+				MyProc->delayChkpt = true;
+				delayChkpt = true;
 				lsn = XLogSaveBufferForHint(buffer, buffer_std);
 			}
 

@@ -7,7 +7,6 @@ use warnings;
 use PostgresNode;
 use TestLib;
 
-use Fcntl qw(:seek);
 use Test::More tests => 80;
 
 my ($node, $result);
@@ -16,6 +15,14 @@ my ($node, $result);
 # Test set-up
 #
 $node = get_new_node('test');
+
+# Like in Makefile, turn off encryption. With encryption, corrupt_first_page()
+# below results in different corruption than the tests expect. We could adjust
+# the test so that the page is first decrypted, but not sure it's worth the
+# effort.
+%ENV = $node->_get_env();
+$ENV{PGENCRKEYCMD}="";
+
 $node->init;
 $node->append_conf('postgresql.conf', 'autovacuum=off');
 $node->start;
@@ -127,8 +134,8 @@ sub corrupt_first_page
 	# Corrupt some line pointers.  The values are chosen to hit the
 	# various line-pointer-corruption checks in verify_heapam.c
 	# on both little-endian and big-endian architectures.
-	seek($fh, 32, SEEK_SET)
-	  or BAIL_OUT("seek failed: $!");
+	sysseek($fh, 32, 0)
+	  or BAIL_OUT("sysseek failed: $!");
 	syswrite(
 		$fh,
 		pack("L*",
