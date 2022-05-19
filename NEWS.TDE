@@ -1,4 +1,20 @@
-13.1_TDE_1.0beta1
-=================
+TDE_1.0.1
+=========
 
-Merged TDE 1.0 into PostgreSQL 13.1
+Bug fixes
+---------
+
+* When a buffer of a temporary file has been dumped, the following block (if
+  it exists) must be loaded into the buffer before we start writing into
+  it. Otherwise the next dump can overwrite valid data of the following block
+  with zeroes.
+
+  Fortunately this bugs seems to be hidden by the fact that logtape.c only
+  writes whole blocks and that other callers of the buffile.c API do not seem
+  to overwrite the temporary files at all.
+
+
+TDE_1.0.0
+=========
+
+The initial implementation of the TDE feature.
