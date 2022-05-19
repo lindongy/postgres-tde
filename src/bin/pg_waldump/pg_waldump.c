@@ -211,10 +211,11 @@ search_directory(const char *directory, const char *fname)
 			 * do. If anything else is wrong, the XLOG reader should find out
 			 * after decryption.
 			 */
-			fatal_error(ngettext("WAL segment size must be a power of two between 1 MB and 1 GB, but size of the WAL file \"%s\" is %d byte",
-								 "WAL segment size must be a power of two between 1 MB and 1 GB, but size of the WAL file \"%s\" is %d bytes",
-								 WalSegSz),
-						fname, WalSegSz);
+			if (!IsValidWalSegSize(WalSegSz))
+				fatal_error(ngettext("WAL segment size must be a power of two between 1 MB and 1 GB, but size of the WAL file \"%s\" is %d byte",
+									 "WAL segment size must be a power of two between 1 MB and 1 GB, but size of the WAL file \"%s\" is %d bytes",
+									 WalSegSz),
+							fname, WalSegSz);
 		}
 		else
 		{
