@@ -4,6 +4,7 @@
  *	  BTree-specific page management code for the Postgres btree access
  *	  method.
  *
+ * Portions Copyright (c) 2019-2021, CYBERTEC PostgreSQL International GmbH
  * Portions Copyright (c) 1996-2020, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -231,11 +232,13 @@ _bt_update_meta_cleanup_info(Relation rel, TransactionId oldestBtpoXact,
 
 		recptr = XLogInsert(RM_BTREE_ID, XLOG_BTREE_META_CLEANUP);
 
+
 		PageSetLSN(metapg, recptr);
 	}
+	else if (data_encrypted)
+		set_page_lsn_for_encryption(metapg);
 
 	END_CRIT_SECTION();
-
 	_bt_relbuf(rel, metabuf);
 }
 
@@ -424,6 +427,8 @@ _bt_getroot(Relation rel, int access)
 			PageSetLSN(rootpage, recptr);
 			PageSetLSN(metapg, recptr);
 		}
+		else if (data_encrypted)
+			set_page_lsn_for_encryption2(rootpage, metapg);
 
 		END_CRIT_SECTION();
 
@@ -1153,6 +1158,8 @@ _bt_delitems_vacuum(Relation rel, Buffer buf,
 
 		PageSetLSN(page, recptr);
 	}
+	else if (data_encrypted)
+		set_page_lsn_for_encryption(page);
 
 	END_CRIT_SECTION();
 
@@ -1234,6 +1241,8 @@ _bt_delitems_delete(Relation rel, Buffer buf,
 
 		PageSetLSN(page, recptr);
 	}
+	else if (data_encrypted)
+		set_page_lsn_for_encryption(page);
 
 	END_CRIT_SECTION();
 }
@@ -1891,6 +1900,9 @@ _bt_mark_page_halfdead(Relation rel, Buffer leafbuf, BTStack stack)
 		page = BufferGetPage(leafbuf);
 		PageSetLSN(page, recptr);
 	}
+	else if (data_encrypted)
+		set_page_lsn_for_encryption2(BufferGetPage(subtreeparent),
+									 BufferGetPage(leafbuf));
 
 	END_CRIT_SECTION();
 
@@ -2291,6 +2303,27 @@ _bt_unlink_halfdead_page(Relation rel, Buffer leafbuf, BlockNumber scanblkno,
 		{
 			PageSetLSN(metapg, recptr);
 		}
+		page = BufferGetPage(rbuf);
+		PageSetLSN(page, recptr);
+		page = BufferGetPage(buf);
+		PageSetLSN(page, recptr);
+		if (BufferIsValid(lbuf))
+		{
+			page = BufferGetPage(lbuf);
+			PageSetLSN(page, recptr);
+		}
+		if (target != leafblkno)
+		{
+			page = BufferGetPage(leafbuf);
+			PageSetLSN(page, recptr);
+		}
+	}
+	else if (data_encrypted)
+	{
+		XLogRecPtr	recptr = get_lsn_for_encryption();
+
+		if (BufferIsValid(metabuf))
+			PageSetLSN(metapg, recptr);
 		page = BufferGetPage(rbuf);
 		PageSetLSN(page, recptr);
 		page = BufferGetPage(buf);

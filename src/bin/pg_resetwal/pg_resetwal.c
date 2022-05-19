@@ -20,6 +20,7 @@
  * step 2 ...
  *
  *
+ * Portions Copyright (c) 2019-2021, CYBERTEC PostgreSQL International GmbH
  * Portions Copyright (c) 1996-2020, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -37,6 +38,7 @@
 
 #include "postgres.h"
 
+#include <arpa/inet.h>
 #include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -54,6 +56,8 @@
 #include "common/file_perm.h"
 #include "common/logging.h"
 #include "common/restricted_token.h"
+#include "fe_utils/encryption.h"
+#include "storage/encryption.h"
 #include "common/string.h"
 #include "getopt_long.h"
 #include "pg_getopt.h"
@@ -137,7 +141,7 @@ main(int argc, char *argv[])
 	}
 
 
-	while ((c = getopt_long(argc, argv, "c:D:e:fl:m:no:O:u:x:", long_options, NULL)) != -1)
+	while ((c = getopt_long(argc, argv, "c:D:e:fK:l:m:no:O:u:x:", long_options, NULL)) != -1)
 	{
 		switch (c)
 		{
@@ -294,6 +298,12 @@ main(int argc, char *argv[])
 				}
 				break;
 
+#ifdef	USE_ENCRYPTION
+			case 'K':
+				encryption_key_command = strdup(optarg);
+				break;
+#endif							/* USE_ENCRYPTION */
+
 			case 'l':
 				if (strspn(optarg, "01234567890ABCDEFabcdef") != XLOG_FNAME_LEN)
 				{
@@ -423,6 +433,35 @@ main(int argc, char *argv[])
 
 	if (log_fname != NULL)
 		XLogFromFileName(log_fname, &minXlogTli, &minXlogSegNo, WalSegSz);
+
+	/*
+	 * If the data is encrypted, we also might need to encrypt the XLOG record
+	 * below.
+	 */
+	if (ControlFile.data_cipher > PG_CIPHER_NONE && !noupdate)
+#ifdef USE_ENCRYPTION
+	{
+		if (encryption_key_command)
+			run_encryption_key_command(DataDir);
+		else
+		{
+			/*
+			 * If executed by pg_upgrade, we don't want pg_resetwal to run the
+			 * encryption key command (possibly interactive application)
+			 * because we have no access to terminal.
+			 */
+			read_encryption_key_f(stdin, NULL);
+		}
+
+		setup_encryption();
+		data_encrypted = true;
+	}
+#else
+	{
+		pg_log_error(ENCRYPTION_NOT_SUPPORTED_MSG);
+		exit(EXIT_FAILURE);
+	}
+#endif	/* USE_ENCRYPTION */
 
 	/*
 	 * Also look at existing segment files to set up newXlogSegNo
@@ -813,6 +852,12 @@ PrintControlValues(bool guessed)
 		   (ControlFile.float8ByVal ? _("by value") : _("by reference")));
 	printf(_("Data page checksum version:           %u\n"),
 		   ControlFile.data_checksum_version);
+	if (ControlFile.data_cipher > PG_CIPHER_NONE)
+		printf(_("Data encryption fingerprint:          %08X%08X%08X%08X\n"),
+			   htonl(((uint32 *) ControlFile.encryption_verification)[0]),
+			   htonl(((uint32 *) ControlFile.encryption_verification)[1]),
+			   htonl(((uint32 *) ControlFile.encryption_verification)[2]),
+			   htonl(((uint32 *) ControlFile.encryption_verification)[3]));
 }
 
 
@@ -1163,6 +1208,20 @@ WriteEmptyXLOG(void)
 	FIN_CRC32C(crc);
 	record->xl_crc = crc;
 
+	if (data_encrypted)
+	{
+		char		tweak[TWEAK_SIZE];
+
+		XLogEncryptionTweak(tweak, page->xlp_tli, newXlogSegNo, 0);
+		encrypt_block(buffer.data,
+					  buffer.data,
+					  XLOG_BLCKSZ,
+					  tweak,
+					  InvalidXLogRecPtr,
+					  InvalidBlockNumber,
+					  EDK_REL_WAL);;
+	}
+
 	/* Write the first page */
 	XLogFilePath(path, ControlFile.checkPointCopy.ThisTimeLineID,
 				 newXlogSegNo, WalSegSz);
@@ -1220,12 +1279,15 @@ usage(void)
 	printf(_("  -c, --commit-timestamp-ids=XID,XID\n"
 			 "                                   set oldest and newest transactions bearing\n"
 			 "                                   commit timestamp (zero means no change)\n"));
-	printf(_(" [-D, --pgdata=]DATADIR            data directory\n"));
-	printf(_("  -e, --epoch=XIDEPOCH             set next transaction ID epoch\n"));
-	printf(_("  -f, --force                      force update to be done\n"));
-	printf(_("  -l, --next-wal-file=WALFILE      set minimum starting location for new WAL\n"));
-	printf(_("  -m, --multixact-ids=MXID,MXID    set next and oldest multitransaction ID\n"));
-	printf(_("  -n, --dry-run                    no update, just show what would be done\n"));
+	printf(_(" [-D, --pgdata=]DATADIR          data directory\n"));
+	printf(_("  -e, --epoch=XIDEPOCH           set next transaction ID epoch\n"));
+	printf(_("  -f, --force                    force update to be done\n"));
+#ifdef	USE_ENCRYPTION
+	printf(_("  -K, --encryption-key-command   command that returns encryption key\n"));
+#endif							/* USE_ENCRYPTION */
+	printf(_("  -l, --next-wal-file=WALFILE    set minimum starting location for new WAL\n"));
+	printf(_("  -m, --multixact-ids=MXID,MXID  set next and oldest multitransaction ID\n"));
+	printf(_("  -n, --dry-run                  no update, just show what would be done\n"));
 	printf(_("  -o, --next-oid=OID               set next OID\n"));
 	printf(_("  -O, --multixact-offset=OFFSET    set next multitransaction offset\n"));
 	printf(_("  -u, --oldest-transaction-id=XID  set oldest transaction ID\n"));
