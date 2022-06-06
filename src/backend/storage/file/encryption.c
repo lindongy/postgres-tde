@@ -106,33 +106,59 @@ EncryptionShmemInit(void)
 /*
  * Read encryption key in hexadecimal form from stdin and store it in
  * encryption_key variable.
+ *
+ * key_len can be used to pass the expected key length. Pass NULL if the
+ * information is not available.
+ *
+ * Returns the key length actually seen.
  */
-void
-read_encryption_key(read_encryption_key_cb read_char, int key_len)
+int
+read_encryption_key(read_encryption_key_cb read_char, int *key_len)
 {
 #ifdef USE_ENCRYPTION
 	char	buf[ENCRYPTION_KEY_MAX_CHARS];
 	int		read_len, c;
-	int		key_chars = key_len * 2; /* 2 hexadecimal characters per byte */
+	int		key_chars;
+	int		actual_key_len;
+
+	if (key_len)
+		key_chars = *key_len * 2; /* 2 hexadecimal characters per byte */
+	else
+		key_chars = ENCRYPTION_KEY_MAX_CHARS;
 
 	read_len = 0;
 	while ((c = (*read_char)()) != EOF && c != '\n')
 	{
 		if (read_len >= key_chars)
-			ereport(FATAL,
-					(errmsg("encryption key is too long, should be a %d character hex string",
-							key_chars)));
+		{
+			if (key_len)
+				ereport(FATAL,
+						(errmsg("encryption key is too long, should be a %d character hex string",
+								key_chars)));
+			else
+				ereport(FATAL,
+						(errmsg("encryption key is too long")));
+		}
 
 		buf[read_len++] = c;
 	}
 
-	if (read_len < key_chars)
+	/*
+	 * Cannot check if the key is too short if the expected length is not
+	 * known.
+	 */
+	if (key_len && read_len < key_chars)
 		ereport(FATAL,
 				(errmsg("encryption key is too short, should be a %d character hex string",
 						key_chars)));
 
+	key_chars = read_len;
+	actual_key_len = key_chars / 2;
+
 	/* Turn the hexadecimal representation into an array of bytes. */
-	encryption_key_from_string(buf, key_len);
+	encryption_key_from_string(buf, actual_key_len);
+
+	return actual_key_len;
 
 #else  /* !USE_ENCRYPTION */
 	/*

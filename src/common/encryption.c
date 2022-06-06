@@ -197,11 +197,11 @@ read_encryption_key_f(FILE *f, char *command, int *key_len_p)
 			snprintf(src, MAXPGPATH, "stdin");
 
 #ifdef FRONTEND
-		pg_log_fatal("could not read encryption key from %s: %m", src);
+		pg_log_fatal("could not read encryption key from %s", src);
 		exit(EXIT_FAILURE);
 #else
 		ereport(FATAL,
-				(errmsg("could not read encryption key from %s: %m",
+				(errmsg("could not read encryption key from %s",
 						src)));
 #endif	/* FRONTEND */
 	}

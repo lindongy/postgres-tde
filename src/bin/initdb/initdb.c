@@ -248,6 +248,7 @@ static char **filter_lines_with_token(char **lines, const char *token);
 static char **readfile(const char *path);
 static void writefile(char *path, char **lines);
 static FILE *popen_check(const char *command, const char *mode);
+static void send_encryption_key(FILE *f);
 static char *get_id(void);
 static int	get_encoding_id(const char *encoding_name);
 static void set_input(char **dest, const char *filename);
@@ -543,6 +544,22 @@ popen_check(const char *command, const char *mode)
 	if (cmdfd == NULL)
 		pg_log_error("could not execute command \"%s\": %m", command);
 	return cmdfd;
+}
+
+/*
+ * Send encryption key in hexadecimal format to the file stream passed.
+ *
+ * The backend processes could actually receive binary data but that would
+ * make startup of postgres in single-user mode less convenient.
+ */
+static void
+send_encryption_key(FILE *f)
+{
+	int	i;
+
+	for (i = 0; i < encryption_key_length; i++)
+		fprintf(f, "%.2x", encryption_key[i]);
+	fputc('\n', f);
 }
 
 /*
@@ -1427,10 +1444,9 @@ bootstrap_template1(void)
 	{
 		size_t		len;
 
-		len = strlen(encryption_key_command) + 6;
+		len = 3;
 		encr_opt_str = (char *) pg_malloc(len);
-		snprintf(encr_opt_str, len, "-K \"%s\"",
-				 encryption_key_command);
+		snprintf(encr_opt_str, len, "-K");
 	}
 	else
 	{
@@ -1449,6 +1465,10 @@ bootstrap_template1(void)
 
 
 	PG_CMD_OPEN;
+
+	/* If the cluster is encrypted, first send the encryption key. */
+	if (encryption_key_command)
+		send_encryption_key(cmdfd);
 
 	for (line = bki_lines; *line != NULL; line++)
 	{
@@ -2945,6 +2965,10 @@ initialize_data_directory(void)
 			 DEVNULL);
 
 	PG_CMD_OPEN;
+
+	/* If the cluster is encrypted, first send the encryption key. */
+	if (encryption_key_command)
+		send_encryption_key(cmdfd);
 
 	setup_auth(cmdfd);
 

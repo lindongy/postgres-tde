@@ -37,7 +37,7 @@ typedef int (*read_encryption_key_cb) (void);
  * not support encryption, so it's compiled regardless the value of
  * USE_ENCRYPTION. It's less invasive than if we had to ifdef each call.
  */
-extern void read_encryption_key(read_encryption_key_cb read_char, int key_len);
+extern int read_encryption_key(read_encryption_key_cb read_char, int *key_len);
 
 /*
  * Likewise, compile regardless USE_ENCRYPTION.

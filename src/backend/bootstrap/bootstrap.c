@@ -58,6 +58,7 @@ uint32		bootstrap_data_checksum_version = 0;	/* No checksum */
 
 static void CheckerModeMain(void);
 static void BootstrapModeMain(void);
+static int bootstrap_getc(void);
 static void bootstrap_signals(void);
 static void ShutdownAuxiliaryProcess(int code, Datum arg);
 static Form_pg_attribute AllocateAttribute(void);
@@ -227,7 +228,7 @@ AuxiliaryProcessMain(int argc, char *argv[])
 	/* If no -x argument, we are a CheckerProcess */
 	MyAuxProcType = CheckerProcess;
 
-	while ((flag = getopt(argc, argv, "B:c:d:D:FkK:r:x:X:-:")) != -1)
+	while ((flag = getopt(argc, argv, "B:c:d:D:FkKr:x:X:-:")) != -1)
 	{
 		switch (flag)
 		{
@@ -265,8 +266,6 @@ AuxiliaryProcessMain(int argc, char *argv[])
 				 * processes inherit that.
 				 */
 				Assert(!IsUnderPostmaster);
-				/* Don't use pstrdup(), this is a GUC. */
-				encryption_key_command = strdup(optarg);
 				data_encrypted = true;
 
 				break;
@@ -396,18 +395,18 @@ AuxiliaryProcessMain(int argc, char *argv[])
 	 */
 	if (data_encrypted && MyAuxProcType == BootstrapProcess)
 	{
-		int		key_length = 0;
+		int		key_length;
 
 		Assert(!IsUnderPostmaster);
-		Assert(encryption_key_command &&
-			   strlen(encryption_key_command) > 0);
+
+		/* Read the key from stdin. */
+		key_length = read_encryption_key(bootstrap_getc, NULL);
 
 		/*
 		 * User of the auxiliary process (typically initdb) should have
 		 * checked that the command returns a key of valid length. Thus we
 		 * don't need an extra command line option for it.
 		 */
-		run_encryption_key_command(DataDir, &key_length);
 		Assert(key_length == 16 || key_length == 24 || key_length == 32);
 
 		DATA_CIPHER_SET(data_cipher, PG_CIPHER_AES_CTR_CBC, key_length);
@@ -593,6 +592,16 @@ BootstrapModeMain(void)
  *						misc functions
  * ----------------------------------------------------------------
  */
+
+/*
+ * Read a single character from stdin. This is a callback for
+ * read_encryption_key().
+ */
+static int
+bootstrap_getc(void)
+{
+	return getc(stdin);
+}
 
 /*
  * Set up signal handling for a bootstrap process

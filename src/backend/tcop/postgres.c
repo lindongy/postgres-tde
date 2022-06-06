@@ -4093,20 +4093,15 @@ PostgresMain(int argc, char *argv[],
 		char	sample[ENCRYPTION_SAMPLE_SIZE];
 		int		key_length = DATA_CIPHER_GET_KEY_LENGTH(data_cipher);
 
-		if (encryption_key_command && strlen(encryption_key_command))
-			run_encryption_key_command(DataDir, &key_length);
-		else
-		{
-			/* Display a prompt for user to enter the encryption key. */
-			printf("key> ");
-			fflush(stdout);
+		/* Display a prompt for user to enter the encryption key. */
+		printf("key> ");
+		fflush(stdout);
 
-			/*
-			 * Read the key from stdin. Pass interactive_getc() as the
-			 * callback so that the reading is interruptible.
-			 */
-			read_encryption_key(interactive_getc, key_length);
-		}
+		/*
+		 * Read the key from stdin. Pass interactive_getc() as the callback so
+		 * that the reading is interruptible.
+		 */
+		read_encryption_key(interactive_getc, &key_length);
 
 		setup_encryption();
 
