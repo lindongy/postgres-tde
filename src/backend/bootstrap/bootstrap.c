@@ -60,6 +60,7 @@ uint32		bootstrap_data_checksum_version = 0;	/* No checksum */
 
 static void CheckerModeMain(void);
 static void BootstrapModeMain(void);
+static int bootstrap_getc(void);
 static void bootstrap_signals(void);
 static void ShutdownAuxiliaryProcess(int code, Datum arg);
 static Form_pg_attribute AllocateAttribute(void);
@@ -266,8 +267,6 @@ AuxiliaryProcessMain(int argc, char *argv[])
 				 * processes inherit that.
 				 */
 				Assert(!IsUnderPostmaster);
-				/* Don't use pstrdup(), this is a GUC. */
-				encryption_key_command = strdup(optarg);
 				data_encrypted = true;
 
 				break;
@@ -396,10 +395,9 @@ AuxiliaryProcessMain(int argc, char *argv[])
 	if (data_encrypted && MyAuxProcType == BootstrapProcess)
 	{
 		Assert(!IsUnderPostmaster);
-		Assert(encryption_key_command &&
-			   strlen(encryption_key_command) > 0);
 
-		run_encryption_key_command(DataDir);
+		/* Read the key from stdin. */
+		read_encryption_key(bootstrap_getc);
 
 		setup_encryption();
 	}
@@ -580,6 +578,17 @@ BootstrapModeMain(void)
  *						misc functions
  * ----------------------------------------------------------------
  */
+
+/*
+ * Read a single character from stdin. This is a callback for
+ * read_encryption_key().
+ */
+static int
+bootstrap_getc(void)
+{
+	return getc(stdin);
+}
+
 
 /*
  * Set up signal handling for a bootstrap process
