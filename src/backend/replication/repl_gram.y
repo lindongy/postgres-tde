@@ -3,6 +3,7 @@
  *
  * repl_gram.y				- Parser for the replication commands
  *
+ * Portions Copyright (c) 2019, Cybertec Schönig & Schönig GmbH
  * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -75,6 +76,7 @@ Node *replication_parse_result;
 %token K_WAL
 %token K_TABLESPACE_MAP
 %token K_NOVERIFY_CHECKSUMS
+%token K_DECRYPT
 %token K_TIMELINE
 %token K_PHYSICAL
 %token K_LOGICAL
@@ -92,6 +94,7 @@ Node *replication_parse_result;
 %type <list>	base_backup_opt_list
 %type <defelt>	base_backup_opt
 %type <uintval>	opt_timeline
+%type <boolval> opt_decrypt
 %type <list>	plugin_options plugin_opt_list
 %type <defelt>	plugin_opt_elem
 %type <node>	plugin_opt_arg
@@ -151,7 +154,7 @@ var_name:	IDENT	{ $$ = $1; }
 
 /*
  * BASE_BACKUP [LABEL '<label>'] [PROGRESS] [FAST] [WAL] [NOWAIT]
- * [MAX_RATE %d] [TABLESPACE_MAP] [NOVERIFY_CHECKSUMS]
+ * [MAX_RATE %d] [TABLESPACE_MAP] [NOVERIFY_CHECKSUMS] [DECRYPT]
  */
 base_backup:
 			K_BASE_BACKUP base_backup_opt_list
@@ -208,6 +211,11 @@ base_backup_opt:
 			| K_NOVERIFY_CHECKSUMS
 				{
 				  $$ = makeDefElem("noverify_checksums",
+								   (Node *)makeInteger(true), -1);
+				}
+			| K_DECRYPT
+				{
+				  $$ = makeDefElem("decrypt",
 								   (Node *)makeInteger(true), -1);
 				}
 			;
@@ -289,10 +297,10 @@ drop_replication_slot:
 			;
 
 /*
- * START_REPLICATION [SLOT slot] [PHYSICAL] %X/%X [TIMELINE %d]
+ * START_REPLICATION [SLOT slot] [PHYSICAL] %X/%X [TIMELINE %d] [DECRYPT]
  */
 start_replication:
-			K_START_REPLICATION opt_slot opt_physical RECPTR opt_timeline
+			K_START_REPLICATION opt_slot opt_physical RECPTR opt_timeline opt_decrypt
 				{
 					StartReplicationCmd *cmd;
 
@@ -301,6 +309,7 @@ start_replication:
 					cmd->slotname = $2;
 					cmd->startpoint = $4;
 					cmd->timeline = $5;
+					cmd->decrypt = $6;
 					$$ = (Node *) cmd;
 				}
 			;
@@ -367,6 +376,10 @@ opt_timeline:
 				| /* EMPTY */			{ $$ = 0; }
 			;
 
+opt_decrypt:
+			K_DECRYPT						{ $$ = true; }
+			| /* EMPTY */					{ $$ = false; }
+			;
 
 plugin_options:
 			'(' plugin_opt_list ')'			{ $$ = $2; }

@@ -1,0 +1,34 @@
+TDE_1.0.1
+=========
+
+Bug fixes
+---------
+
+* When a buffer of a temporary file has been dumped, the following block (if
+  it exists) must be loaded into the buffer before we start writing into
+  it. Otherwise the next dump can overwrite valid data of the following block
+  with zeroes.
+
+  Fortunately this bugs seems to be hidden by the fact that logtape.c only
+  writes whole blocks and that other callers of the buffile.c API do not seem
+  to overwrite the temporary files at all.
+
+* Fixed the use and processing of the "encryption key command".
+
+  The command that should generate the encryption key is passed to various
+  processes via the -K command line option. So far it had two issues:
+
+  1) If one program was passing the -K option to another (e.g. initdb to
+  bootstrap), it didn't quote the argument. This was typically a problem when
+  the command called the pg_keytool utility. (Spaces are needed to separate
+  the pg_keytool executable from its command line options.)
+
+  2) If the command contained the '%D' pattern (for the substitution of the
+  data directory path), not enough memory was allocated for the final command
+  string.
+
+
+TDE_1.0.0
+=========
+
+The initial implementation of the TDE feature.
