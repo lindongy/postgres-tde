@@ -3960,6 +3960,12 @@ PostgresMain(int argc, char *argv[],
 	/*
 	 * Standalone backend operating on an encrypted cluster needs encryption
 	 * key.
+	 *
+	 * We should not use run_encryption_key_command() here because the command
+	 * might read data (password) from stdin, and that would break cases like
+	 * postgres execution by initdb or pg_rewind. (Even if those don't pass
+	 * the command via the -K option, encryption_key_command might be
+	 * initialized via postgresql.conf, so it makes no sense to test it here.)
 	 */
 	if (!IsUnderPostmaster && data_encrypted &&
 		!encryption_setup_done)

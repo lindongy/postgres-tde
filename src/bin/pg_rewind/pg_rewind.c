@@ -300,35 +300,10 @@ main(int argc, char **argv)
 	pg_free(buffer);
 
 	/*
-	 * If the target instance was not cleanly shut down, start and stop the
-	 * target cluster once in single-user mode to enforce recovery to finish,
-	 * ensuring that the cluster can be used by pg_rewind.  Note that if
-	 * no_ensure_shutdown is specified, pg_rewind ignores this step, and users
-	 * need to make sure by themselves that the target cluster is in a clean
-	 * state.
-	 */
-	if (!no_ensure_shutdown &&
-		ControlFile_target.state != DB_SHUTDOWNED &&
-		ControlFile_target.state != DB_SHUTDOWNED_IN_RECOVERY)
-	{
-		ensureCleanShutdown(argv[0]);
-
-		buffer = slurpFile(datadir_target, "global/pg_control", &size);
-		digestControlFile(&ControlFile_target, buffer, size);
-		pg_free(buffer);
-	}
-
-	buffer = fetchFile("global/pg_control", &size);
-	digestControlFile(&ControlFile_source, buffer, size);
-	pg_free(buffer);
-
-	sanityChecks();
-
-	/*
 	 * Setup encryption if it's obvious that we'll have to deal with encrypted
-	 * XLOG.
+	 * cluster.
 	 */
-	if (ControlFile_target.data_cipher > PG_CIPHER_NONE)
+	if (ControlFile_target.data_cipher != PG_CIPHER_NONE)
 #ifdef USE_ENCRYPTION
 	{
 		/*
@@ -365,6 +340,31 @@ main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 #endif	/* USE_ENCRYPTION */
+
+	/*
+	 * If the target instance was not cleanly shut down, start and stop the
+	 * target cluster once in single-user mode to enforce recovery to finish,
+	 * ensuring that the cluster can be used by pg_rewind.  Note that if
+	 * no_ensure_shutdown is specified, pg_rewind ignores this step, and users
+	 * need to make sure by themselves that the target cluster is in a clean
+	 * state.
+	 */
+	if (!no_ensure_shutdown &&
+		ControlFile_target.state != DB_SHUTDOWNED &&
+		ControlFile_target.state != DB_SHUTDOWNED_IN_RECOVERY)
+	{
+		ensureCleanShutdown(argv[0]);
+
+		buffer = slurpFile(datadir_target, "global/pg_control", &size);
+		digestControlFile(&ControlFile_target, buffer, size);
+		pg_free(buffer);
+	}
+
+	buffer = fetchFile("global/pg_control", &size);
+	digestControlFile(&ControlFile_source, buffer, size);
+	pg_free(buffer);
+
+	sanityChecks();
 
 	/*
 	 * If both clusters are already on the same timeline, there's nothing to
@@ -1023,13 +1023,54 @@ ensureCleanShutdown(const char *argv0)
 	 * fsync here.  This makes the recovery faster, and the target data folder
 	 * is synced at the end anyway.
 	 */
-	snprintf(cmd, MAXCMDLEN, "\"%s\" --single -F -D \"%s\" template1 < \"%s\"",
-			 exec_path, datadir_target, DEVNULL);
-
-	if (system(cmd) != 0)
+	if (!data_encrypted)
 	{
-		pg_log_error("postgres single-user mode in target cluster failed");
-		pg_fatal("Command was: %s", cmd);
+		snprintf(cmd, MAXCMDLEN, "\"%s\" --single -F -D \"%s\" template1 < \"%s\"",
+				 exec_path, datadir_target, DEVNULL);
+
+		if (system(cmd) != 0)
+		{
+			pg_log_error("postgres single-user mode in target cluster failed");
+			pg_fatal("Command was: %s", cmd);
+		}
+	}
+	else
+	{
+		FILE	   *cmdfd;
+		int			exitstatus;
+
+		/*
+		 * If the cluster is encrypted, we need to send encryption key to the
+		 * backend.
+		 */
+		snprintf(cmd, MAXCMDLEN, "\"%s\" --single -F -D \"%s\" template1",
+				 exec_path, datadir_target);
+
+		errno = 0;
+		cmdfd = popen(cmd, "w");
+		if (cmdfd == NULL)
+		{
+			pg_log_error("postgres single-user mode in target cluster failed");
+			pg_fatal("Command was: %s", cmd);
+		}
+
+		send_encryption_key(cmdfd);
+
+		exitstatus = pclose(cmdfd);
+
+		if (exitstatus == -1)
+		{
+			/* pclose() itself failed, and hopefully set errno */
+			pg_fatal("pclose() failed: %m");
+		}
+		else if (exitstatus != 0)
+		{
+			char	*reason;
+
+			reason = wait_result_to_str(exitstatus);
+			pg_fatal("%s", reason);
+			pfree(reason);
+		}
 	}
 }
 

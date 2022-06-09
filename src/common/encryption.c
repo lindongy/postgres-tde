@@ -133,6 +133,24 @@ run_encryption_key_command(char *data_dir)
 }
 
 /*
+ * Send encryption key in hexadecimal format to the file stream passed.
+ *
+ * The backend processes could actually receive binary data but that would
+ * make startup of postgres in single-user mode less convenient.
+ */
+void
+send_encryption_key(FILE *f)
+{
+	int	i;
+
+	for (i = 0; i < ENCRYPTION_KEY_LENGTH; i++)
+		fprintf(f, "%.2x", encryption_key[i]);
+	fputc('\n', f);
+}
+
+
+
+/*
  * Read the encryption key from a file stream.
  */
 void
