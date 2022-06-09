@@ -100,7 +100,11 @@ extern char *encryption_key_command;
 /* Key to encrypt / decrypt permanent data. */
 extern unsigned char encryption_key[];
 
+/* Key length in bytes. */
+extern int encryption_key_length;
+
 extern void run_encryption_key_command(char *data_dir, int *key_len_p);
+extern void send_encryption_key(FILE *f);
 extern void read_encryption_key_f(FILE *f, char *command, int *key_len_p);
 extern void encryption_key_from_string(char key_str[ENCRYPTION_KEY_MAX_CHARS],
 									   int key_len);

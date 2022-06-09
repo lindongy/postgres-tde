@@ -150,7 +150,6 @@ static bool data_checksums = false;
 static char *xlog_dir = NULL;
 static char *str_wal_segment_size_mb = NULL;
 static int	wal_segment_size_mb;
-static int	encryption_key_length;
 
 
 /* internal vars */
@@ -248,7 +247,6 @@ static char **filter_lines_with_token(char **lines, const char *token);
 static char **readfile(const char *path);
 static void writefile(char *path, char **lines);
 static FILE *popen_check(const char *command, const char *mode);
-static void send_encryption_key(FILE *f);
 static char *get_id(void);
 static int	get_encoding_id(const char *encoding_name);
 static void set_input(char **dest, const char *filename);
@@ -544,22 +542,6 @@ popen_check(const char *command, const char *mode)
 	if (cmdfd == NULL)
 		pg_log_error("could not execute command \"%s\": %m", command);
 	return cmdfd;
-}
-
-/*
- * Send encryption key in hexadecimal format to the file stream passed.
- *
- * The backend processes could actually receive binary data but that would
- * make startup of postgres in single-user mode less convenient.
- */
-static void
-send_encryption_key(FILE *f)
-{
-	int	i;
-
-	for (i = 0; i < encryption_key_length; i++)
-		fprintf(f, "%.2x", encryption_key[i]);
-	fputc('\n', f);
 }
 
 /*

@@ -324,26 +324,9 @@ main(int argc, char **argv)
 	digestControlFile(&ControlFile_target, buffer, size);
 	pg_free(buffer);
 
-	if (!no_ensure_shutdown &&
-		ControlFile_target.state != DB_SHUTDOWNED &&
-		ControlFile_target.state != DB_SHUTDOWNED_IN_RECOVERY)
-	{
-		ensureCleanShutdown(argv[0]);
-
-		buffer = slurpFile(datadir_target, "global/pg_control", &size);
-		digestControlFile(&ControlFile_target, buffer, size);
-		pg_free(buffer);
-	}
-
-	buffer = source->fetch_file(source, "global/pg_control", &size);
-	digestControlFile(&ControlFile_source, buffer, size);
-	pg_free(buffer);
-
-	sanityChecks();
-
 	/*
 	 * Setup encryption if it's obvious that we'll have to deal with encrypted
-	 * XLOG.
+	 * cluster.
 	 */
 	if (DATA_CIPHER_GET_KIND(ControlFile_target.data_cipher) != PG_CIPHER_NONE)
 #ifdef USE_ENCRYPTION
@@ -369,16 +352,12 @@ main(int argc, char **argv)
 			exit(EXIT_FAILURE);
 		}
 
-		/*
-		 * It should not matter whether we pass the source or target data
-		 * directory. It should have been checked earlier that both clusters
-		 * are encrypted using the same key.
-		 */
-		data_cipher = ControlFile_source.data_cipher;
+		data_cipher = ControlFile_target.data_cipher;
 		key_len = DATA_CIPHER_GET_KEY_LENGTH(data_cipher);
 		run_encryption_key_command(datadir_source, &key_len);
 		setup_encryption();
 		data_encrypted = true;
+		encryption_key_length = key_len;
 	}
 #else
 	{
@@ -386,6 +365,24 @@ main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 #endif	/* USE_ENCRYPTION */
+
+
+	if (!no_ensure_shutdown &&
+		ControlFile_target.state != DB_SHUTDOWNED &&
+		ControlFile_target.state != DB_SHUTDOWNED_IN_RECOVERY)
+	{
+		ensureCleanShutdown(argv[0]);
+
+		buffer = slurpFile(datadir_target, "global/pg_control", &size);
+		digestControlFile(&ControlFile_target, buffer, size);
+		pg_free(buffer);
+	}
+
+	buffer = source->fetch_file(source, "global/pg_control", &size);
+	digestControlFile(&ControlFile_source, buffer, size);
+	pg_free(buffer);
+
+	sanityChecks();
 
 	/*
 	 * Find the common ancestor timeline between the clusters.
@@ -1207,13 +1204,54 @@ ensureCleanShutdown(const char *argv0)
 	 * fsync here.  This makes the recovery faster, and the target data folder
 	 * is synced at the end anyway.
 	 */
-	snprintf(cmd, MAXCMDLEN, "\"%s\" --single -F -D \"%s\" template1 < \"%s\"",
-			 exec_path, datadir_target, DEVNULL);
-
-	if (system(cmd) != 0)
+	if (!data_encrypted)
 	{
-		pg_log_error("postgres single-user mode in target cluster failed");
-		pg_fatal("Command was: %s", cmd);
+		snprintf(cmd, MAXCMDLEN, "\"%s\" --single -F -D \"%s\" template1 < \"%s\"",
+				 exec_path, datadir_target, DEVNULL);
+
+		if (system(cmd) != 0)
+		{
+			pg_log_error("postgres single-user mode in target cluster failed");
+			pg_fatal("Command was: %s", cmd);
+		}
+	}
+	else
+	{
+		FILE	   *cmdfd;
+		int			exitstatus;
+
+		/*
+		 * If the cluster is encrypted, we need to send encryption key to the
+		 * backend.
+		 */
+		snprintf(cmd, MAXCMDLEN, "\"%s\" --single -F -D \"%s\" template1",
+				 exec_path, datadir_target);
+
+		errno = 0;
+		cmdfd = popen(cmd, "w");
+		if (cmdfd == NULL)
+		{
+			pg_log_error("postgres single-user mode in target cluster failed");
+			pg_fatal("Command was: %s", cmd);
+		}
+
+		send_encryption_key(cmdfd);
+
+		exitstatus = pclose(cmdfd);
+
+		if (exitstatus == -1)
+		{
+			/* pclose() itself failed, and hopefully set errno */
+			pg_fatal("pclose() failed: %m");
+		}
+		else if (exitstatus != 0)
+		{
+			char	*reason;
+
+			reason = wait_result_to_str(exitstatus);
+			pg_fatal("%s", reason);
+			pfree(reason);
+		}
 	}
 }
 

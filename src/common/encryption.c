@@ -25,6 +25,7 @@
 #endif	/* USE_ENCRYPTION */
 
 unsigned char encryption_key[ENCRYPTION_KEY_MAX_LENGTH];
+int	encryption_key_length = 0;
 
 /* Copy of the corresponding field of ControlFileData */
 uint8 data_cipher = 0;
@@ -138,6 +139,24 @@ run_encryption_key_command(char *data_dir, int *key_len_p)
 	}
 	pfree(cmd);
 }
+
+/*
+ * Send encryption key in hexadecimal format to the file stream passed.
+ *
+ * The backend processes could actually receive binary data but that would
+ * make startup of postgres in single-user mode less convenient.
+ */
+void
+send_encryption_key(FILE *f)
+{
+	int	i;
+
+	for (i = 0; i < encryption_key_length; i++)
+		fprintf(f, "%.2x", encryption_key[i]);
+	fputc('\n', f);
+}
+
+
 
 /*
  * Read the encryption key from a file stream.
