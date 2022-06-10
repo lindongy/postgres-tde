@@ -1010,19 +1010,6 @@ PostmasterMain(int argc, char *argv[])
 	LocalProcessControlFile(false);
 
 	/*
-	 * At this moment we know whether the instance is encrypted or not. If it
-	 * is, check the shared memory type before shared memory initialization
-	 * starts. The problem is that the data in the shared memory is not
-	 * encrypted, and due to the mmap type it can end up on disk.
-	 */
-#ifdef USE_ENCRYPTION
-	if (data_encrypted &&
-		dynamic_shared_memory_type == DSM_IMPL_MMAP)
-		ereport(FATAL,
-				(errmsg("dynamic_shared_memory_type cannot be \"mmap\" when the instance is encrypted")));
-#endif /* USE_ENCRYPTION */
-
-	/*
 	 * Register the apply launcher.  Since it registers a background worker,
 	 * it needs to be called before InitializeMaxBackends(), and it's probably
 	 * a good idea to call it before any modules had chance to take the
