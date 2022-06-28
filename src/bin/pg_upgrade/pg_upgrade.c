@@ -3,6 +3,7 @@
  *
  *	main source file
  *
+ *	Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
  *	Copyright (c) 2010-2022, PostgreSQL Global Development Group
  *	src/bin/pg_upgrade/pg_upgrade.c
  */
@@ -45,16 +46,21 @@
 #endif
 
 #include "catalog/pg_class_d.h"
+#include "common/encryption.h"
 #include "common/file_perm.h"
 #include "common/logging.h"
 #include "common/restricted_token.h"
 #include "fe_utils/string_utils.h"
 #include "pg_upgrade.h"
 
+#ifdef USE_ENCRYPTION
+static char *get_encryption_key_command(char *bindir, char *pgconfig);
+#endif	/* USE_ENCRYPTION */
+
 static void prepare_new_cluster(void);
 static void prepare_new_globals(void);
 static void create_new_objects(void);
-static void copy_xact_xlog_xid(void);
+static void copy_xact_xlog_xid(EncryptionKey *encryption_key);
 static void set_frozenxids(bool minmxid_only);
 static void make_outputdirs(char *pgdata);
 static void setup(char *argv0, bool *live_check);
@@ -74,12 +80,24 @@ char	   *output_files[] = {
 	NULL
 };
 
+char encryption_key_command_opt[MAXPGPATH];
+
+/*
+ * Declare these locally so we don't have to link storage/file/encryption.c
+ * here.
+ */
+bool		encryption_setup_done = false;
+extern unsigned char encryption_key[ENCRYPTION_KEY_MAX_LENGTH];
 
 int
 main(int argc, char **argv)
 {
 	char	   *deletion_script_file_name = NULL;
 	bool		live_check = false;
+#ifdef USE_ENCRYPTION
+	char	*key_cmd_pgconf;
+	EncryptionKey	encr_key_arg;
+#endif
 
 	pg_logging_init(argv[0]);
 	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_upgrade"));
@@ -87,6 +105,7 @@ main(int argc, char **argv)
 	/* Set default restrictive mask until new cluster permissions are read */
 	umask(PG_MODE_MASK_OWNER);
 
+	encryption_key_command_opt[0] = '\0';
 	parseCommandLine(argc, argv);
 
 	get_restricted_token();
@@ -123,6 +142,70 @@ main(int argc, char **argv)
 
 	check_and_dump_old_cluster(live_check);
 
+#ifdef USE_ENCRYPTION
+	/* Try to get the encryption key command from postgresql.conf. */
+	key_cmd_pgconf = get_encryption_key_command(old_cluster.bindir,
+												old_cluster.pgconfig);
+	old_cluster.has_encr_key_cmd = key_cmd_pgconf != NULL;
+#endif
+
+	/*
+	 * Is the key passed as command line option?
+	 */
+	if (encryption_key_command)
+#ifdef USE_ENCRYPTION
+	{
+		/* The command in postgresql.conf takes precedence. */
+		if (key_cmd_pgconf)
+		{
+			pg_log(PG_WARNING,
+				   "ignoring the -K option due to presence of encryption_key_command in configuration file\n");
+			encryption_key_command = key_cmd_pgconf;
+		}
+	}
+	else
+	{
+		/* Only specified in postgresql.conf, so use that value. */
+		encryption_key_command = key_cmd_pgconf;
+	}
+
+	/*
+	 * Setup the encryption if we have the command.
+	 *
+	 * Ideally we'd use get_control_data() to find out whether the encryption
+	 * is enabled, but that function assumes that postmaster lock file has
+	 * already been cleaned up.
+	 */
+	if (encryption_key_command)
+	{
+		int	key_len;
+
+		/*
+		 * We've already checked that both clusters use encryption key of the
+		 * same length.
+		 */
+		key_len = DATA_CIPHER_GET_KEY_LENGTH(old_cluster.controldata.data_cipher);
+
+		/*
+		 * Both clusters should eventually have KDF parameters of the old one,
+		 * so pass the old cluster's pgdata here.
+		 */
+		run_encryption_key_command(old_cluster.pgdata, &key_len);
+		encr_key_arg.data = encryption_key;
+		encr_key_arg.length = key_len;
+		encryption_setup_done = true;
+	}
+
+	/* Check if the new cluster has the key command in postgresql.conf. */
+	key_cmd_pgconf = get_encryption_key_command(new_cluster.bindir,
+												new_cluster.pgconfig);
+	new_cluster.has_encr_key_cmd = key_cmd_pgconf != NULL;
+#else
+	{
+		/* User should not be able to pass the -K option. */
+		Assert(false);
+	}
+#endif	/* USE_ENCRYPTION */
 
 	/* -- NEW -- */
 	start_postmaster(&new_cluster, true);
@@ -143,7 +226,28 @@ main(int argc, char **argv)
 	 * Destructive Changes to New Cluster
 	 */
 
-	copy_xact_xlog_xid();
+#ifdef USE_ENCRYPTION
+	copy_xact_xlog_xid(encryption_setup_done ? &encr_key_arg : NULL);
+#else
+	copy_xact_xlog_xid(NULL);
+#endif	/* USE_ENCRYPTION */
+
+	if (encryption_setup_done)
+#ifdef USE_ENCRYPTION
+	{
+		/*
+		 * Copy KDF file so that the old cluster encryption password works for
+		 * the new cluster.
+		 */
+		read_kdf_file(old_cluster.pgdata);
+		write_kdf_file(new_cluster.pgdata);
+	}
+#else
+	{
+		/* User should not be able to enable encryption. */
+		Assert(false);
+	}
+#endif	/* USE_ENCRYPTION */
 
 	/* New now using xids of the old system */
 
@@ -176,15 +280,21 @@ main(int argc, char **argv)
 	 */
 	prep_status("Setting next OID for new cluster");
 	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
+#ifdef USE_ENCRYPTION
+			  encryption_setup_done ? &encr_key_arg : NULL,
+#else
+			  NULL,
+#endif	/* USE_ENCRYPTION */
 			  "\"%s/pg_resetwal\" -o %u \"%s\"",
-			  new_cluster.bindir, old_cluster.controldata.chkpnt_nxtoid,
+			  new_cluster.bindir,
+			  old_cluster.controldata.chkpnt_nxtoid,
 			  new_cluster.pgdata);
 	check_ok();
 
 	if (user_opts.do_sync)
 	{
 		prep_status("Sync data directory to disk");
-		exec_prog(UTILITY_LOG_FILE, NULL, true, true,
+		exec_prog(UTILITY_LOG_FILE, NULL, true, true, NULL,
 				  "\"%s/initdb\" --sync-only \"%s\"", new_cluster.bindir,
 				  new_cluster.pgdata);
 		check_ok();
@@ -297,6 +407,44 @@ make_outputdirs(char *pgdata)
 	}
 }
 
+#ifdef USE_ENCRYPTION
+/*
+ * Retrieve the value of encryption_key_command parameter from postgresql.conf
+ * and return it. Return NULL if the parameter is not set.
+ */
+static char *
+get_encryption_key_command(char	*bindir, char *pgconfig)
+{
+	char		cmd[MAXPGPATH],
+		cmd_output[MAX_STRING];
+	FILE *output = NULL;
+	char	*result = NULL;
+
+	/*
+	 * Retrieve the command from the old cluster: the command can reference
+	 * data directory because of the KDF file, but KDF files haven't yet been
+	 * synchronized.
+	 */
+	snprintf(cmd, sizeof(cmd), "\"%s/postgres\" -D \"%s\" -C encryption_key_command",
+			 bindir, pgconfig);
+
+	if ((output = popen(cmd, "r")) != NULL &&
+		fgets(cmd_output, sizeof(cmd_output), output) != NULL)
+	{
+		/* Remove trailing newline */
+		if (strchr(cmd_output, '\n') != NULL)
+			*strchr(cmd_output, '\n') = '\0';
+
+		if (strlen(cmd_output) > 0)
+			result = pg_strdup(cmd_output);
+	}
+
+	if (output && pclose(output) != 0)
+		pg_fatal("could not close pipe to \"%s\"", cmd);
+
+	return result;
+}
+#endif	/* USE_ENCRYPTION */
 
 static void
 setup(char *argv0, bool *live_check)
@@ -371,7 +519,7 @@ prepare_new_cluster(void)
 	 * --analyze so autovacuum doesn't update statistics later
 	 */
 	prep_status("Analyzing all rows in the new cluster");
-	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
+	exec_prog(UTILITY_LOG_FILE, NULL, true, true, NULL,
 			  "\"%s/vacuumdb\" %s --all --analyze %s",
 			  new_cluster.bindir, cluster_conn_opts(&new_cluster),
 			  log_opts.verbose ? "--verbose" : "");
@@ -384,7 +532,7 @@ prepare_new_cluster(void)
 	 * counter later.
 	 */
 	prep_status("Freezing all rows in the new cluster");
-	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
+	exec_prog(UTILITY_LOG_FILE, NULL, true, true, NULL,
 			  "\"%s/vacuumdb\" %s --all --freeze %s",
 			  new_cluster.bindir, cluster_conn_opts(&new_cluster),
 			  log_opts.verbose ? "--verbose" : "");
@@ -405,7 +553,7 @@ prepare_new_globals(void)
 	 */
 	prep_status("Restoring global objects in the new cluster");
 
-	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
+	exec_prog(UTILITY_LOG_FILE, NULL, true, true, NULL,
 			  "\"%s/psql\" " EXEC_PSQL_ARGS " %s -f \"%s/%s\"",
 			  new_cluster.bindir, cluster_conn_opts(&new_cluster),
 			  log_opts.dumpdir,
@@ -452,6 +600,7 @@ create_new_objects(void)
 				  NULL,
 				  true,
 				  true,
+				  NULL,
 				  "\"%s/pg_restore\" %s %s --exit-on-error --verbose "
 				  "--dbname postgres \"%s/%s\"",
 				  new_cluster.bindir,
@@ -550,7 +699,7 @@ copy_subdir_files(const char *old_subdir, const char *new_subdir)
 
 	prep_status("Copying old %s to new server", old_subdir);
 
-	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
+	exec_prog(UTILITY_LOG_FILE, NULL, true, true, NULL,
 #ifndef WIN32
 			  "cp -Rf \"%s\" \"%s\"",
 #else
@@ -563,7 +712,7 @@ copy_subdir_files(const char *old_subdir, const char *new_subdir)
 }
 
 static void
-copy_xact_xlog_xid(void)
+copy_xact_xlog_xid(EncryptionKey *encryption_key)
 {
 	/*
 	 * Copy old commit logs to new data dir. pg_clog has been renamed to
@@ -576,6 +725,7 @@ copy_xact_xlog_xid(void)
 
 	prep_status("Setting oldest XID for new cluster");
 	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
+			  encryption_key,
 			  "\"%s/pg_resetwal\" -f -u %u \"%s\"",
 			  new_cluster.bindir, old_cluster.controldata.chkpnt_oldstxid,
 			  new_cluster.pgdata);
@@ -584,15 +734,20 @@ copy_xact_xlog_xid(void)
 	/* set the next transaction id and epoch of the new cluster */
 	prep_status("Setting next transaction ID and epoch for new cluster");
 	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
+			  encryption_key,
 			  "\"%s/pg_resetwal\" -f -x %u \"%s\"",
-			  new_cluster.bindir, old_cluster.controldata.chkpnt_nxtxid,
+			  new_cluster.bindir,
+			  old_cluster.controldata.chkpnt_nxtxid,
 			  new_cluster.pgdata);
 	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
+			  encryption_key,
 			  "\"%s/pg_resetwal\" -f -e %u \"%s\"",
-			  new_cluster.bindir, old_cluster.controldata.chkpnt_nxtepoch,
+			  new_cluster.bindir,
+			  old_cluster.controldata.chkpnt_nxtepoch,
 			  new_cluster.pgdata);
 	/* must reset commit timestamp limits also */
 	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
+			  encryption_key,
 			  "\"%s/pg_resetwal\" -f -c %u,%u \"%s\"",
 			  new_cluster.bindir,
 			  old_cluster.controldata.chkpnt_nxtxid,
@@ -619,6 +774,7 @@ copy_xact_xlog_xid(void)
 		 * counters here and the oldest multi present on system.
 		 */
 		exec_prog(UTILITY_LOG_FILE, NULL, true, true,
+				  encryption_key,
 				  "\"%s/pg_resetwal\" -O %u -m %u,%u \"%s\"",
 				  new_cluster.bindir,
 				  old_cluster.controldata.chkpnt_nxtmxoff,
@@ -647,6 +803,7 @@ copy_xact_xlog_xid(void)
 		 * next=MaxMultiXactId, but multixact.c can cope with that just fine.
 		 */
 		exec_prog(UTILITY_LOG_FILE, NULL, true, true,
+				  encryption_key,
 				  "\"%s/pg_resetwal\" -m %u,%u \"%s\"",
 				  new_cluster.bindir,
 				  old_cluster.controldata.chkpnt_nxtmulti + 1,
@@ -658,6 +815,7 @@ copy_xact_xlog_xid(void)
 	/* now reset the wal archives in the new cluster */
 	prep_status("Resetting WAL archives");
 	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
+			  encryption_key,
 	/* use timeline 1 to match controldata and no WAL history file */
 			  "\"%s/pg_resetwal\" -l 00000001%s \"%s\"", new_cluster.bindir,
 			  old_cluster.controldata.nextxlogfile + 8,

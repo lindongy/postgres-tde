@@ -3239,6 +3239,19 @@ retry:
 
 	xlogreader->seg.ws_tli = curFileTLI;
 
+	if (data_encrypted)
+	{
+		char		tweak[TWEAK_SIZE];
+
+		XLogEncryptionTweak(tweak, curFileTLI, readSegNo, readOff);
+		decrypt_block(readBuf,
+					  readBuf,
+					  XLOG_BLCKSZ,
+					  tweak,
+					  InvalidBlockNumber,
+					  EDK_REL_WAL);
+	}
+
 	/*
 	 * Check the page header immediately, so that we can retry immediately if
 	 * it's not valid. This may seem unnecessary, because ReadPageInternal()

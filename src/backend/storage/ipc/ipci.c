@@ -3,6 +3,7 @@
  * ipci.c
  *	  POSTGRES inter-process communication initialization code.
  *
+ * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
  * Portions Copyright (c) 1996-2022, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -141,6 +142,7 @@ CalculateShmemSize(int *num_semaphores)
 	size = add_size(size, SyncScanShmemSize());
 	size = add_size(size, AsyncShmemSize());
 	size = add_size(size, StatsShmemSize());
+	size = add_size(size, EncryptionShmemSize());
 #ifdef EXEC_BACKEND
 	size = add_size(size, ShmemBackendArraySize());
 #endif
@@ -293,6 +295,7 @@ CreateSharedMemoryAndSemaphores(void)
 	SyncScanShmemInit();
 	AsyncShmemInit();
 	StatsShmemInit();
+	EncryptionShmemInit();
 
 #ifdef EXEC_BACKEND
 

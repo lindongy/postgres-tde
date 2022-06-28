@@ -38,6 +38,7 @@
 #include "miscadmin.h"
 #include "port/pg_bitutils.h"
 #include "storage/dsm.h"
+#include "storage/encryption.h"
 #include "storage/ipc.h"
 #include "storage/lwlock.h"
 #include "storage/pg_shmem.h"
@@ -154,6 +155,19 @@ dsm_postmaster_startup(PGShmemHeader *shim)
 	Size		segsize;
 
 	Assert(!IsUnderPostmaster);
+
+	/*
+	 * If the instance is encrypted, check the dynamic shared memory type
+	 * before shared memory initialization starts. The problem is that the
+	 * data in the shared memory is not encrypted, and due to the mmap type it
+	 * can end up on disk.
+	 */
+#ifdef USE_ENCRYPTION
+	if (data_encrypted &&
+		dynamic_shared_memory_type == DSM_IMPL_MMAP)
+		ereport(FATAL,
+				(errmsg("dynamic_shared_memory_type cannot be \"mmap\" when the instance is encrypted")));
+#endif /* USE_ENCRYPTION */
 
 	/*
 	 * If we're using the mmap implementations, clean up any leftovers.

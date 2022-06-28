@@ -4,6 +4,7 @@
  *
  * Author: Magnus Hagander <magnus@hagander.net>
  *
+ * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
  * Portions Copyright (c) 1996-2022, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
@@ -30,6 +31,7 @@
 #include "access/xlog_internal.h"
 #include "bbstreamer.h"
 #include "common/compression.h"
+#include "common/encryption.h"
 #include "common/file_perm.h"
 #include "common/file_utils.h"
 #include "common/logging.h"
@@ -140,6 +142,7 @@ static bool writerecoveryconf = false;
 static bool do_sync = true;
 static int	standby_message_timeout = 10 * 1000;	/* 10 sec = default */
 static pg_time_t last_progress_report = 0;
+static bool decrypt = false;
 static int32 maxrate = 0;		/* no limit by default */
 static char *replication_slot = NULL;
 static bool temp_replication_slot = true;
@@ -392,6 +395,9 @@ usage(void)
 	printf(_("      --waldir=WALDIR    location for the write-ahead log directory\n"));
 	printf(_("  -X, --wal-method=none|fetch|stream\n"
 			 "                         include required WAL files with specified method\n"));
+#ifdef	USE_ENCRYPTION
+	printf(_("  -y, --decrypt          receive the data decrypted\n"));
+#endif	/* USE_ENCRYPTION */
 	printf(_("  -z, --gzip             compress tar output\n"));
 	printf(_("  -Z, --compress=[{client|server}-]METHOD[:DETAIL]\n"
 			 "                         compress on client or server as specified\n"));
@@ -546,6 +552,7 @@ LogStreamerMain(logstreamer_param *param)
 	stream.synchronous = false;
 	/* fsync happens at the end of pg_basebackup for all data */
 	stream.do_sync = false;
+	stream.decrypt = decrypt;
 	stream.mark_done = true;
 	stream.partial_suffix = NULL;
 	stream.replication_slot = replication_slot;
@@ -1914,6 +1921,13 @@ BaseBackup(char *compression_algorithm, char *compression_detail,
 									  compression_detail);
 	}
 
+	/*
+	 * If user requested decryption, we blindly pass the DECRYPT option and
+	 * let server ignore it if the cluster is not encrypted.
+	 */
+	if (decrypt)
+		AppendPlainCommandOption(&buf, use_new_option_syntax, "DECRYPT");
+
 	if (verbose)
 		pg_log_info("initiating base backup, waiting for checkpoint to complete");
 
@@ -2287,6 +2301,9 @@ main(int argc, char **argv)
 		{"target", required_argument, NULL, 't'},
 		{"tablespace-mapping", required_argument, NULL, 'T'},
 		{"wal-method", required_argument, NULL, 'X'},
+#ifdef	USE_ENCRYPTION
+		{"decrypt", no_argument, NULL, 'y'},
+#endif							/* USE_ENCRYPTION */
 		{"gzip", no_argument, NULL, 'z'},
 		{"compress", required_argument, NULL, 'Z'},
 		{"label", required_argument, NULL, 'l'},
@@ -2339,7 +2356,7 @@ main(int argc, char **argv)
 
 	atexit(cleanup_directories_atexit);
 
-	while ((c = getopt_long(argc, argv, "CD:F:r:RS:t:T:X:l:nNzZ:d:c:h:p:U:s:wWkvP",
+	while ((c = getopt_long(argc, argv, "CD:F:r:RS:t:T:X:l:nNyzZ:d:c:h:p:U:s:wWkvP",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -2403,6 +2420,11 @@ main(int argc, char **argv)
 					pg_fatal("invalid wal-method option \"%s\", must be \"fetch\", \"stream\", or \"none\"",
 							 optarg);
 				break;
+#ifdef	USE_ENCRYPTION
+			case 'y':
+				decrypt = true;
+				break;
+#endif							/* USE_ENCRYPTION */
 			case 1:
 				xlog_dir = pg_strdup(optarg);
 				break;

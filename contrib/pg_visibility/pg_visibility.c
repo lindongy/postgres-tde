@@ -395,7 +395,7 @@ pg_truncate_visibility_map(PG_FUNCTION_ARGS)
 	/* Forcibly reset cached file size */
 	RelationGetSmgr(rel)->smgr_cached_nblocks[VISIBILITYMAP_FORKNUM] = InvalidBlockNumber;
 
-	block = visibilitymap_prepare_truncate(rel, 0);
+	block = visibilitymap_prepare_truncate(rel, 0, InvalidXLogRecPtr);
 	if (BlockNumberIsValid(block))
 	{
 		fork = VISIBILITYMAP_FORKNUM;

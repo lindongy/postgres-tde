@@ -15,6 +15,14 @@ my ($node, $result);
 # Test set-up
 #
 $node = PostgreSQL::Test::Cluster->new('test');
+
+# Like in Makefile, turn off encryption. With encryption, corrupt_first_page()
+# below results in different corruption than the tests expect. We could adjust
+# the test so that the page is first decrypted, but not sure it's worth the
+# effort.
+%ENV = $node->_get_env();
+$ENV{PGENCRKEYCMD}="";
+
 $node->init;
 $node->append_conf('postgresql.conf', 'autovacuum=off');
 $node->start;

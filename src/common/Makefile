@@ -54,6 +54,7 @@ OBJS_COMMON = \
 	controldata_utils.o \
 	d2s.o \
 	encnames.o \
+	encryption.o \
 	exec.o \
 	f2s.o \
 	file_perm.o \

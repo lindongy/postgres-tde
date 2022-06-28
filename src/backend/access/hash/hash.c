@@ -29,6 +29,7 @@
 #include "miscadmin.h"
 #include "optimizer/plancat.h"
 #include "pgstat.h"
+#include "storage/encryption.h"
 #include "utils/builtins.h"
 #include "utils/index_selfuncs.h"
 #include "utils/rel.h"
@@ -620,6 +621,8 @@ loop_top:
 		recptr = XLogInsert(RM_HASH_ID, XLOG_HASH_UPDATE_META_PAGE);
 		PageSetLSN(BufferGetPage(metabuf), recptr);
 	}
+	else if (data_encrypted)
+		set_page_lsn_for_encryption(BufferGetPage(metabuf));
 
 	END_CRIT_SECTION();
 
@@ -836,6 +839,8 @@ hashbucketcleanup(Relation rel, Bucket cur_bucket, Buffer bucket_buf,
 				recptr = XLogInsert(RM_HASH_ID, XLOG_HASH_DELETE);
 				PageSetLSN(BufferGetPage(buf), recptr);
 			}
+			else if (data_encrypted)
+				set_page_lsn_for_encryption(BufferGetPage(buf));
 
 			END_CRIT_SECTION();
 		}
@@ -902,6 +907,8 @@ hashbucketcleanup(Relation rel, Bucket cur_bucket, Buffer bucket_buf,
 			recptr = XLogInsert(RM_HASH_ID, XLOG_HASH_SPLIT_CLEANUP);
 			PageSetLSN(page, recptr);
 		}
+		else if (data_encrypted)
+			set_page_lsn_for_encryption(page);
 
 		END_CRIT_SECTION();
 	}

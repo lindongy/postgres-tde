@@ -18,6 +18,7 @@
 #include "access/ginxlog.h"
 #include "access/xloginsert.h"
 #include "miscadmin.h"
+#include "storage/encryption.h"
 #include "storage/predicate.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
@@ -436,6 +437,14 @@ ginPlaceToPage(GinBtree btree, GinBtreeStack *stack,
 			if (BufferIsValid(childbuf))
 				PageSetLSN(childpage, recptr);
 		}
+		else if (data_encrypted)
+		{
+			XLogRecPtr recptr = get_lsn_for_encryption();
+
+			PageSetLSN(page, recptr);
+			if (BufferIsValid(childbuf))
+				PageSetLSN(childpage, recptr);
+		}
 
 		END_CRIT_SECTION();
 
@@ -614,6 +623,17 @@ ginPlaceToPage(GinBtree btree, GinBtreeStack *stack,
 			XLogRegisterData((char *) &data, sizeof(ginxlogSplit));
 
 			recptr = XLogInsert(RM_GIN_ID, XLOG_GIN_SPLIT);
+
+			PageSetLSN(page, recptr);
+			PageSetLSN(BufferGetPage(rbuffer), recptr);
+			if (stack->parent == NULL)
+				PageSetLSN(BufferGetPage(lbuffer), recptr);
+			if (BufferIsValid(childbuf))
+				PageSetLSN(childpage, recptr);
+		}
+		else if (data_encrypted)
+		{
+			XLogRecPtr	recptr = get_lsn_for_encryption();
 
 			PageSetLSN(page, recptr);
 			PageSetLSN(BufferGetPage(rbuffer), recptr);

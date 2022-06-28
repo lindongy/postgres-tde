@@ -4,6 +4,7 @@
  *	  implementation of insert algorithm
  *
  *
+ * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
  * Portions Copyright (c) 1996-2022, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -22,6 +23,7 @@
 #include "common/pg_prng.h"
 #include "miscadmin.h"
 #include "storage/bufmgr.h"
+#include "storage/encryption.h"
 #include "utils/rel.h"
 
 
@@ -316,6 +318,15 @@ addLeafTuple(Relation index, SpGistState *state, SpGistLeafTuple leafTuple,
 			PageSetLSN(parent->page, recptr);
 		}
 	}
+	else if (data_encrypted)
+	{
+		XLogRecPtr	recptr = get_lsn_for_encryption();
+
+		PageSetLSN(current->page, recptr);
+
+		if (xlrec.offnumParent != InvalidOffsetNumber)
+			PageSetLSN(parent->page, recptr);
+	}
 
 	END_CRIT_SECTION();
 }
@@ -544,6 +555,14 @@ moveLeafs(Relation index, SpGistState *state,
 		XLogRegisterBuffer(2, parent->buffer, REGBUF_STANDARD);
 
 		recptr = XLogInsert(RM_SPGIST_ID, XLOG_SPGIST_MOVE_LEAFS);
+
+		PageSetLSN(current->page, recptr);
+		PageSetLSN(npage, recptr);
+		PageSetLSN(parent->page, recptr);
+	}
+	else if (data_encrypted)
+	{
+		XLogRecPtr	recptr = get_lsn_for_encryption();
 
 		PageSetLSN(current->page, recptr);
 		PageSetLSN(npage, recptr);
@@ -1434,6 +1453,31 @@ doPickSplit(Relation index, SpGistState *state,
 			PageSetLSN(parent->page, recptr);
 		}
 	}
+	else if (data_encrypted)
+	{
+		XLogRecPtr	recptr = get_lsn_for_encryption();
+
+		if (newLeafBuffer != InvalidBuffer)
+		{
+			Page		page = BufferGetPage(newLeafBuffer);
+
+			PageSetLSN(page, recptr);
+		}
+
+		if (saveCurrent.buffer != InvalidBuffer)
+		{
+			Page		page = BufferGetPage(saveCurrent.buffer);
+
+			PageSetLSN(page, recptr);
+		}
+
+		PageSetLSN(current->page, recptr);
+
+		if (parent->buffer != InvalidBuffer)
+		{
+			PageSetLSN(parent->page, recptr);
+		}
+	}
 
 	END_CRIT_SECTION();
 
@@ -1568,6 +1612,8 @@ spgAddNodeAction(Relation index, SpGistState *state,
 
 			PageSetLSN(current->page, recptr);
 		}
+		else if (data_encrypted)
+			set_page_lsn_for_encryption(current->page);
 
 		END_CRIT_SECTION();
 	}
@@ -1691,6 +1737,14 @@ spgAddNodeAction(Relation index, SpGistState *state,
 			recptr = XLogInsert(RM_SPGIST_ID, XLOG_SPGIST_ADD_NODE);
 
 			/* we don't bother to check if any of these are redundant */
+			PageSetLSN(current->page, recptr);
+			PageSetLSN(parent->page, recptr);
+			PageSetLSN(saveCurrent.page, recptr);
+		}
+		else if (data_encrypted)
+		{
+			XLogRecPtr	recptr = get_lsn_for_encryption();
+
 			PageSetLSN(current->page, recptr);
 			PageSetLSN(parent->page, recptr);
 			PageSetLSN(saveCurrent.page, recptr);
@@ -1891,6 +1945,15 @@ spgSplitNodeAction(Relation index, SpGistState *state,
 		{
 			PageSetLSN(BufferGetPage(newBuffer), recptr);
 		}
+	}
+	else if (data_encrypted)
+	{
+		XLogRecPtr	recptr = get_lsn_for_encryption();
+
+		PageSetLSN(current->page, recptr);
+
+		if (newBuffer != InvalidBuffer)
+			PageSetLSN(BufferGetPage(newBuffer), recptr);
 	}
 
 	END_CRIT_SECTION();

@@ -3,6 +3,7 @@
  *
  * repl_gram.y				- Parser for the replication commands
  *
+ * Portions Copyright (c) 2019-2021, CYBERTEC PostgreSQL International GmbH
  * Portions Copyright (c) 1996-2022, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -68,6 +69,7 @@ Node *replication_parse_result;
 %token K_DROP_REPLICATION_SLOT
 %token K_TIMELINE_HISTORY
 %token K_WAIT
+%token K_DECRYPT
 %token K_TIMELINE
 %token K_PHYSICAL
 %token K_LOGICAL
@@ -86,6 +88,7 @@ Node *replication_parse_result;
 %type <list>	generic_option_list
 %type <defelt>	generic_option
 %type <uintval>	opt_timeline
+%type <boolval> opt_decrypt
 %type <list>	plugin_options plugin_opt_list
 %type <defelt>	plugin_opt_elem
 %type <node>	plugin_opt_arg
@@ -260,10 +263,10 @@ drop_replication_slot:
 			;
 
 /*
- * START_REPLICATION [SLOT slot] [PHYSICAL] %X/%X [TIMELINE %d]
+ * START_REPLICATION [SLOT slot] [PHYSICAL] %X/%X [TIMELINE %d] [DECRYPT]
  */
 start_replication:
-			K_START_REPLICATION opt_slot opt_physical RECPTR opt_timeline
+			K_START_REPLICATION opt_slot opt_physical RECPTR opt_timeline opt_decrypt
 				{
 					StartReplicationCmd *cmd;
 
@@ -272,6 +275,7 @@ start_replication:
 					cmd->slotname = $2;
 					cmd->startpoint = $4;
 					cmd->timeline = $5;
+					cmd->decrypt = $6;
 					$$ = (Node *) cmd;
 				}
 			;
@@ -338,6 +342,10 @@ opt_timeline:
 				| /* EMPTY */			{ $$ = 0; }
 			;
 
+opt_decrypt:
+			K_DECRYPT						{ $$ = true; }
+			| /* EMPTY */					{ $$ = false; }
+			;
 
 plugin_options:
 			'(' plugin_opt_list ')'			{ $$ = $2; }
@@ -413,6 +421,7 @@ ident_or_keyword:
 			| K_EXPORT_SNAPSHOT				{ $$ = "export_snapshot"; }
 			| K_NOEXPORT_SNAPSHOT			{ $$ = "noexport_snapshot"; }
 			| K_USE_SNAPSHOT				{ $$ = "use_snapshot"; }
+			| K_DECRYPT						{ $$ = "decrypt"; }
 		;
 
 %%

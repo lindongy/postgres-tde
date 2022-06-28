@@ -29,6 +29,7 @@
 #include "access/xloginsert.h"
 #include "miscadmin.h"
 #include "storage/bufmgr.h"
+#include "storage/encryption.h"
 #include "storage/lmgr.h"
 #include "utils/rel.h"
 
@@ -433,6 +434,8 @@ brinRevmapDesummarizeRange(Relation idxrel, BlockNumber heapBlk)
 		PageSetLSN(revmapPg, recptr);
 		PageSetLSN(regPg, recptr);
 	}
+	else if (data_encrypted)
+		set_page_lsn_for_encryption2(revmapPg, regPg);
 
 	END_CRIT_SECTION();
 
@@ -655,6 +658,8 @@ revmap_physical_extend(BrinRevmap *revmap)
 		PageSetLSN(metapage, recptr);
 		PageSetLSN(page, recptr);
 	}
+	else if (data_encrypted)
+		set_page_lsn_for_encryption2(metapage, page);
 
 	END_CRIT_SECTION();
 

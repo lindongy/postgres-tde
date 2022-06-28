@@ -20,6 +20,7 @@
 #include "commands/vacuum.h"
 #include "miscadmin.h"
 #include "postmaster/autovacuum.h"
+#include "storage/encryption.h"
 #include "storage/indexfsm.h"
 #include "storage/lmgr.h"
 #include "storage/predicate.h"
@@ -97,7 +98,12 @@ xlogVacuumPage(Relation index, Buffer buffer)
 	Assert(GinPageIsLeaf(page));
 
 	if (!RelationNeedsWAL(index))
+	{
+		if (data_encrypted)
+			set_page_lsn_for_encryption(page);
+
 		return;
+	}
 
 	/*
 	 * Always create a full image, we don't track the changes on the page at
@@ -224,6 +230,8 @@ ginDeletePage(GinVacuumState *gvs, BlockNumber deleteBlkno, BlockNumber leftBlkn
 		PageSetLSN(parentPage, recptr);
 		PageSetLSN(BufferGetPage(lBuffer), recptr);
 	}
+	else if (data_encrypted)
+		set_page_lsn_for_encryption3(page, parentPage, BufferGetPage(lBuffer));
 
 	ReleaseBuffer(pBuffer);
 	ReleaseBuffer(lBuffer);

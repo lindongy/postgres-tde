@@ -14,6 +14,10 @@ REGRESS = check check_btree check_heap
 
 TAP_TESTS = 1
 
+# We could adjust the tests so that the relations are first decrypted and then
+# corrupted, but not sure if that would add much value.
+PGENCRKEYCMD =
+
 ifdef USE_PGXS
 PG_CONFIG = pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)

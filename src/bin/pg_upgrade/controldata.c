@@ -3,6 +3,7 @@
  *
  *	controldata functions
  *
+ *	Portions Copyright (c) 2019-2021, CYBERTEC PostgreSQL International GmbH
  *	Copyright (c) 2010-2022, PostgreSQL Global Development Group
  *	src/bin/pg_upgrade/controldata.c
  */
@@ -202,6 +203,14 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 		cluster->controldata.data_checksum_version = 0;
 		got_data_checksum_version = true;
 	}
+
+	/*
+	 * The cluster is not necessarily encrypted. In case it is, set the
+	 * default key length because this is the only possible length for TDE 1.0
+	 * and because TDE 1.0 does not report the key length explicitly.
+	 */
+	DATA_CIPHER_SET(cluster->controldata.data_cipher, PG_CIPHER_NONE,
+					DEFAULT_ENCRYPTION_KEY_LENGTH);
 
 	/* we have the result of cmd in "output". so parse it line by line now */
 	while (fgets(bufin, sizeof(bufin), output))
@@ -497,6 +506,65 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 			cluster->controldata.data_checksum_version = str2uint(p);
 			got_data_checksum_version = true;
 		}
+		else if ((p = strstr(bufin, "Encryption key length")) != NULL)
+		{
+			uint	key_bits;
+
+			p = strchr(p, ':');
+
+			if (p == NULL || strlen(p) <= 1)
+				pg_fatal("%d: controldata retrieval problem\n", __LINE__);
+
+			p++;				/* remove ':' char */
+			key_bits = str2uint(p);
+			/* Currently we only support this one cipher. */
+			DATA_CIPHER_SET(cluster->controldata.data_cipher,
+							PG_CIPHER_AES_CTR_CBC, key_bits / 8);
+		}
+		else if ((p = strstr(bufin, "encryption fingerprint")) != NULL)
+		{
+			int			key_len, i;
+			int	sample_int[ENCRYPTION_SAMPLE_SIZE];
+
+			/*
+			 * If the cluster supports configurable key length, we should
+			 * already have processed the information. If we haven't seen the
+			 * key length info so far, it probably means that the cluster is
+			 * TDE 1.0 (key length not configurable) - the default key length
+			 * was set earlier for this purpose.
+			 */
+			key_len = DATA_CIPHER_GET_KEY_LENGTH(cluster->controldata.data_cipher);
+
+			/*
+			 * Whether the key length was seen or not, we're now sure that the
+			 * cluster is encrypted. Currently we only support this one
+			 * cipher.
+			 */
+			DATA_CIPHER_SET(cluster->controldata.data_cipher,
+							PG_CIPHER_AES_CTR_CBC, key_len);
+
+			/* Skip the colon and any whitespace after it */
+			p = strchr(p, ':');
+			if (p == NULL || strlen(p) <= 1)
+				pg_fatal("%d: controldata retrieval problem\n", __LINE__);
+			p = strpbrk(p, "01234567890ABCDEF");
+			if (p == NULL || strlen(p) <= 1)
+				pg_fatal("%d: controldata retrieval problem\n", __LINE__);
+
+			/* Make sure it looks like a valid finerprint */
+			if (strspn(p, "0123456789ABCDEF") != 32)
+				pg_fatal("%d: controldata retrieval problem\n", __LINE__);
+
+			/*
+			 * See encryption_key_from_string() for explanation why %2hhx
+			 * conversion cannot be used here.
+			 */
+			for (i = 0; i < ENCRYPTION_SAMPLE_SIZE; i++)
+				sscanf(p + 2 * i, "%2x", sample_int + i);
+			for (i = 0; i < ENCRYPTION_SAMPLE_SIZE; i++)
+				cluster->controldata.encryption_verification[i] =
+					(char) sample_int[i];
+		}
 	}
 
 	pclose(output);
@@ -698,6 +766,32 @@ check_control_data(ControlData *oldctrl,
 		pg_fatal("old cluster uses data checksums but the new one does not\n");
 	else if (oldctrl->data_checksum_version != newctrl->data_checksum_version)
 		pg_fatal("old and new cluster pg_controldata checksum versions do not match\n");
+
+	if (DATA_CIPHER_GET_KIND(oldctrl->data_cipher) != PG_CIPHER_NONE &&
+		DATA_CIPHER_GET_KIND(newctrl->data_cipher) == PG_CIPHER_NONE)
+		pg_fatal("old cluster is encrypted, upgrade to a non-encrypted cluster is not supported\n");
+	else if (DATA_CIPHER_GET_KIND(oldctrl->data_cipher) == PG_CIPHER_NONE &&
+			 DATA_CIPHER_GET_KIND(newctrl->data_cipher) != PG_CIPHER_NONE)
+		pg_fatal("old cluster is not encrypted, upgrade to an encrypted cluster is not supported\n");
+	else if (DATA_CIPHER_GET_KIND(oldctrl->data_cipher) != PG_CIPHER_NONE)
+	{
+		/* Both clusters are encrypted. */
+
+		/* Currently we only support one cipher. */
+		Assert(DATA_CIPHER_GET_KIND(oldctrl->data_cipher) ==
+			   DATA_CIPHER_GET_KIND(newctrl->data_cipher));
+
+		/* Key lengths should match. */
+		if (DATA_CIPHER_GET_KEY_LENGTH(oldctrl->data_cipher) !=
+			DATA_CIPHER_GET_KEY_LENGTH(newctrl->data_cipher))
+			pg_fatal("keys of different length were used to encrypt the old and the new cluster\n");
+
+		/* Have the same keys been used to encrypt the clusters? */
+		if (memcmp(oldctrl->encryption_verification,
+				   newctrl->encryption_verification,
+				   ENCRYPTION_SAMPLE_SIZE) != 0)
+			pg_fatal("encryption of the new cluster is not compatible with encryption of the old one\n");
+	}
 }
 
 

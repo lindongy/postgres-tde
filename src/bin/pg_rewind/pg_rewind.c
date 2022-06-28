@@ -3,6 +3,7 @@
  * pg_rewind.c
  *	  Synchronizes a PostgreSQL data directory to a new timeline
  *
+ * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
  * Portions Copyright (c) 1996-2022, PostgreSQL Global Development Group
  *
  *-------------------------------------------------------------------------
@@ -22,6 +23,7 @@
 #include "common/file_perm.h"
 #include "common/restricted_token.h"
 #include "common/string.h"
+#include "fe_utils/encryption.h"
 #include "fe_utils/recovery_gen.h"
 #include "fe_utils/string_utils.h"
 #include "file_ops.h"
@@ -30,6 +32,7 @@
 #include "pg_rewind.h"
 #include "rewind_source.h"
 #include "storage/bufpage.h"
+#include "storage/encryption.h"
 
 static void usage(const char *progname);
 
@@ -91,6 +94,10 @@ usage(const char *progname)
 	printf(_("  -D, --target-pgdata=DIRECTORY  existing data directory to modify\n"));
 	printf(_("      --source-pgdata=DIRECTORY  source data directory to synchronize with\n"));
 	printf(_("      --source-server=CONNSTR    source server to synchronize with\n"));
+#ifdef	USE_ENCRYPTION
+	printf(_("  -K, --encryption-key-command=COMMAND\n"
+			 "                                 command that returns encryption key\n"));
+#endif							/* USE_ENCRYPTION */
 	printf(_("  -n, --dry-run                  stop before modifying anything\n"));
 	printf(_("  -N, --no-sync                  do not wait for changes to be written\n"
 			 "                                 safely to disk\n"));
@@ -125,6 +132,9 @@ main(int argc, char **argv)
 		{"no-sync", no_argument, NULL, 'N'},
 		{"progress", no_argument, NULL, 'P'},
 		{"debug", no_argument, NULL, 3},
+#ifdef	USE_ENCRYPTION
+		{"encryption-key-command", required_argument, NULL, 'K'},
+#endif							/* USE_ENCRYPTION */
 		{NULL, 0, NULL, 0}
 	};
 	int			option_index;
@@ -161,7 +171,7 @@ main(int argc, char **argv)
 		}
 	}
 
-	while ((c = getopt_long(argc, argv, "cD:nNPR", long_options, &option_index)) != -1)
+	while ((c = getopt_long(argc, argv, "cD:K:nNPR", long_options, &option_index)) != -1)
 	{
 		switch (c)
 		{
@@ -205,6 +215,12 @@ main(int argc, char **argv)
 			case 4:
 				no_ensure_shutdown = true;
 				break;
+
+#ifdef	USE_ENCRYPTION
+			case 'K':
+				encryption_key_command = strdup(optarg);
+				break;
+#endif							/* USE_ENCRYPTION */
 
 			case 5:
 				config_file = pg_strdup(optarg);
@@ -314,6 +330,49 @@ main(int argc, char **argv)
 	buffer = slurpFile(datadir_target, "global/pg_control", &size);
 	digestControlFile(&ControlFile_target, buffer, size);
 	pg_free(buffer);
+
+	/*
+	 * Setup encryption if it's obvious that we'll have to deal with encrypted
+	 * cluster.
+	 */
+	if (DATA_CIPHER_GET_KIND(ControlFile_target.data_cipher) != PG_CIPHER_NONE)
+#ifdef USE_ENCRYPTION
+	{
+		int		key_len;
+
+		/*
+		 * Try to retrieve the command from environment variable. We do this
+		 * primarily to make automated tests work for encrypted cluster w/o
+		 * changing the scripts. XXX Not sure the variable should be
+		 * documented. If we do, then pg_ctl should probably accept it too.
+		 */
+		if (encryption_key_command == NULL)
+		{
+			encryption_key_command = getenv("PGENCRKEYCMD");
+			if (encryption_key_command && strlen(encryption_key_command) == 0)
+				encryption_key_command = NULL;
+		}
+
+		if (encryption_key_command == NULL)
+		{
+			pg_log_error("-K option must be passed for encrypted cluster");
+			exit(EXIT_FAILURE);
+		}
+
+		data_cipher = ControlFile_target.data_cipher;
+		key_len = DATA_CIPHER_GET_KEY_LENGTH(data_cipher);
+		run_encryption_key_command(datadir_source, &key_len);
+		setup_encryption();
+		data_encrypted = true;
+		encryption_key_length = key_len;
+	}
+#else
+	{
+		pg_log_error(ENCRYPTION_NOT_SUPPORTED_MSG);
+		exit(EXIT_FAILURE);
+	}
+#endif	/* USE_ENCRYPTION */
+
 
 	if (!no_ensure_shutdown &&
 		ControlFile_target.state != DB_SHUTDOWNED &&
@@ -722,6 +781,27 @@ sanityChecks(void)
 		ControlFile_source.state != DB_SHUTDOWNED &&
 		ControlFile_source.state != DB_SHUTDOWNED_IN_RECOVERY)
 		pg_fatal("source data directory must be shut down cleanly");
+
+	/*
+	 * Since standby receives XLOG stream encrypted by master, handling
+	 * differently encrypted clusters is not the typical use case for
+	 * pg_rewind. Yet we should check the encryption.
+	 */
+	if (DATA_CIPHER_GET_KIND(ControlFile_source.data_cipher) != PG_CIPHER_NONE ||
+		DATA_CIPHER_GET_KIND(ControlFile_target.data_cipher) != PG_CIPHER_NONE)
+	{
+		if (DATA_CIPHER_GET_KIND(ControlFile_source.data_cipher) !=
+			DATA_CIPHER_GET_KIND(ControlFile_target.data_cipher))
+			pg_fatal("source and target server must be both unencrypted or both encrypted\n");
+
+		/* Keys should match. */
+		if (DATA_CIPHER_GET_KEY_LENGTH(ControlFile_source.data_cipher) !=
+			DATA_CIPHER_GET_KEY_LENGTH(ControlFile_target.data_cipher) ||
+			memcmp(ControlFile_source.encryption_verification,
+				   ControlFile_target.encryption_verification,
+				   ENCRYPTION_SAMPLE_SIZE))
+			pg_fatal("both source and target server must use the same encryption key");
+	}
 }
 
 /*
@@ -1147,15 +1227,54 @@ ensureCleanShutdown(const char *argv0)
 		appendShellString(postgres_cmd, config_file);
 	}
 
-	/* finish with the database name, and a properly quoted redirection */
-	appendPQExpBufferStr(postgres_cmd, " template1 < ");
-	appendShellString(postgres_cmd, DEVNULL);
-
-	if (system(postgres_cmd->data) != 0)
+	/* finish with the database name */
+	appendPQExpBufferStr(postgres_cmd, " template1 ");
+	if (!data_encrypted)
 	{
-		pg_log_error("postgres single-user mode in target cluster failed");
-		pg_log_error_detail("Command was: %s", postgres_cmd->data);
-		exit(1);
+		appendPQExpBufferStr(postgres_cmd, "< ");
+		appendShellString(postgres_cmd, DEVNULL);
+
+		if (system(postgres_cmd->data) != 0)
+		{
+			pg_log_error("postgres single-user mode in target cluster failed");
+			pg_log_error_detail("Command was: %s", postgres_cmd->data);
+			exit(1);
+		}
+	}
+	else
+	{
+		FILE	   *cmdfd;
+		int			exitstatus;
+
+		/*
+		 * If the cluster is encrypted, we need to send encryption key to the
+		 * backend.
+		 */
+		errno = 0;
+		cmdfd = popen(postgres_cmd->data, "w");
+		if (cmdfd == NULL)
+		{
+			pg_log_error("postgres single-user mode in target cluster failed");
+			pg_fatal("Command was: %s", postgres_cmd->data);
+		}
+
+		send_encryption_key(cmdfd);
+
+		exitstatus = pclose(cmdfd);
+
+		if (exitstatus == -1)
+		{
+			/* pclose() itself failed, and hopefully set errno */
+			pg_fatal("pclose() failed: %m");
+		}
+		else if (exitstatus != 0)
+		{
+			char	*reason;
+
+			reason = wait_result_to_str(exitstatus);
+			pg_fatal("%s", reason);
+			pfree(reason);
+		}
 	}
 
 	destroyPQExpBuffer(postgres_cmd);

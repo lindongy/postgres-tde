@@ -24,6 +24,7 @@
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "storage/bufmgr.h"
+#include "storage/encryption.h"
 #include "utils/snapmgr.h"
 #include "utils/rel.h"
 #include "utils/snapmgr.h"
@@ -449,6 +450,8 @@ heap_page_prune(Relation relation, Buffer buffer,
 
 			PageSetLSN(BufferGetPage(buffer), recptr);
 		}
+		else if (data_encrypted)
+			set_page_lsn_for_encryption(BufferGetPage(buffer));
 	}
 	else
 	{

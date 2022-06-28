@@ -18,6 +18,7 @@
 #include "access/nbtxlog.h"
 #include "access/xloginsert.h"
 #include "miscadmin.h"
+#include "storage/encryption.h"
 #include "utils/rel.h"
 
 static void _bt_bottomupdel_finish_pending(Page page, BTDedupState state,
@@ -265,6 +266,9 @@ _bt_dedup_pass(Relation rel, Buffer buf, Relation heapRel, IndexTuple newitem,
 
 		PageSetLSN(page, recptr);
 	}
+	else if (data_encrypted)
+		set_page_lsn_for_encryption(page);
+
 
 	END_CRIT_SECTION();
 

@@ -38,6 +38,7 @@
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "parser/parse_type.h"
+#include "storage/encryption.h"
 #include "storage/lmgr.h"
 #include "storage/proc.h"
 #include "storage/smgr.h"
@@ -427,6 +428,8 @@ fill_seq_fork_with_data(Relation rel, HeapTuple tuple, ForkNumber forkNum)
 
 		PageSetLSN(page, recptr);
 	}
+	else if (data_encrypted)
+		set_page_lsn_for_encryption(page);
 
 	END_CRIT_SECTION();
 
@@ -845,6 +848,8 @@ nextval_internal(Oid relid, bool check_permissions)
 
 		PageSetLSN(page, recptr);
 	}
+	else if (data_encrypted)
+		set_page_lsn_for_encryption(page);
 
 	/* Now update sequence tuple to the intended final state */
 	seq->last_value = last;		/* last fetched number */
@@ -1031,6 +1036,8 @@ do_setval(Oid relid, int64 next, bool iscalled)
 
 		PageSetLSN(page, recptr);
 	}
+	else if (data_encrypted)
+		set_page_lsn_for_encryption(BufferGetPage(buf));
 
 	END_CRIT_SECTION();
 

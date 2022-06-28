@@ -1,6 +1,7 @@
 /*
  *	pg_upgrade.h
  *
+ *	Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
  *	Copyright (c) 2010-2022, PostgreSQL Global Development Group
  *	src/bin/pg_upgrade/pg_upgrade.h
  */
@@ -10,7 +11,9 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 
+#include "fe_utils/encryption.h"
 #include "libpq-fe.h"
+#include "storage/encryption.h"
 
 /* For now, pg_upgrade does not use common/logging.c; use our own pg_fatal */
 #undef pg_fatal
@@ -217,6 +220,8 @@ typedef struct
 	bool		date_is_int;
 	bool		float8_pass_by_value;
 	bool		data_checksum_version;
+	uint8		data_cipher;
+	uint8		encryption_verification[ENCRYPTION_SAMPLE_SIZE];
 } ControlData;
 
 /*
@@ -266,6 +271,8 @@ typedef struct
 	char		major_version_str[64];	/* string PG_VERSION of cluster */
 	uint32		bin_version;	/* version returned from pg_ctl */
 	const char *tablespace_suffix;	/* directory specification */
+	bool	has_encr_key_cmd;		/* is encryption key command in the config
+									 * file? */
 } ClusterInfo;
 
 
@@ -329,7 +336,7 @@ extern UserOpts user_opts;
 extern ClusterInfo old_cluster,
 			new_cluster;
 extern OSInfo os_info;
-
+extern char encryption_key_command_opt[];
 
 /* check.c */
 
@@ -360,8 +367,16 @@ void		generate_old_dump(void);
 
 #define EXEC_PSQL_ARGS "--echo-queries --set ON_ERROR_STOP=on --no-psqlrc --dbname=template1"
 
+typedef struct EncryptionKey
+{
+	unsigned char	*data;
+	int		length;
+} EncryptionKey;
+
 bool		exec_prog(const char *log_file, const char *opt_log_file,
-					  bool report_error, bool exit_on_error, const char *fmt,...) pg_attribute_printf(5, 6);
+					  bool report_error, bool exit_on_error,
+					  EncryptionKey *encryption_key, const char *fmt,...)
+	pg_attribute_printf(6, 7);
 void		verify_directories(void);
 bool		pid_lock_file_exists(const char *datadir);
 

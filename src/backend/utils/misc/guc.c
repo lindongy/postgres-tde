@@ -6,6 +6,7 @@
  * See src/backend/utils/misc/README for more information.
  *
  *
+ * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
  * Copyright (c) 2000-2022, PostgreSQL Global Development Group
  * Written by Peter Eisentraut <peter_e@gmx.net>.
  *
@@ -85,8 +86,10 @@
 #include "replication/syncrep.h"
 #include "replication/walreceiver.h"
 #include "replication/walsender.h"
+#include "storage/buffile.h"
 #include "storage/bufmgr.h"
 #include "storage/dsm_impl.h"
+#include "storage/encryption.h"
 #include "storage/fd.h"
 #include "storage/large_object.h"
 #include "storage/pg_shmem.h"
@@ -209,6 +212,7 @@ static const char *show_tcp_keepalives_idle(void);
 static const char *show_tcp_keepalives_interval(void);
 static const char *show_tcp_keepalives_count(void);
 static const char *show_tcp_user_timeout(void);
+static void assign_buffile_seg_blocks(int newval, void *extra);
 static bool check_maxconnections(int *newval, void **extra, GucSource source);
 static bool check_max_worker_processes(int *newval, void **extra, GucSource source);
 static bool check_autovacuum_max_workers(int *newval, void **extra, GucSource source);
@@ -242,6 +246,10 @@ static bool check_recovery_target_lsn(char **newval, void **extra, GucSource sou
 static void assign_recovery_target_lsn(const char *newval, void *extra);
 static bool check_primary_slot_name(char **newval, void **extra, GucSource source);
 static bool check_default_with_oids(bool *newval, void **extra, GucSource source);
+
+#ifdef USE_ENCRYPTION
+static const char *show_encryption_key_command(void);
+#endif
 
 /* Private functions in guc-file.l that need to be called from guc.c */
 static ConfigVariable *ProcessConfigFileInternal(GucContext context,
@@ -2056,6 +2064,17 @@ static struct config_bool ConfigureNamesBool[] =
 	},
 
 	{
+		{"data_encryption", PGC_INTERNAL, PRESET_OPTIONS,
+			gettext_noop("Shows whether data encryption is turned on for this cluster."),
+			NULL,
+			GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE
+		},
+		&data_encrypted,
+		false,
+		NULL, NULL, NULL
+	},
+
+	{
 		{"syslog_sequence_numbers", PGC_SIGHUP, LOGGING_WHERE,
 			gettext_noop("Add sequence number to syslog messages to avoid duplicate suppression."),
 			NULL
@@ -3662,6 +3681,18 @@ static struct config_int ConfigureNamesInt[] =
 		NULL, NULL, NULL
 	},
 
+	{
+		/* NOT for general use */
+		{"buffile_seg_blocks", PGC_SUSET, DEVELOPER_OPTIONS,
+			gettext_noop("Maximum size of BufFile segment."),
+			gettext_noop("This makes testing of some corner cases easier, especially crossing of segment boundary."),
+			GUC_NOT_IN_SAMPLE | GUC_UNIT_BLOCKS
+		},
+		&buffile_seg_blocks,
+		BUFFILE_SEG_BLOCKS, 2, BUFFILE_SEG_BLOCKS,
+		NULL, assign_buffile_seg_blocks, NULL
+	},
+
 	/* End-of-list marker */
 	{
 		{NULL, 0, 0, NULL, NULL}, NULL, 0, 0, 0, NULL, NULL, NULL
@@ -4720,6 +4751,19 @@ static struct config_string ConfigureNamesString[] =
 		"",
 		check_backtrace_functions, assign_backtrace_functions, NULL
 	},
+
+#ifdef USE_ENCRYPTION
+	{
+		{"encryption_key_command", PGC_POSTMASTER, 0,
+			gettext_noop("Sets the shell command that will be called to fetch database encryption key."),
+			NULL,
+			GUC_SUPERUSER_ONLY
+		},
+		&encryption_key_command,
+		NULL,
+		NULL, NULL, show_encryption_key_command
+	},
+#endif
 
 	/* End-of-list marker */
 	{
@@ -12366,6 +12410,12 @@ show_tcp_user_timeout(void)
 	return nbuf;
 }
 
+static void
+assign_buffile_seg_blocks(int newval, void *extra)
+{
+	BufFileAdjustConfiguration(newval);
+}
+
 static bool
 check_maxconnections(int *newval, void **extra, GucSource source)
 {
@@ -12905,5 +12955,16 @@ check_default_with_oids(bool *newval, void **extra, GucSource source)
 
 	return true;
 }
+
+#ifdef USE_ENCRYPTION
+static const char *
+show_encryption_key_command(void)
+{
+	if (encryption_key_command)
+		return encryption_key_command;
+	else
+		return "(disabled)";
+}
+#endif
 
 #include "guc-file.c"

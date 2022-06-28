@@ -175,6 +175,9 @@ blbuildempty(Relation index)
 	 * itself might remove it while replaying, for example, an
 	 * XLOG_DBASE_CREATE* or XLOG_TBLSPC_CREATE record.  Therefore, we need
 	 * this even when wal_level=minimal.
+	 *
+	 * Encryption: nothing to do, LSN (the encryption IV) is not set and there
+	 * is no user data yet.
 	 */
 	PageSetChecksumInplace(metapage, BLOOM_METAPAGE_BLKNO);
 	smgrwrite(RelationGetSmgr(index), INIT_FORKNUM, BLOOM_METAPAGE_BLKNO,

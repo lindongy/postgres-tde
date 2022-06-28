@@ -3,6 +3,7 @@
  * postgres.c
  *	  POSTGRES C Backend Interface
  *
+ * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
  * Portions Copyright (c) 1996-2022, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -66,6 +67,7 @@
 #include "replication/walsender.h"
 #include "rewrite/rewriteHandler.h"
 #include "storage/bufmgr.h"
+#include "storage/encryption.h"
 #include "storage/ipc.h"
 #include "storage/pmsignal.h"
 #include "storage/proc.h"
@@ -4119,6 +4121,43 @@ PostgresMain(const char *dbname, const char *username)
 
 	/* We need to allow SIGINT, etc during the initial transaction */
 	PG_SETMASK(&UnBlockSig);
+
+	/*
+	 * Standalone backend operating on an encrypted cluster needs encryption
+	 * key.
+	 *
+	 * We should not use run_encryption_key_command() here because the command
+	 * might read data (password) from stdin, and that would break cases like
+	 * postgres execution by initdb or pg_rewind. (Even if those don't pass
+	 * the command via the -K option, encryption_key_command might be
+	 * initialized via postgresql.conf, so it makes no sense to test it here.)
+	 */
+	if (!IsUnderPostmaster && data_encrypted &&
+		!encryption_setup_done)
+	{
+		char	sample[ENCRYPTION_SAMPLE_SIZE];
+		int		key_length = DATA_CIPHER_GET_KEY_LENGTH(data_cipher);
+
+		/* Display a prompt for user to enter the encryption key. */
+		printf("key> ");
+		fflush(stdout);
+
+		/*
+		 * Read the key from stdin. Pass interactive_getc() as the callback so
+		 * that the reading is interruptible.
+		 */
+		read_encryption_key(interactive_getc, &key_length);
+
+		setup_encryption();
+
+		/* Verify the key. */
+		sample_encryption(sample);
+		if (memcmp(encryption_verification, sample, ENCRYPTION_SAMPLE_SIZE))
+			ereport(FATAL,
+					(errmsg("invalid encryption key"),
+					 errdetail("The passed encryption key does not match"
+							   " database encryption key.")));
+	}
 
 	/*
 	 * General initialization.

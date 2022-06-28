@@ -116,6 +116,7 @@ CREATE EXTENSION <replaceable>module_name</replaceable>;
  &intagg;
  &intarray;
  &isn;
+ &keycmd;
  &lo;
  &ltree;
  &oldsnapshot;

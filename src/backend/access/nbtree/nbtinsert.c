@@ -3,6 +3,7 @@
  * nbtinsert.c
  *	  Item insertion in Lehman and Yao btrees for Postgres.
  *
+ * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
  * Portions Copyright (c) 1996-2022, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -22,6 +23,7 @@
 #include "common/pg_prng.h"
 #include "lib/qunique.h"
 #include "miscadmin.h"
+#include "storage/encryption.h"
 #include "storage/lmgr.h"
 #include "storage/predicate.h"
 #include "storage/smgr.h"
@@ -1390,6 +1392,16 @@ _bt_insertonpg(Relation rel,
 
 			PageSetLSN(page, recptr);
 		}
+		else if (data_encrypted)
+		{
+			XLogRecPtr	recptr = get_lsn_for_encryption();
+
+			if (BufferIsValid(metabuf))
+				PageSetLSN(metapg, recptr);
+			if (!isleaf)
+				PageSetLSN(BufferGetPage(cbuf), recptr);
+			PageSetLSN(page, recptr);
+		}
 
 		END_CRIT_SECTION();
 
@@ -2055,6 +2067,17 @@ _bt_split(Relation rel, BTScanInsert itup_key, Buffer buf, Buffer cbuf,
 		if (!isleaf)
 			PageSetLSN(BufferGetPage(cbuf), recptr);
 	}
+	else if (data_encrypted)
+	{
+		XLogRecPtr	recptr = get_lsn_for_encryption();
+
+		PageSetLSN(origpage, recptr);
+		PageSetLSN(rightpage, recptr);
+		if (!isrightmost)
+			PageSetLSN(spage, recptr);
+		if (!isleaf)
+			PageSetLSN(BufferGetPage(cbuf), recptr);
+	}
 
 	END_CRIT_SECTION();
 
@@ -2578,6 +2601,14 @@ _bt_newroot(Relation rel, Buffer lbuf, Buffer rbuf)
 							((PageHeader) rootpage)->pd_upper);
 
 		recptr = XLogInsert(RM_BTREE_ID, XLOG_BTREE_NEWROOT);
+
+		PageSetLSN(lpage, recptr);
+		PageSetLSN(rootpage, recptr);
+		PageSetLSN(metapg, recptr);
+	}
+	else if (data_encrypted)
+	{
+		XLogRecPtr	recptr = get_lsn_for_encryption();
 
 		PageSetLSN(lpage, recptr);
 		PageSetLSN(rootpage, recptr);

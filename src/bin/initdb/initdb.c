@@ -38,6 +38,7 @@
  *
  * This code is released under the terms of the PostgreSQL License.
  *
+ * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
  * Portions Copyright (c) 1996-2022, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -71,11 +72,13 @@
 #include "common/restricted_token.h"
 #include "common/string.h"
 #include "common/username.h"
+#include "fe_utils/encryption.h"
 #include "fe_utils/string_utils.h"
 #include "getaddrinfo.h"
 #include "getopt_long.h"
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
+#include "storage/encryption.h"
 
 
 /* Ideally this would be in a .h file, but it hardly seems worth the trouble */
@@ -1180,6 +1183,18 @@ setup_config(void)
 
 	snprintf(path, sizeof(path), "%s/postgresql.conf", pg_data);
 
+	if (encryption_key_command)
+#ifdef USE_ENCRYPTION
+	{
+		snprintf(repltok, sizeof(repltok), "encryption_key_command = '%s'",
+				 escape_quotes(encryption_key_command));
+		conflines = replace_token(conflines, "#encryption_key_command = ''", repltok);
+	}
+#else
+		/* encryption_key_command should not be set */
+		Assert(false);
+#endif
+
 	writefile(path, conflines);
 	if (chmod(path, pg_file_create_mode) != 0)
 		pg_fatal("could not change permissions of \"%s\": %m", path);
@@ -1312,6 +1327,7 @@ bootstrap_template1(void)
 	char	  **bki_lines;
 	char		headerline[MAXPGPATH];
 	char		buf[64];
+	char *encr_opt_str = NULL;
 
 	printf(_("running bootstrap script ... "));
 	fflush(stdout);
@@ -1366,16 +1382,36 @@ bootstrap_template1(void)
 	/* Also ensure backend isn't confused by this environment var: */
 	unsetenv("PGCLIENTENCODING");
 
+	/* Prepare the -K option for the backend. */
+	if (encryption_key_command)
+	{
+		size_t		len;
+
+		len = 3;
+		encr_opt_str = (char *) pg_malloc(len);
+		snprintf(encr_opt_str, len, "-K");
+	}
+	else
+	{
+		encr_opt_str = (char *) pg_malloc(1);
+		encr_opt_str[0] = '\0';
+	}
+
 	snprintf(cmd, sizeof(cmd),
-			 "\"%s\" --boot -X %d %s %s %s %s",
+			 "\"%s\" --boot -X %d %s %s %s %s %s",
 			 backend_exec,
 			 wal_segment_size_mb * (1024 * 1024),
 			 data_checksums ? "-k" : "",
+			 encr_opt_str,
 			 boot_options, extra_options,
 			 debug ? "-d 5" : "");
 
 
 	PG_CMD_OPEN;
+
+	/* If the cluster is encrypted, first send the encryption key. */
+	if (encryption_key_command)
+		send_encryption_key(cmdfd);
 
 	for (line = bki_lines; *line != NULL; line++)
 	{
@@ -2172,6 +2208,11 @@ usage(const char *progname)
 	printf(_("  -g, --allow-group-access  allow group read/execute on data directory\n"));
 	printf(_("      --icu-locale=LOCALE   set ICU locale ID for new databases\n"));
 	printf(_("  -k, --data-checksums      use data page checksums\n"));
+#ifdef	USE_ENCRYPTION
+	printf(_("  -K, --encryption-key-command\n"
+			 "                            command that returns encryption key\n"));
+	printf(_("      --key-bits=NBITS      number of bits in the encryption key\n"));
+#endif
 	printf(_("      --locale=LOCALE       set default locale for new databases\n"));
 	printf(_("      --lc-collate=, --lc-ctype=, --lc-messages=LOCALE\n"
 			 "      --lc-monetary=, --lc-numeric=, --lc-time=LOCALE\n"
@@ -2721,6 +2762,40 @@ initialize_data_directory(void)
 	/* Top level PG_VERSION is checked by bootstrapper, so make it first */
 	write_version_file(NULL);
 
+	/*
+	 * If the cluster will be encrypted, write the KDF file so that encryption
+	 * key can be derived from password.
+	 */
+	if (encryption_key_command)
+#ifdef USE_ENCRYPTION
+	{
+		/*
+		 * XXX Since execution of encryption_key_command produce the key (as
+		 * opposed to password), we don't know if the command received the key
+		 * itself or a password. If DBA provided initdb with a key, he will
+		 * never use password in the future (there was no KDF so far so the
+		 * key could not be derived from password, and the password can hardly
+		 * be derived from the key), so the KDF file may be useless. We don't
+		 * have enough information to recognize this special case, so just
+		 * initialize and write the KDF unconditionally.
+		 */
+		init_kdf(encryption_key_length);
+		write_kdf_file(pg_data);
+
+		/*
+		 * The key command is allowed to use pg_keytool, which in turn needs
+		 * the KDF parameters. The KDF parameters are now available so we can
+		 * run the command.
+		 */
+		run_encryption_key_command(pg_data, &encryption_key_length);
+	}
+#else
+	{
+		/* User should not be able to enable encryption. */
+		Assert(false);
+	}
+#endif	/* USE_ENCRYPTION */
+
 	/* Select suitable configuration settings */
 	set_null_conf();
 	test_config_settings();
@@ -2749,6 +2824,10 @@ initialize_data_directory(void)
 			 DEVNULL);
 
 	PG_CMD_OPEN;
+
+	/* If the cluster is encrypted, first send the encryption key. */
+	if (encryption_key_command)
+		send_encryption_key(cmdfd);
 
 	setup_auth(cmdfd);
 
@@ -2823,6 +2902,10 @@ main(int argc, char *argv[])
 		{"waldir", required_argument, NULL, 'X'},
 		{"wal-segsize", required_argument, NULL, 12},
 		{"data-checksums", no_argument, NULL, 'k'},
+#ifdef	USE_ENCRYPTION
+		{"encryption-key-command", required_argument, NULL, 'K'},
+		{"key-bits", required_argument, NULL, 15},
+#endif							/* USE_ENCRYPTION */
 		{"allow-group-access", no_argument, NULL, 'g'},
 		{"discard-caches", no_argument, NULL, 14},
 		{"locale-provider", required_argument, NULL, 15},
@@ -2839,6 +2922,7 @@ main(int argc, char *argv[])
 	char	   *effective_user;
 	PQExpBuffer start_db_cmd;
 	char		pg_ctl_path[MAXPGPATH];
+	char		*str_key_bits = NULL;
 
 	/*
 	 * Ensure that buffering behavior of stdout matches what it is in
@@ -2868,7 +2952,7 @@ main(int argc, char *argv[])
 
 	/* process command-line options */
 
-	while ((c = getopt_long(argc, argv, "A:dD:E:gkL:nNsST:U:WX:", long_options, &option_index)) != -1)
+	while ((c = getopt_long(argc, argv, "A:dD:E:gkK:L:nNsST:U:WX:", long_options, &option_index)) != -1)
 	{
 		switch (c)
 		{
@@ -2920,6 +3004,14 @@ main(int argc, char *argv[])
 			case 'k':
 				data_checksums = true;
 				break;
+#ifdef	USE_ENCRYPTION
+			case 'K':
+				encryption_key_command = pg_strdup(optarg);
+				break;
+			case 17:
+				str_key_bits = pstrdup(optarg);
+				break;
+#endif							/* USE_ENCRYPTION */
 			case 'L':
 				share_path = pg_strdup(optarg);
 				break;
@@ -3014,6 +3106,58 @@ main(int argc, char *argv[])
 		pg_fatal("%s cannot be specified unless locale provider \"%s\" is chosen",
 				 "--icu-locale", "icu");
 
+	/*
+	 * Try to retrieve the command from environment variable. We do this
+	 * primarily to create encrypted clusters during automated tests. XXX Not
+	 * sure the variable should be documented. If we do, then pg_ctl should
+	 * probably accept it too.
+	 */
+	if (encryption_key_command == NULL)
+	{
+		encryption_key_command = getenv("PGENCRKEYCMD");
+		if (encryption_key_command && strlen(encryption_key_command) == 0)
+			encryption_key_command = NULL;
+	}
+
+	if (encryption_key_command == NULL && str_key_bits)
+	{
+		pg_log_error("--key-bits is only allowed if --encryption-key-command is used");
+		exit(1);
+	}
+
+	/* Like above, allow setting the key length for testing. */
+	if (str_key_bits == NULL)
+	{
+		str_key_bits = getenv("PGENCRKEYBITS");
+		if (str_key_bits && strlen(str_key_bits) == 0)
+			str_key_bits = NULL;
+	}
+
+	if (str_key_bits)
+	{
+		long	key_bits;
+		char	*endptr;
+
+		key_bits = strtol(str_key_bits, &endptr, 10);
+		if (*endptr != '\0')
+		{
+			pg_log_error("--key-bits must be a valid integer");
+			exit(1);
+		}
+
+		if (key_bits != 128 && key_bits != 192 && key_bits != 256)
+		{
+			pg_log_error("the allowed values of --key-bits are 128, 192 and 256");
+			exit(1);
+		}
+
+		/* Convert the number of bits to the number of bytes. */
+		encryption_key_length = key_bits / 8;
+	}
+	else
+		/* Just set the default value. */
+		encryption_key_length = DEFAULT_ENCRYPTION_KEY_LENGTH;
+
 	atexit(cleanup_directories_atexit);
 
 	/* If we only need to fsync, just do it and exit */
@@ -3095,6 +3239,11 @@ main(int argc, char *argv[])
 
 	if (pwprompt || pwfilename)
 		get_su_pwd();
+
+	if (encryption_key_command)
+		printf(_("Data encryption is enabled.\n"));
+	else
+		printf(_("Data encryption is disabled.\n"));
 
 	printf("\n");
 

@@ -3,6 +3,7 @@
  * storage.c
  *	  code to create and destroy physical storage for relations
  *
+ * Portions Copyright (c) 2022, CYBERTEC PostgreSQL International GmbH
  * Portions Copyright (c) 1996-2022, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -28,6 +29,7 @@
 #include "catalog/storage.h"
 #include "catalog/storage_xlog.h"
 #include "miscadmin.h"
+#include "storage/encryption.h"
 #include "storage/freespace.h"
 #include "storage/smgr.h"
 #include "utils/hsearch.h"
@@ -312,7 +314,8 @@ RelationTruncate(Relation rel, BlockNumber nblocks)
 	fsm = smgrexists(RelationGetSmgr(rel), FSM_FORKNUM);
 	if (fsm)
 	{
-		blocks[nforks] = FreeSpaceMapPrepareTruncateRel(rel, nblocks);
+		blocks[nforks] = FreeSpaceMapPrepareTruncateRel(rel, nblocks,
+														InvalidXLogRecPtr);
 		if (BlockNumberIsValid(blocks[nforks]))
 		{
 			forks[nforks] = FSM_FORKNUM;
@@ -325,7 +328,8 @@ RelationTruncate(Relation rel, BlockNumber nblocks)
 	vm = smgrexists(RelationGetSmgr(rel), VISIBILITYMAP_FORKNUM);
 	if (vm)
 	{
-		blocks[nforks] = visibilitymap_prepare_truncate(rel, nblocks);
+		blocks[nforks] = visibilitymap_prepare_truncate(rel, nblocks,
+														InvalidXLogRecPtr);
 		if (BlockNumberIsValid(blocks[nforks]))
 		{
 			forks[nforks] = VISIBILITYMAP_FORKNUM;
@@ -409,7 +413,8 @@ RelationTruncate(Relation rel, BlockNumber nblocks)
 	 * possibility of corruption after a crash anyway.
 	 */
 	if (need_fsm_vacuum)
-		FreeSpaceMapVacuumRange(rel, nblocks, InvalidBlockNumber);
+		FreeSpaceMapVacuumRange(rel, nblocks, InvalidBlockNumber,
+								InvalidXLogRecPtr);
 }
 
 /*
@@ -481,13 +486,28 @@ RelationCopyStorage(SMgrRelation src, SMgrRelation dst,
 
 	for (blkno = 0; blkno < nblocks; blkno++)
 	{
+		char	*buf_read, *buf_dst;
+		Page	page_encr = NULL;
+		XLogRecPtr	lsn;
+
 		/* If we got a cancel signal during the copy of the data, quit */
 		CHECK_FOR_INTERRUPTS();
 
-		smgrread(src, forkNum, blkno, buf.data);
+		if (!data_encrypted)
+			buf_read = buf.data;
+		else
+			buf_read = encrypt_buf.data;
 
+		smgrread(src, forkNum, blkno, buf_read);
+
+		if (data_encrypted)
+		{
+			decrypt_page(buf_read, buf.data, blkno);
+			page_encr = buf_read;
+		}
 		if (!PageIsVerifiedExtended(page, blkno,
-									PIV_LOG_WARNING | PIV_REPORT_STAT))
+									PIV_LOG_WARNING | PIV_REPORT_STAT,
+									page_encr))
 		{
 			/*
 			 * For paranoia's sake, capture the file path before invoking the
@@ -512,16 +532,38 @@ RelationCopyStorage(SMgrRelation src, SMgrRelation dst,
 		 * space.
 		 */
 		if (use_wal)
+		{
 			log_newpage(&dst->smgr_rnode.node, forkNum, blkno, page, false);
+			lsn = PageGetLSN(page);
+		}
+		else if (data_encrypted)
+			lsn = get_lsn_for_encryption();
 
-		PageSetChecksumInplace(page, blkno);
+		buf_dst = (char *) page;
+
+		/*
+		 * Encrypt only if we have valid IV. It should be always except when
+		 * log_newpage() encountered an empty page - it should be safe not to
+		 * encrypt such.
+		 */
+		if (data_encrypted && !XLogRecPtrIsInvalid(lsn))
+		{
+			encrypt_page(buf_dst,
+						 encrypt_buf.data,
+						 lsn,
+						 blkno);
+
+			buf_dst = encrypt_buf.data;
+		}
+
+		PageSetChecksumInplace(buf_dst, blkno);
 
 		/*
 		 * Now write the page.  We say skipFsync = true because there's no
 		 * need for smgr to schedule an fsync for this write; we'll do it
 		 * ourselves below.
 		 */
-		smgrextend(dst, forkNum, blkno, buf.data, true);
+		smgrextend(dst, forkNum, blkno, buf_dst, true);
 	}
 
 	/*
@@ -1024,7 +1066,8 @@ smgr_redo(XLogReaderState *record)
 		if ((xlrec->flags & SMGR_TRUNCATE_FSM) != 0 &&
 			smgrexists(reln, FSM_FORKNUM))
 		{
-			blocks[nforks] = FreeSpaceMapPrepareTruncateRel(rel, xlrec->blkno);
+			blocks[nforks] = FreeSpaceMapPrepareTruncateRel(rel, xlrec->blkno,
+															lsn);
 			if (BlockNumberIsValid(blocks[nforks]))
 			{
 				forks[nforks] = FSM_FORKNUM;
@@ -1035,7 +1078,8 @@ smgr_redo(XLogReaderState *record)
 		if ((xlrec->flags & SMGR_TRUNCATE_VM) != 0 &&
 			smgrexists(reln, VISIBILITYMAP_FORKNUM))
 		{
-			blocks[nforks] = visibilitymap_prepare_truncate(rel, xlrec->blkno);
+			blocks[nforks] = visibilitymap_prepare_truncate(rel, xlrec->blkno,
+															lsn);
 			if (BlockNumberIsValid(blocks[nforks]))
 			{
 				forks[nforks] = VISIBILITYMAP_FORKNUM;
@@ -1054,7 +1098,8 @@ smgr_redo(XLogReaderState *record)
 		 */
 		if (need_fsm_vacuum)
 			FreeSpaceMapVacuumRange(rel, xlrec->blkno,
-									InvalidBlockNumber);
+									InvalidBlockNumber,
+									lsn);
 
 		FreeFakeRelcacheEntry(rel);
 	}

@@ -3,6 +3,7 @@
  * bufmgr.c
  *	  buffer manager interface routines
  *
+ * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
  * Portions Copyright (c) 1996-2022, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -47,6 +48,7 @@
 #include "postmaster/bgwriter.h"
 #include "storage/buf_internals.h"
 #include "storage/bufmgr.h"
+#include "storage/encryption.h"
 #include "storage/ipc.h"
 #include "storage/proc.h"
 #include "storage/smgr.h"
@@ -983,6 +985,10 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 		/* new buffers are zero-filled */
 		MemSet((char *) bufBlock, 0, BLCKSZ);
 		/* don't set checksum for all-zero page */
+		/*
+		 * Encryption: no need to set LSN (to become an IV) because
+		 * zero-filled page won't be encrypted.
+		 */
 		smgrextend(smgr, forkNum, blockNum, (char *) bufBlock, false);
 
 		/*
@@ -1004,11 +1010,26 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 		{
 			instr_time	io_start,
 						io_time;
+			Page	bufBlockEncr = NULL;
+			Page	bufRead;
+
+			if (!data_encrypted)
+				bufRead = bufBlock;
+			else
+				bufRead = (Page) encrypt_buf.data;
 
 			if (track_io_timing)
 				INSTR_TIME_SET_CURRENT(io_start);
 
-			smgrread(smgr, forkNum, blockNum, (char *) bufBlock);
+			smgrread(smgr, forkNum, blockNum, bufRead);
+
+			if (data_encrypted)
+			{
+				decrypt_page(bufRead,
+							 bufBlock,
+							 blockNum);
+				bufBlockEncr = bufRead;
+			}
 
 			if (track_io_timing)
 			{
@@ -1020,7 +1041,8 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 
 			/* check for garbage data */
 			if (!PageIsVerifiedExtended((Page) bufBlock, blockNum,
-										PIV_LOG_WARNING | PIV_REPORT_STAT))
+										PIV_LOG_WARNING | PIV_REPORT_STAT,
+										bufBlockEncr))
 			{
 				if (mode == RBM_ZERO_ON_ERROR || zero_damaged_pages)
 				{
@@ -1581,7 +1603,11 @@ MarkBufferDirty(Buffer buffer)
 
 	if (BufferIsLocal(buffer))
 	{
-		MarkLocalBufferDirty(buffer);
+		/*
+		 * The caller of MarkBufferDirty () is responsible for setting the
+		 * LSN.
+		 */
+		MarkLocalBufferDirty(buffer, false);
 		return;
 	}
 
@@ -2885,6 +2911,48 @@ FlushBuffer(BufferDesc *buf, SMgrRelation reln)
 	 */
 	bufBlock = BufHdrGetBlock(buf);
 
+	if (data_encrypted)
+	{
+		/*
+		 * If permanent relation happens not to have valid LSN, it's probably
+		 * a new page and so it's o.k. not to encrypt that. We cannot assign
+		 * regular LSN (by inserting a new XLOG_NOOP record) at this stage
+		 * anyway.
+		 */
+		if (!XLogRecPtrIsInvalid(recptr))
+		{
+			encrypt_page(bufBlock, encrypt_buf.data, recptr,
+						 buf->tag.blockNum);
+		}
+		else
+		{
+			/*
+			 * Copy the data into a local buffer to make sure the LSN cannot
+			 * be changed concurrently (by MarkBufferDirtyHint()).
+			 */
+			memcpy(encrypt_buf.data, bufBlock, BLCKSZ);
+
+			/*
+			 * If the LSN changed while we were copying it, the only possible
+			 * reason should be MarkBufferDirtyHint() because the buffer is
+			 * locked in shared mode. We don't expect hints to be set on an
+			 * empty page, so error out. If this assumption was wrong, we'd
+			 * have to encrypt the page.
+			 */
+			if (!XLogRecPtrIsInvalid(PageGetLSN(encrypt_buf.data)))
+				ereport(ERROR,
+						(errmsg("LSN of an empty page changed concurrently")));
+
+			/*
+			 * Now that we're sure that the LSN is invalid and no one cannot
+			 * change our local copy during the write, we're also sure that
+			 * encryption is not applicable.
+			 */
+		}
+
+		bufBlock = encrypt_buf.data;
+	}
+
 	/*
 	 * Update page checksum if desired.  Since we have only shared lock on the
 	 * buffer, other processes might be updating hint bits in it, so we must
@@ -3010,8 +3078,12 @@ BufferGetLSNAtomic(Buffer buffer)
 
 	/*
 	 * If we don't need locking for correctness, fastpath out.
+	 *
+	 * If data_encrypted, then MarkBufferDirtyHint() can change the LSN while
+	 * the caller has only share lock on the buffer, so the fastpath is not
+	 * usable.
 	 */
-	if (!XLogHintBitIsNeeded() || BufferIsLocal(buffer))
+	if (!(XLogHintBitIsNeeded() || data_encrypted) || BufferIsLocal(buffer))
 		return PageGetLSN(page);
 
 	/* Make sure we've got a real buffer, and that we hold a pin on it. */
@@ -3532,8 +3604,22 @@ FlushRelationBuffers(Relation rel)
 				errcallback.previous = error_context_stack;
 				error_context_stack = &errcallback;
 
-				PageSetChecksumInplace(localpage, bufHdr->tag.blockNum);
+				if (data_encrypted)
+				{
+					XLogRecPtr	lsn = PageGetLSN(localpage);
 
+					if (!XLogRecPtrIsInvalid(lsn))
+					{
+						encrypt_page((char *) localpage,
+									 encrypt_buf.data,
+									 lsn,
+									 bufHdr->tag.blockNum);
+
+						localpage = encrypt_buf.data;
+					}
+				}
+
+				PageSetChecksumInplace(localpage, bufHdr->tag.blockNum);
 				smgrwrite(RelationGetSmgr(rel),
 						  bufHdr->tag.forkNum,
 						  bufHdr->tag.blockNum,
@@ -3980,6 +4066,17 @@ IncrBufferRefCount(Buffer buffer)
  *	  buffer's content lock.
  * 3. This function does not guarantee that the buffer is always marked dirty
  *	  (due to a race condition), so it cannot be used for important changes.
+ *
+ * The function also handles generation of LSN when it's needed as the
+ * encryption IV. The problem is that the buffer can be written to disk
+ * anytime after this function has finished, so the function needs to
+ * guarantee an unique LSN to be set. Alternatively, caller can be required to
+ * set the LSN before he ever calls the function, but in such a case he'd have
+ * to predict whether the function will set the LSN too or not.
+ *
+ * Note that the encryption-specific LSN is not generated during
+ * recovery. Caller should set the LSN in such a case, *before* the actual
+ * call.
  */
 void
 MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
@@ -3992,7 +4089,26 @@ MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
 
 	if (BufferIsLocal(buffer))
 	{
-		MarkLocalBufferDirty(buffer);
+		bool	set_lsn = false;
+
+		/* LSN is used as the encryption IV. */
+		if (data_encrypted)
+		{
+			/*
+			 * It's safer to return without marking the buffer dirty than to
+			 * go ahead without setting the LSN (a new LSN cannot be generated
+			 * during recovery anyway). The point is that the recovery can end
+			 * anytime after RecoveryInProgress() has returned true, so if we
+			 * only skip setting the LSN, then the buffer can be written to
+			 * disk w/o LSN, and therefore unencrypted.
+			 */
+			if (RecoveryInProgress())
+				return;
+
+			set_lsn = true;
+		}
+
+		MarkLocalBufferDirty(buffer, set_lsn);
 		return;
 	}
 
@@ -4020,6 +4136,7 @@ MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
 		bool		dirtied = false;
 		bool		delayChkptFlags = false;
 		uint32		buf_state;
+		bool	need_fpi;
 
 		/*
 		 * If we need to protect hint bit updates from torn writes, WAL-log a
@@ -4030,8 +4147,9 @@ MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
 		 * We don't check full_page_writes here because that logic is included
 		 * when we call XLogInsert() since the value changes dynamically.
 		 */
-		if (XLogHintBitIsNeeded() &&
-			(pg_atomic_read_u32(&bufHdr->state) & BM_PERMANENT))
+		need_fpi = XLogHintBitIsNeeded() &&
+			(pg_atomic_read_u32(&bufHdr->state) & BM_PERMANENT);
+		if (need_fpi || data_encrypted)
 		{
 			/*
 			 * If we must not write WAL, due to a relfilenode-specific
@@ -4067,11 +4185,23 @@ MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
 			 * It's possible we may enter here without an xid, so it is
 			 * essential that CreateCheckPoint waits for virtual transactions
 			 * rather than full transactionids.
+			 *
+			 * Encryption alone should not be the reason for FPI.
 			 */
-			Assert((MyProc->delayChkptFlags & DELAY_CHKPT_START) == 0);
-			MyProc->delayChkptFlags |= DELAY_CHKPT_START;
-			delayChkptFlags = true;
-			lsn = XLogSaveBufferForHint(buffer, buffer_std);
+			if (need_fpi)
+			{
+				Assert((MyProc->delayChkptFlags & DELAY_CHKPT_START) == 0);
+				MyProc->delayChkptFlags |= DELAY_CHKPT_START;
+				delayChkptFlags = true;
+				lsn = XLogSaveBufferForHint(buffer, buffer_std);
+			}
+
+			/*
+			 * Callers rely on us to generate LSN for the sake of encryption
+			 * IV.
+			 */
+			if (XLogRecPtrIsInvalid(lsn) && data_encrypted)
+				lsn = get_lsn_for_encryption();
 		}
 
 		buf_state = LockBufHdr(bufHdr);

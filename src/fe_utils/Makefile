@@ -5,6 +5,7 @@
 # This makefile generates a static library, libpgfeutils.a,
 # for use by client applications
 #
+# Portions Copyright (c) 2019-2021, CYBERTEC PostgreSQL International GmbH
 # Portions Copyright (c) 1996-2022, PostgreSQL Global Development Group
 # Portions Copyright (c) 1994, Regents of the University of California
 #
@@ -23,6 +24,7 @@ OBJS = \
 	archive.o \
 	cancel.o \
 	conditional.o \
+	encryption.o \
 	connect_utils.o \
 	mbprint.o \
 	option_utils.o \

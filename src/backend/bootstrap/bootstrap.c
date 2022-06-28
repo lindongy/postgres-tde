@@ -4,6 +4,7 @@
  *	  routines to support running postgres in 'bootstrap' mode
  *	bootstrap mode is used to create the initial template database
  *
+ * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
  * Portions Copyright (c) 1996-2022, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -36,6 +37,7 @@
 #include "storage/bufmgr.h"
 #include "storage/bufpage.h"
 #include "storage/condition_variable.h"
+#include "storage/encryption.h"
 #include "storage/ipc.h"
 #include "storage/proc.h"
 #include "tcop/tcopprot.h"
@@ -49,6 +51,7 @@ uint32		bootstrap_data_checksum_version = 0;	/* No checksum */
 
 
 static void CheckerModeMain(void);
+static int bootstrap_getc(void);
 static void bootstrap_signals(void);
 static Form_pg_attribute AllocateAttribute(void);
 static void populate_typ_list(void);
@@ -221,7 +224,7 @@ BootstrapModeMain(int argc, char *argv[], bool check_only)
 	argv++;
 	argc--;
 
-	while ((flag = getopt(argc, argv, "B:c:d:D:Fkr:X:-:")) != -1)
+	while ((flag = getopt(argc, argv, "B:c:d:D:FkKr:X:-:")) != -1)
 	{
 		switch (flag)
 		{
@@ -247,6 +250,22 @@ BootstrapModeMain(int argc, char *argv[], bool check_only)
 			case 'F':
 				SetConfigOption("fsync", "false", PGC_POSTMASTER, PGC_S_ARGV);
 				break;
+#ifdef	USE_ENCRYPTION
+			case 'K':
+				/*
+				 * When auxiliary process (bootstrap) starts, the control file
+				 * does not exist yet, so command line option needs to be used
+				 * to indicate that the encryption is enabled.
+				 *
+				 * Postmaster should not pass this option. Instead, it just
+				 * sets data_encrypted according to the control file and child
+				 * processes inherit that.
+				 */
+				Assert(!IsUnderPostmaster);
+				data_encrypted = true;
+
+				break;
+#endif							/* USE_ENCRYPTION */
 			case 'k':
 				bootstrap_data_checksum_version = PG_DATA_CHECKSUM_VERSION;
 				break;
@@ -343,6 +362,34 @@ BootstrapModeMain(int argc, char *argv[], bool check_only)
 	 */
 	InitProcess();
 
+	/*
+	 * If data_encryption is set because of command line option, do the setup
+	 * now.
+	 *
+	 * This should only be useful for the bootstrap process. Anyone else
+	 * detects the encryption via ReadControlFile().
+	 */
+	if (data_encrypted && !check_only)
+	{
+		int		key_length;
+
+		Assert(!IsUnderPostmaster);
+
+		/* Read the key from stdin. */
+		key_length = read_encryption_key(bootstrap_getc, NULL);
+
+		/*
+		 * User of the auxiliary process (typically initdb) should have
+		 * checked that the command returns a key of valid length. Thus we
+		 * don't need an extra command line option for it.
+		 */
+		Assert(key_length == 16 || key_length == 24 || key_length == 32);
+
+		DATA_CIPHER_SET(data_cipher, PG_CIPHER_AES_CTR_CBC, key_length);
+
+		setup_encryption();
+	}
+
 	BaseInit();
 
 	bootstrap_signals();
@@ -387,6 +434,16 @@ BootstrapModeMain(int argc, char *argv[], bool check_only)
  *						misc functions
  * ----------------------------------------------------------------
  */
+
+/*
+ * Read a single character from stdin. This is a callback for
+ * read_encryption_key().
+ */
+static int
+bootstrap_getc(void)
+{
+	return getc(stdin);
+}
 
 /*
  * Set up signal handling for a bootstrap process

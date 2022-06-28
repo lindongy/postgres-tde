@@ -22,6 +22,7 @@
 #include "catalog/pg_type.h"
 #include "commands/vacuum.h"
 #include "miscadmin.h"
+#include "storage/encryption.h"
 #include "storage/indexfsm.h"
 #include "storage/lmgr.h"
 #include "storage/predicate.h"
@@ -700,6 +701,8 @@ ginUpdateStats(Relation index, const GinStatsData *stats, bool is_build)
 		recptr = XLogInsert(RM_GIN_ID, XLOG_GIN_UPDATE_META_PAGE);
 		PageSetLSN(metapage, recptr);
 	}
+	else if (data_encrypted)
+		set_page_lsn_for_encryption(metapage);
 
 	UnlockReleaseBuffer(metabuffer);
 

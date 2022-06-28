@@ -4,6 +4,7 @@
  *	  POSTGRES free space map for quickly finding free space in relations
  *
  *
+ * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
  * Portions Copyright (c) 1996-2022, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -27,6 +28,7 @@
 #include "access/xloginsert.h"
 #include "access/xlogutils.h"
 #include "miscadmin.h"
+#include "storage/encryption.h"
 #include "storage/freespace.h"
 #include "storage/fsm_internals.h"
 #include "storage/lmgr.h"
@@ -221,6 +223,7 @@ XLogRecordPageWithFreeSpace(RelFileNode rnode, BlockNumber heapBlk,
 
 	if (fsm_set_avail(page, slot, new_cat))
 		MarkBufferDirtyHint(buf, false);
+
 	UnlockReleaseBuffer(buf);
 }
 
@@ -260,12 +263,16 @@ GetRecordedFreeSpace(Relation rel, BlockNumber heapBlk)
  * to update upper-level pages in the FSM.
  */
 BlockNumber
-FreeSpaceMapPrepareTruncateRel(Relation rel, BlockNumber nblocks)
+FreeSpaceMapPrepareTruncateRel(Relation rel, BlockNumber nblocks,
+							   XLogRecPtr recptr)
 {
 	BlockNumber new_nfsmblocks;
 	FSMAddress	first_removed_address;
 	uint16		first_removed_slot;
 	Buffer		buf;
+
+	Assert(InRecovery || XLogRecPtrIsInvalid(recptr));
+
 
 	/*
 	 * If no FSM has been created yet for this relation, there's nothing to
@@ -307,6 +314,19 @@ FreeSpaceMapPrepareTruncateRel(Relation rel, BlockNumber nblocks)
 		MarkBufferDirty(buf);
 		if (!InRecovery && RelationNeedsWAL(rel) && XLogHintBitIsNeeded())
 			log_newpage_buffer(buf, false);
+		else if (data_encrypted)
+		{
+			if (XLogRecPtrIsInvalid(recptr))
+				set_page_lsn_for_encryption(BufferGetPage(buf));
+			else
+			{
+				/*
+				 * Once the page is dirty, the LSN must be set even during
+				 * recovery because it's used as the encryption IV.
+				 */
+				PageSetLSN(BufferGetPage(buf), recptr);
+			}
+		}
 
 		END_CRIT_SECTION();
 
@@ -349,9 +369,13 @@ FreeSpaceMapVacuum(Relation rel)
  * have new free-space information, so update only the upper-level slots
  * covering that block range.  end == InvalidBlockNumber is equivalent to
  * "all the rest of the relation".
+ *
+ * Valid recptr is passed when the function is called during WAL replay, see
+ * visibilitymap_set() for explanation.
  */
 void
-FreeSpaceMapVacuumRange(Relation rel, BlockNumber start, BlockNumber end)
+FreeSpaceMapVacuumRange(Relation rel, BlockNumber start, BlockNumber end,
+						XLogRecPtr recptr)
 {
 	bool		dummy;
 
@@ -649,6 +673,12 @@ fsm_extend(Relation rel, BlockNumber fsm_nblocks)
 	/* Extend as needed. */
 	while (fsm_nblocks_now < fsm_nblocks)
 	{
+		/*
+		 * Encryption: invalid LSN means that the page should not be
+		 * encrypted. This is o.k. as the page is still empty.
+		 */
+		Assert(XLogRecPtrIsInvalid(PageGetLSN(pg.data)));
+
 		PageSetChecksumInplace((Page) pg.data, fsm_nblocks_now);
 
 		smgrextend(reln, FSM_FORKNUM, fsm_nblocks_now,

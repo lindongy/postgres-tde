@@ -43,6 +43,7 @@
 #include "miscadmin.h"
 #include "optimizer/optimizer.h"
 #include "storage/bufmgr.h"
+#include "storage/encryption.h"
 #include "storage/smgr.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
@@ -338,6 +339,8 @@ gistbuild(Relation heap, Relation index, IndexInfo *indexInfo)
 							  0, RelationGetNumberOfBlocks(index),
 							  true);
 		}
+		else if (data_encrypted)
+			newpage_range_set_lsn(index, 0, RelationGetNumberOfBlocks(index));
 	}
 
 	/* okay, all heap tuples are indexed */
@@ -405,6 +408,7 @@ gist_indexsortbuild(GISTBuildState *state)
 	IndexTuple	itup;
 	GistSortedBuildLevelState *levelstate;
 	Page		page;
+	char		*buf;
 
 	state->pages_allocated = 0;
 	state->pages_written = 0;
@@ -413,6 +417,8 @@ gist_indexsortbuild(GISTBuildState *state)
 	/*
 	 * Write an empty page as a placeholder for the root page. It will be
 	 * replaced with the real root page at the end.
+	 *
+	 * Empty page has no valid LSN, therefore encryption is not applicable.
 	 */
 	page = palloc0(BLCKSZ);
 	smgrextend(RelationGetSmgr(state->indexrel), MAIN_FORKNUM, GIST_ROOT_BLKNO,
@@ -457,10 +463,28 @@ gist_indexsortbuild(GISTBuildState *state)
 	gist_indexsortbuild_flush_ready_pages(state);
 
 	/* Write out the root */
-	PageSetLSN(levelstate->pages[0], GistBuildLSN);
-	PageSetChecksumInplace(levelstate->pages[0], GIST_ROOT_BLKNO);
+
+	buf = (char *) levelstate->pages[0];
+	PageSetLSN(buf, GistBuildLSN);
+
+	if (data_encrypted)
+	{
+		encrypt_page(buf,
+					 encrypt_buf.data,
+					 GistBuildLSN,
+					 GIST_ROOT_BLKNO);
+
+		buf = encrypt_buf.data;
+	}
+
+	PageSetChecksumInplace(buf, GIST_ROOT_BLKNO);
 	smgrwrite(RelationGetSmgr(state->indexrel), MAIN_FORKNUM, GIST_ROOT_BLKNO,
-			  levelstate->pages[0], true);
+			  buf, true);
+
+	/*
+	 * Encryption: no need to enforce the LSN, the page isn't going to be
+	 * flushed to disk now.
+	 */
 	if (RelationNeedsWAL(state->indexrel))
 		log_newpage(&state->indexrel->rd_node, MAIN_FORKNUM, GIST_ROOT_BLKNO,
 					levelstate->pages[0], true);
@@ -642,6 +666,8 @@ gist_indexsortbuild_levelstate_flush(GISTBuildState *state,
 static void
 gist_indexsortbuild_flush_ready_pages(GISTBuildState *state)
 {
+	char	*buf;
+
 	if (state->ready_num_pages == 0)
 		return;
 
@@ -654,14 +680,30 @@ gist_indexsortbuild_flush_ready_pages(GISTBuildState *state)
 		if (blkno != state->pages_written)
 			elog(ERROR, "unexpected block number to flush GiST sorting build");
 
-		PageSetLSN(page, GistBuildLSN);
-		PageSetChecksumInplace(page, blkno);
-		smgrextend(RelationGetSmgr(state->indexrel), MAIN_FORKNUM, blkno, page,
+		buf = (char *) page;
+		PageSetLSN(buf, GistBuildLSN);
+
+		if (data_encrypted)
+		{
+			encrypt_page(buf,
+						 encrypt_buf.data,
+						 GistBuildLSN,
+						 blkno);
+
+			buf = encrypt_buf.data;
+		}
+
+		PageSetChecksumInplace(buf, blkno);
+		smgrextend(RelationGetSmgr(state->indexrel), MAIN_FORKNUM, blkno, buf,
 				   true);
 
 		state->pages_written++;
 	}
 
+	/*
+	 * Encryption: no need to enforce the LSN, the pages aren't going to be
+	 * flushed to disk now.
+	 */
 	if (RelationNeedsWAL(state->indexrel))
 		log_newpages(&state->indexrel->rd_node, MAIN_FORKNUM, state->ready_num_pages,
 					 state->ready_blknos, state->ready_pages, true);

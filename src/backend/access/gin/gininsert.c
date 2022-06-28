@@ -21,6 +21,7 @@
 #include "catalog/index.h"
 #include "miscadmin.h"
 #include "storage/bufmgr.h"
+#include "storage/encryption.h"
 #include "storage/indexfsm.h"
 #include "storage/predicate.h"
 #include "storage/smgr.h"
@@ -418,6 +419,8 @@ ginbuild(Relation heap, Relation index, IndexInfo *indexInfo)
 						  0, RelationGetNumberOfBlocks(index),
 						  true);
 	}
+	else if (data_encrypted)
+		newpage_range_set_lsn(index, 0, RelationGetNumberOfBlocks(index));
 
 	/*
 	 * Return statistics

@@ -3,6 +3,7 @@
  * walreceiver.h
  *	  Exports from replication/walreceiverfuncs.c.
  *
+ * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
  * Portions Copyright (c) 2010-2022, PostgreSQL Global Development Group
  *
  * src/include/replication/walreceiver.h
@@ -174,6 +175,7 @@ typedef struct
 		struct
 		{
 			TimeLineID	startpointTLI;	/* Starting timeline */
+			bool	decrypt;			/* Decrypt the stream? */
 		}			physical;
 		struct
 		{

@@ -59,6 +59,8 @@ extern void log_newpages(RelFileNode *rnode, ForkNumber forkNum, int num_pages,
 extern XLogRecPtr log_newpage_buffer(Buffer buffer, bool page_std);
 extern void log_newpage_range(Relation rel, ForkNumber forkNum,
 							  BlockNumber startblk, BlockNumber endblk, bool page_std);
+extern void newpage_range_set_lsn(Relation rel, BlockNumber startblk,
+								  BlockNumber endblk);
 extern XLogRecPtr XLogSaveBufferForHint(Buffer buffer, bool buffer_std);
 
 extern void InitXLogInsert(void);

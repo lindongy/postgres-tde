@@ -4,6 +4,7 @@
  *	  Checks, enables or disables page level checksums for an offline
  *	  cluster
  *
+ * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
  * Copyright (c) 2010-2022, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
@@ -121,6 +122,9 @@ static const struct exclude_list_item skip[] = {
 #ifdef EXEC_BACKEND
 	{"config_exec_params", true},
 #endif
+#ifdef USE_ENCRYPTION
+	{"kdf_params", false},
+#endif
 	{NULL, false}
 };
 
@@ -227,8 +231,12 @@ scan_file(const char *fn, int segmentno)
 		 */
 		current_size += r;
 
-		/* New pages have no checksum yet */
-		if (PageIsNew(header))
+		/*
+		 * New pages have no checksum yet, unless it's encrypted - see
+		 * PageSetChecksumCopy() for explanation.
+		 */
+		if (DATA_CIPHER_GET_KIND(ControlFile->data_cipher) == PG_CIPHER_NONE &&
+			PageIsNew(header))
 			continue;
 
 		csum = pg_checksum_page(buf.data, blockno + segmentno * RELSEG_SIZE);

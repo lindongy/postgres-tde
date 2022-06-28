@@ -3,6 +3,7 @@
  * visibilitymap.c
  *	  bitmap for tracking visibility of heap tuples
  *
+ * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
  * Portions Copyright (c) 1996-2022, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -93,6 +94,7 @@
 #include "miscadmin.h"
 #include "port/pg_bitutils.h"
 #include "storage/bufmgr.h"
+#include "storage/encryption.h"
 #include "storage/lmgr.h"
 #include "storage/smgr.h"
 #include "utils/inval.h"
@@ -289,8 +291,11 @@ visibilitymap_set(Relation rel, BlockNumber heapBlk, Buffer heapBuf,
 				/*
 				 * If data checksums are enabled (or wal_log_hints=on), we
 				 * need to protect the heap page from being torn.
+				 *
+				 * For the encryption case, new recptr is needed so that
+				 * different IV is used for the next encryption.
 				 */
-				if (XLogHintBitIsNeeded())
+				if (XLogHintBitIsNeeded() || data_encrypted)
 				{
 					Page		heapPage = BufferGetPage(heapBuf);
 
@@ -298,6 +303,18 @@ visibilitymap_set(Relation rel, BlockNumber heapBlk, Buffer heapBuf,
 					Assert(PageIsAllVisible(heapPage));
 					PageSetLSN(heapPage, recptr);
 				}
+			}
+			PageSetLSN(page, recptr);
+		}
+		else if (data_encrypted)
+		{
+			if (XLogRecPtrIsInvalid(recptr))
+			{
+				Page		heapPage = BufferGetPage(heapBuf);
+
+				recptr = get_lsn_for_encryption();
+
+				PageSetLSN(heapPage, recptr);
 			}
 			PageSetLSN(page, recptr);
 		}
@@ -441,9 +458,13 @@ visibilitymap_count(Relation rel, BlockNumber *all_visible, BlockNumber *all_fro
  * If it's InvalidBlockNumber, there is nothing to truncate;
  * otherwise the caller is responsible for calling smgrtruncate()
  * to truncate the visibility map pages.
+ *
+ * Valid recptr is passed iff called during WAL replay, see
+ * visibilitymap_set() for details.
  */
 BlockNumber
-visibilitymap_prepare_truncate(Relation rel, BlockNumber nheapblocks)
+visibilitymap_prepare_truncate(Relation rel, BlockNumber nheapblocks,
+							   XLogRecPtr recptr)
 {
 	BlockNumber newnblocks;
 
@@ -455,6 +476,9 @@ visibilitymap_prepare_truncate(Relation rel, BlockNumber nheapblocks)
 #ifdef TRACE_VISIBILITYMAP
 	elog(DEBUG1, "vm_truncate %s %d", RelationGetRelationName(rel), nheapblocks);
 #endif
+
+	Assert(InRecovery || XLogRecPtrIsInvalid(recptr));
+
 
 	/*
 	 * If no visibility map has been created yet for this relation, there's
@@ -519,6 +543,19 @@ visibilitymap_prepare_truncate(Relation rel, BlockNumber nheapblocks)
 		MarkBufferDirty(mapBuffer);
 		if (!InRecovery && RelationNeedsWAL(rel) && XLogHintBitIsNeeded())
 			log_newpage_buffer(mapBuffer, false);
+		else if (data_encrypted)
+		{
+			if (XLogRecPtrIsInvalid(recptr))
+				set_page_lsn_for_encryption(BufferGetPage(mapBuffer));
+			else
+			{
+				/*
+				 * The LSN must be set even during recovery because it's
+				 * used as the encryption IV.
+				 */
+				PageSetLSN(BufferGetPage(mapBuffer), recptr);
+			}
+		}
 
 		END_CRIT_SECTION();
 
@@ -655,9 +692,15 @@ vm_extend(Relation rel, BlockNumber vm_nblocks)
 	/* Now extend the file */
 	while (vm_nblocks_now < vm_nblocks)
 	{
-		PageSetChecksumInplace((Page) pg.data, vm_nblocks_now);
+		/*
+		 * Encryption: invalid LSN means that the page should not be
+		 * encrypted. This is o.k. as the page is still empty.
+		 */
+		Assert(XLogRecPtrIsInvalid(PageGetLSN(pg.data)));
 
-		smgrextend(reln, VISIBILITYMAP_FORKNUM, vm_nblocks_now, pg.data, false);
+		PageSetChecksumInplace((Page) pg.data, vm_nblocks_now);
+		smgrextend(reln, VISIBILITYMAP_FORKNUM, vm_nblocks_now, pg.data,
+				   false);
 		vm_nblocks_now++;
 	}
 

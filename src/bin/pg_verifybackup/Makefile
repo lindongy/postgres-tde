@@ -16,6 +16,8 @@ subdir = src/bin/pg_verifybackup
 top_builddir = ../../..
 include $(top_builddir)/src/Makefile.global
 
+override CPPFLAGS := -DFRONTEND $(CPPFLAGS)
+
 # We need libpq only because fe_utils does.
 LDFLAGS_INTERNAL += -L$(top_builddir)/src/fe_utils -lpgfeutils $(libpq_pgport)
 

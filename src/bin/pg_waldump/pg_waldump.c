@@ -2,6 +2,7 @@
  *
  * pg_waldump.c - decode and display WAL
  *
+ * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
  * Copyright (c) 2013-2022, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
@@ -24,8 +25,10 @@
 #include "access/xlogstats.h"
 #include "common/fe_memutils.h"
 #include "common/logging.h"
+#include "fe_utils/encryption.h"
 #include "getopt_long.h"
 #include "rmgrdesc.h"
+#include "storage/encryption.h"
 
 /*
  * NOTE: For any code change or issue fix here, it is highly recommended to
@@ -205,29 +208,60 @@ search_directory(const char *directory, const char *fname)
 		PGAlignedXLogBlock buf;
 		int			r;
 
-		r = read(fd, buf.data, XLOG_BLCKSZ);
-		if (r == XLOG_BLCKSZ)
+		if (data_encrypted)
 		{
-			XLogLongPageHeader longhdr = (XLogLongPageHeader) buf.data;
+			/*
+			 * Segment size affects calculation of segNo and thus also the
+			 * encryption tweak, so we cannot get the size from the header
+			 * until the page is decrypted. Here we need to take more
+			 * expensive approach and really check the file size.
+			 */
+			WalSegSz = (int) lseek(fd, 0, SEEK_END);
+			if (WalSegSz <= 0)
+				pg_fatal("Could not determine size of WAL segment \"%s\"", fname);
 
-			WalSegSz = longhdr->xlp_seg_size;
-
+			/*
+			 * Verification of the file size is the only useful thing we can
+			 * do. If anything else is wrong, the XLOG reader should find out
+			 * after decryption.
+			 */
 			if (!IsValidWalSegSize(WalSegSz))
-				pg_fatal(ngettext("WAL segment size must be a power of two between 1 MB and 1 GB, but the WAL file \"%s\" header specifies %d byte",
-								  "WAL segment size must be a power of two between 1 MB and 1 GB, but the WAL file \"%s\" header specifies %d bytes",
-								  WalSegSz),
-						 fname, WalSegSz);
+				pg_fatal(ngettext("WAL segment size must be a power of two between 1 MB and 1 GB, but size of the WAL file \"%s\" is %d byte",
+									 "WAL segment size must be a power of two between 1 MB and 1 GB, but size of the WAL file \"%s\" is %d bytes",
+									 WalSegSz),
+							fname, WalSegSz);
 		}
-		else if (r < 0)
-			pg_fatal("could not read file \"%s\": %m",
-					 fname);
 		else
-			pg_fatal("could not read file \"%s\": read %d of %d",
-					 fname, r, XLOG_BLCKSZ);
+		{
+			r = read(fd, buf.data, XLOG_BLCKSZ);
+			if (r == XLOG_BLCKSZ)
+			{
+				XLogLongPageHeader longhdr;
+
+				longhdr = (XLogLongPageHeader) buf.data;
+
+				if (longhdr->std.xlp_magic != XLOG_PAGE_MAGIC)
+					pg_fatal(gettext("WAL segment \"%s\" has an incorrect magic number. If it's encrypted, use the -K option to pass encryption credentials"),
+								fname);
+
+				WalSegSz = longhdr->xlp_seg_size;
+
+				if (!IsValidWalSegSize(WalSegSz))
+					pg_fatal(ngettext("WAL segment size must be a power of two between 1 MB and 1 GB, but the WAL file \"%s\" header specifies %d byte",
+										 "WAL segment size must be a power of two between 1 MB and 1 GB, but the WAL file \"%s\" header specifies %d bytes",
+										 WalSegSz),
+								fname, WalSegSz);
+			}
+			else if (r < 0)
+				pg_fatal("could not read file \"%s\": %m",
+							fname);
+			else
+				pg_fatal("could not read file \"%s\": read %d of %zu",
+							fname, r, (Size) XLOG_BLCKSZ);
+		}
 		close(fd);
 		return true;
 	}
-
 	return false;
 }
 
@@ -364,7 +398,7 @@ WALDumpReadPage(XLogReaderState *state, XLogRecPtr targetPagePtr, int reqLen,
 	}
 
 	if (!WALRead(state, readBuff, targetPagePtr, count, private->timeline,
-				 &errinfo))
+				 &errinfo, data_encrypted))
 	{
 		WALOpenSegment *seg = &errinfo.wre_seg;
 		char		fname[MAXPGPATH];
@@ -666,6 +700,10 @@ usage(void)
 	printf(_("  -f, --follow           keep retrying after reaching end of WAL\n"));
 	printf(_("  -F, --fork=FORK        only show records that modify blocks in fork FORK;\n"
 			 "                         valid names are main, fsm, vm, init\n"));
+#ifdef	USE_ENCRYPTION
+	printf(_("  -K, --encryption-key-command=COMMAND\n"
+			 "                         command that returns encryption key\n"));
+#endif							/* USE_ENCRYPTION */
 	printf(_("  -n, --limit=N          number of records to display\n"));
 	printf(_("  -p, --path=PATH        directory in which to find log segment files or a\n"
 			 "                         directory with a ./pg_wal that contains such files\n"
@@ -709,6 +747,7 @@ main(int argc, char **argv)
 		{"fork", required_argument, NULL, 'F'},
 		{"fullpage", no_argument, NULL, 'w'},
 		{"help", no_argument, NULL, '?'},
+		{"encryption-key-command", required_argument, NULL, 'K'},
 		{"limit", required_argument, NULL, 'n'},
 		{"path", required_argument, NULL, 'p'},
 		{"quiet", no_argument, NULL, 'q'},
@@ -782,7 +821,7 @@ main(int argc, char **argv)
 		goto bad_argument;
 	}
 
-	while ((option = getopt_long(argc, argv, "bB:e:fF:n:p:qr:R:s:t:wx:z",
+	while ((option = getopt_long(argc, argv, "bB:e:fF:K:n:p:qr:R:s:t:wx:z",
 								 long_options, &optindex)) != -1)
 	{
 		switch (option)
@@ -821,6 +860,12 @@ main(int argc, char **argv)
 				}
 				config.filter_by_extended = true;
 				break;
+#ifdef	USE_ENCRYPTION
+			case 'K':
+				encryption_key_command = pg_strdup(optarg);
+				data_encrypted = true;
+				break;
+#endif							/* USE_ENCRYPTION */
 			case 'n':
 				if (sscanf(optarg, "%d", &config.stop_after_records) != 1)
 				{
@@ -1062,6 +1107,27 @@ main(int argc, char **argv)
 	}
 
 	/* done with argument parsing, do the actual work */
+
+	if (data_encrypted)
+#ifdef USE_ENCRYPTION
+	{
+		/*
+		 * There's no easy way to get the key length, so don't let us issue
+		 * error messages about incorrect key length. A key of incorrect
+		 * length will simply cause a failure to decrypt the data.
+		 */
+		int	key_len = 0;
+
+		run_encryption_key_command(NULL, &key_len);
+		DATA_CIPHER_SET(data_cipher, PG_CIPHER_AES_CTR_CBC, key_len);
+		setup_encryption();
+	}
+#else
+	{
+		/* User should not be able to enable encryption. */
+		Assert(false);
+	}
+#endif	/* USE_ENCRYPTION */
 
 	/* we have everything we need, start reading */
 	xlogreader_state =

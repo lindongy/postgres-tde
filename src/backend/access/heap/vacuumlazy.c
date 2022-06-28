@@ -57,6 +57,7 @@
 #include "portability/instr_time.h"
 #include "postmaster/autovacuum.h"
 #include "storage/bufmgr.h"
+#include "storage/encryption.h"
 #include "storage/freespace.h"
 #include "storage/lmgr.h"
 #include "tcop/tcopprot.h"
@@ -957,7 +958,7 @@ lazy_scan_heap(LVRelState *vacrel)
 			 * upper-level FSM pages.  Note we have not yet processed blkno.
 			 */
 			FreeSpaceMapVacuumRange(vacrel->rel, next_fsm_block_to_vacuum,
-									blkno);
+									blkno, InvalidXLogRecPtr);
 			next_fsm_block_to_vacuum = blkno;
 
 			/* Report that we are once again scanning the heap */
@@ -1080,7 +1081,7 @@ lazy_scan_heap(LVRelState *vacrel)
 				if (blkno - next_fsm_block_to_vacuum >= VACUUM_FSM_EVERY_PAGES)
 				{
 					FreeSpaceMapVacuumRange(vacrel->rel, next_fsm_block_to_vacuum,
-											blkno);
+											blkno, InvalidXLogRecPtr);
 					next_fsm_block_to_vacuum = blkno;
 				}
 
@@ -1268,7 +1269,8 @@ lazy_scan_heap(LVRelState *vacrel)
 	 * not there were indexes, and whether or not we bypassed index vacuuming.
 	 */
 	if (blkno > next_fsm_block_to_vacuum)
-		FreeSpaceMapVacuumRange(vacrel->rel, next_fsm_block_to_vacuum, blkno);
+		FreeSpaceMapVacuumRange(vacrel->rel, next_fsm_block_to_vacuum, blkno,
+								InvalidXLogRecPtr);
 
 	/* report all blocks vacuumed */
 	pgstat_progress_update_param(PROGRESS_VACUUM_HEAP_BLKS_VACUUMED, blkno);
@@ -1494,12 +1496,15 @@ lazy_scan_new_or_empty(LVRelState *vacrel, Buffer buf, BlockNumber blkno,
 			 * To prevent that, check whether the page has been previously
 			 * WAL-logged, and if not, do that now.
 			 */
-			if (RelationNeedsWAL(vacrel->rel) &&
-				PageGetLSN(page) == InvalidXLogRecPtr)
-				log_newpage_buffer(buf, true);
+				if (RelationNeedsWAL(vacrel->rel) &&
+					PageGetLSN(page) == InvalidXLogRecPtr)
+					log_newpage_buffer(buf, true);
+				else if (data_encrypted &&
+						 PageGetLSN(page) == InvalidXLogRecPtr)
+					set_page_lsn_for_encryption(page);
 
-			PageSetAllVisible(page);
-			visibilitymap_set(vacrel->rel, blkno, buf, InvalidXLogRecPtr,
+				PageSetAllVisible(page);
+				visibilitymap_set(vacrel->rel, blkno, buf, InvalidXLogRecPtr,
 							  vmbuffer, InvalidTransactionId,
 							  VISIBILITYMAP_ALL_VISIBLE | VISIBILITYMAP_ALL_FROZEN);
 			END_CRIT_SECTION();
@@ -1845,6 +1850,8 @@ retry:
 									 frozen, nfrozen);
 			PageSetLSN(page, recptr);
 		}
+		else if (data_encrypted)
+			set_page_lsn_for_encryption(page);
 
 		END_CRIT_SECTION();
 	}
@@ -2546,6 +2553,8 @@ lazy_vacuum_heap_page(LVRelState *vacrel, BlockNumber blkno, Buffer buffer,
 
 		PageSetLSN(page, recptr);
 	}
+	else if (data_encrypted)
+		set_page_lsn_for_encryption(page);
 
 	/*
 	 * End critical section, so we safely can do visibility tests (which
