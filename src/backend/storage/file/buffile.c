@@ -238,7 +238,7 @@ static void extendBufFile(BufFile *file);
 static void BufFileLoadBuffer(BufFile *file);
 static void BufFileDumpBuffer(BufFile *file);
 static void BufFileDumpBufferEncrypted(BufFile *file, bool last_in_segment);
-static void BufFileFlush(BufFile *file);
+static void BufFileFlush(BufFileCommon *file, bool is_transient);
 static File MakeNewFileSetSegment(BufFile *file, int segment);
 
 static void BufFileTweak(char *tweak, BufFileCommon *file);
@@ -578,7 +578,7 @@ BufFileExportFileSet(BufFile *file)
 	/* It's probably a bug if someone calls this twice. */
 	Assert(!file->common.readOnly);
 
-	BufFileFlush(file);
+	BufFileFlush(&file->common, false);
 	file->common.readOnly = true;
 }
 
@@ -593,7 +593,7 @@ BufFileClose(BufFile *file)
 	int			i;
 
 	/* flush any unwritten data */
-	BufFileFlush(file);
+	BufFileFlush(&file->common, false);
 	/* close and delete the underlying file(s) */
 	for (i = 0; i < file->numFiles; i++)
 		FileClose(file->files[i].vfd);
@@ -918,17 +918,22 @@ BufFileWrite(BufFile *file, void *ptr, size_t size)
  * Like fflush(), except that I/O errors are reported with ereport().
  */
 static void
-BufFileFlush(BufFile *file)
+BufFileFlush(BufFileCommon *file, bool is_transient)
 {
-	if (file->common.dirty)
+	if (!file->dirty)
+		return;
+
+	if (!is_transient)
 	{
 		if (!data_encrypted)
-			BufFileDumpBuffer(file);
+			BufFileDumpBuffer((BufFile *) file);
 		else
-			BufFileDumpBufferEncrypted(file, false);
+			BufFileDumpBufferEncrypted((BufFile *) file, false);
 	}
+	else
+		BufFileDumpBufferTransient((TransientBufFile *) file);
 
-	Assert(!file->common.dirty);
+	Assert(!file->dirty);
 }
 
 /*
@@ -1080,7 +1085,7 @@ BufFileSeek(BufFile *file, int fileno, off_t offset, int whence)
 		return 0;
 	}
 	/* Otherwise, must reposition buffer, so flush any dirty data */
-	BufFileFlush(file);
+	BufFileFlush(&file->common, false);
 
 	/*
 	 * At this point and no sooner, check for seek past last segment. The
@@ -1424,11 +1429,13 @@ BufFileOpenTransient(const char *path, int fileFlags)
 	BufFileCommon *fcommon;
 	File		vfd;
 
-	/* Either read or write mode, but not both. */
-	Assert((fileFlags & O_RDWR) == 0);
-
-	/* Check whether user wants read or write access. */
-	readOnly = (fileFlags & O_WRONLY) == 0;
+	/*
+	 * Check whether user wants read or write access.
+	 *
+	 * The O_RDONLY flag appears to be zero (at least on FreeBSD), so we need
+	 * to use this non-trivial test.
+	 */
+	readOnly = (fileFlags & O_WRONLY) == 0 && (fileFlags & O_RDWR) == 0;
 
 	if (data_encrypted)
 	{
@@ -1659,9 +1666,42 @@ BufFileDumpBufferTransient(TransientBufFile *file)
 	file->common.dirty = false;
 
 	if (!data_encrypted)
+	{
+		/*
+		 * Like in BufFileDumpBuffer(), set curOffset to the original value +
+		 * pos.
+		 */
+		file->common.curOffset -= (file->common.nbytes - file->common.pos);
+		/* No segment crossing here. */
+		Assert(file->common.curOffset >= 0);
+
 		file->common.pos = file->common.nbytes = 0;
+	}
 	else
-		file->common.pos = file->common.nbytes = SizeOfBufFilePageHeader;
+	{
+		/*
+		 * Like in BufFileDumpBufferEncrypted(), adjust curOffset if
+		 * needed.
+		 */
+		if (file->common.pos >= BLCKSZ)
+		{
+			Assert(file->common.pos == BLCKSZ);
+
+			/*
+			 * curOffset points to the beginning of the next buffer, so just reset
+			 * pos and nbytes.
+			 */
+			file->common.pos = file->common.nbytes = SizeOfBufFilePageHeader;
+		}
+		else
+		{
+			/*
+			 * Move curOffset to the beginning of the just-written buffer so it
+			 * stays at BLCKSZ boundary, and preserve pos.
+			 */
+			file->common.curOffset -= BLCKSZ;
+		}
+	}
 }
 
 /*
@@ -1680,6 +1720,81 @@ size_t
 BufFileWriteTransient(TransientBufFile *file, void *ptr, size_t size)
 {
 	return BufFileWriteCommon(&file->common, ptr, size, true);
+}
+
+/*
+ * BufFileSeekTransient
+ *
+ * Like fseek(), but currently we only support whence==SEEK_CUR.
+ *
+ * Result is 0 if OK, EOF if not. Logical position is not moved if an
+ * impossible seek is attempted.
+ */
+int
+BufFileSeekTransient(TransientBufFile *file, off_t offset, int whence)
+{
+	off_t		newOffset;
+	BufFileCommon	*fc = &file->common;
+
+	if (whence != SEEK_CUR)
+		ereport(ERROR, (errmsg("whence can only be SEEK_CUR")));
+
+	if (!data_encrypted)
+	{
+		newOffset = (fc->curOffset + fc->pos) + offset;
+		if (newOffset < 0)
+			return EOF;
+	}
+	else
+	{
+		off_t	posLog, posPhys;
+
+		/* 'offset' is the logical position, so treat it accordingly */
+		posPhys = file->common.curOffset + file->common.pos;
+		posLog = BufFilePhysicalToLogicalPos(posPhys);
+		Assert(posLog >= 0);
+
+		posLog += offset;
+		if (posLog < 0)
+			return EOF;
+
+		newOffset = BufFileLogicalToPhysicalPos(posLog);
+		Assert(newOffset >= 0);
+	}
+
+	if (newOffset >= fc->curOffset &&
+		newOffset <= fc->curOffset + fc->nbytes)
+	{
+		/*
+		 * Seek is to a point within existing buffer; we can just adjust
+		 * pos-within-buffer, without flushing buffer.	Note this is OK
+		 * whether reading or writing, but buffer remains dirty if we were
+		 * writing.
+		 */
+		fc->pos = (int) (newOffset - fc->curOffset);
+		return 0;
+	}
+	/* Otherwise, must reposition buffer, so flush any dirty data */
+	BufFileFlush(&file->common, true);
+
+	if (!data_encrypted)
+	{
+		/*
+		 * Just set the position info, the buffer will be loaded on the next
+		 * read.
+		 */
+		fc->curOffset = newOffset;
+		fc->pos = 0;
+		fc->nbytes = 0;
+	}
+	else
+	{
+		/* See the corresponding comments in BufFileSeek(). */
+		fc->pos = newOffset % BLCKSZ;
+		fc->curOffset = newOffset - file->common.pos;
+		BufFileLoadBufferTransient(file);
+	}
+	return 0;
 }
 
 /*
@@ -1706,7 +1821,7 @@ BufFileReadCommon(BufFileCommon *file, void *ptr, size_t size,
 	if (data_encrypted && BUFFER_IS_EMPTY(file))
 		return nread;
 
-	BufFileFlush((BufFile *) file);
+	BufFileFlush(file, is_transient);
 
 	while (size > 0)
 	{
@@ -2013,12 +2128,11 @@ BufFileAdjustUsefulBytes(BufFileCommon *file, BufFileSegment *segments)
 		 */
 		memset(file->buffer.data + file->nbytes, 0, BLCKSZ - file->nbytes);
 	}
-	else if (!is_transient && IsAllZero(file->buffer.data, BLCKSZ))
+	else if (IsAllZero(file->buffer.data, BLCKSZ))
 	{
 		/*
 		 * Looks like a hole due to lseek() - user should really see zeroes,
-		 * so do not lower file->nbytes. This should not happen to a transient
-		 * file as it does not support lseek().
+		 * so do not lower file->nbytes.
 		 */
 	}
 	else
@@ -2039,45 +2153,43 @@ BufFileAdjustUsefulBytes(BufFileCommon *file, BufFileSegment *segments)
 		/* Adjust the usage information if needed. */
 		if (hdr->nbytes < file->nbytes)
 		{
+			BufFileSegment	*seg;
+			uint64	seg_size;
+
+			/* Check the size of the current physical file. */
 			if (!is_transient)
+				seg = &segments[file->curFile];
+			else
 			{
-				uint64	seg_size;
+				TransientBufFile	*tf = (TransientBufFile *) file;
 
-				/* Check the size of the current physical file. */
-				seg_size = BufFileSegmentSize(&segments[file->curFile]);
+				seg = &tf->file;
+			}
 
-				/* Is the current buffer at the end of the segment file? */
-				if (file->curOffset + BLCKSZ < seg_size)
-				{
-					/*
-					 * Not at the end, so it should be a hole created by
-					 * lseek(). All the data beyond hdr->nbytes should be
-					 * zeroes.
-					 */
-					MemSet(file->buffer.data + hdr->nbytes, 0,
-						   BLCKSZ - hdr->nbytes);
+			seg_size = BufFileSegmentSize(seg);
 
-					/*
-					 * The zeroes should be available to the user, so do not
-					 * lower file->nbytes.
-					 */
-				}
-				else
-				{
-					Assert(file->curOffset + BLCKSZ == seg_size);
+			/* Is the current buffer at the end of the segment file? */
+			if (file->curOffset + BLCKSZ < seg_size)
+			{
+				/*
+				 * Not at the end, so it should be a hole created by
+				 * lseek(). All the data beyond hdr->nbytes should be zeroes.
+				 */
+				MemSet(file->buffer.data + hdr->nbytes, 0,
+					   BLCKSZ - hdr->nbytes);
 
-					/*
-					 * We're at the end of the segment. Data beyond
-					 * hdr->nbytes should only be padding up to BLCKSZ.
-					 */
-					file->nbytes = hdr->nbytes;
-				}
+				/*
+				 * The zeroes should be available to the user, so do not lower
+				 * file->nbytes.
+				 */
 			}
 			else
 			{
+				Assert(file->curOffset + BLCKSZ == seg_size);
+
 				/*
-				 * There's no lseek for transient files, so there should be no
-				 * holes in it. Thus we should be at the end of the file.
+				 * We're at the end of the segment. Data beyond hdr->nbytes
+				 * should only be padding up to BLCKSZ.
 				 */
 				file->nbytes = hdr->nbytes;
 			}

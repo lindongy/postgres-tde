@@ -185,5 +185,7 @@ extern size_t BufFileReadTransient(TransientBufFile *file, void *ptr,
 					 size_t size);
 extern size_t BufFileWriteTransient(TransientBufFile *file, void *ptr,
 					  size_t size);
+extern int BufFileSeekTransient(TransientBufFile *file, off_t offset,
+								int whence);
 
 #endif							/* BUFFILE_H */

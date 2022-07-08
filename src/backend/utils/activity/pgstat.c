@@ -97,6 +97,7 @@
 #include "lib/dshash.h"
 #include "pgstat.h"
 #include "port/atomics.h"
+#include "storage/buffile.h"
 #include "storage/fd.h"
 #include "storage/ipc.h"
 #include "storage/lwlock.h"
@@ -1236,17 +1237,38 @@ pgstat_assert_is_up(void)
 
 /* helpers for pgstat_write_statsfile() */
 static void
-write_chunk(FILE *fpout, void *ptr, size_t len)
+write_chunk(TransientBufFile *fpout, void *ptr, size_t len, bool *failed)
 {
-	int			rc;
+	if (*failed)
+		return;
 
-	rc = fwrite(ptr, len, 1, fpout);
-
-	/* we'll check for errors with ferror once at the end */
-	(void) rc;
+	/*
+	 * In pgstat.c we don't want ERROR. XXX Should we pass elevel to
+	 * BufFileOpenTransient()?
+	 */
+	PG_TRY();
+	{
+		BufFileWriteTransient(fpout, ptr, len);
+	}
+	PG_CATCH();
+	{
+		/* buffile.c should not need to clean any resources (e.g. locks) */
+		*failed = true;
+	}
+	PG_END_TRY();
 }
 
-#define write_chunk_s(fpout, ptr) write_chunk(fpout, ptr, sizeof(*ptr))
+#define write_chunk_s(fpout, ptr, failed) \
+	write_chunk(fpout, ptr, sizeof(*ptr), failed)
+
+static void
+write_char(TransientBufFile *fpout, char c, bool *failed)
+{
+	char	str[1];
+
+	str[0] = c;
+	write_chunk(fpout, str, 1, failed);
+}
 
 /*
  * This function is called in the last process that is accessing the shared
@@ -1255,12 +1277,14 @@ write_chunk(FILE *fpout, void *ptr, size_t len)
 static void
 pgstat_write_statsfile(void)
 {
-	FILE	   *fpout;
+	TransientBufFile *fpout;
+	File		vfd;
 	int32		format_id;
 	const char *tmpfile = PGSTAT_STAT_PERMANENT_TMPFILE;
 	const char *statfile = PGSTAT_STAT_PERMANENT_FILENAME;
 	dshash_seq_status hstat;
 	PgStatShared_HashEntry *ps;
+	bool	failed = false;
 
 	pgstat_assert_is_up();
 
@@ -1272,7 +1296,7 @@ pgstat_write_statsfile(void)
 	/*
 	 * Open the statistics temp file to write out the current values.
 	 */
-	fpout = AllocateFile(tmpfile, PG_BINARY_W);
+	fpout = BufFileOpenTransient(tmpfile, O_CREAT | O_WRONLY | PG_BINARY);
 	if (fpout == NULL)
 	{
 		ereport(LOG,
@@ -1286,7 +1310,7 @@ pgstat_write_statsfile(void)
 	 * Write the file header --- currently just a format ID.
 	 */
 	format_id = PGSTAT_FILE_FORMAT_ID;
-	write_chunk_s(fpout, &format_id);
+	write_chunk_s(fpout, &format_id, &failed);
 
 	/*
 	 * XXX: The following could now be generalized to just iterate over
@@ -1298,31 +1322,31 @@ pgstat_write_statsfile(void)
 	 * Write archiver stats struct
 	 */
 	pgstat_build_snapshot_fixed(PGSTAT_KIND_ARCHIVER);
-	write_chunk_s(fpout, &pgStatLocal.snapshot.archiver);
+	write_chunk_s(fpout, &pgStatLocal.snapshot.archiver, &failed);
 
 	/*
 	 * Write bgwriter stats struct
 	 */
 	pgstat_build_snapshot_fixed(PGSTAT_KIND_BGWRITER);
-	write_chunk_s(fpout, &pgStatLocal.snapshot.bgwriter);
+	write_chunk_s(fpout, &pgStatLocal.snapshot.bgwriter, &failed);
 
 	/*
 	 * Write checkpointer stats struct
 	 */
 	pgstat_build_snapshot_fixed(PGSTAT_KIND_CHECKPOINTER);
-	write_chunk_s(fpout, &pgStatLocal.snapshot.checkpointer);
+	write_chunk_s(fpout, &pgStatLocal.snapshot.checkpointer, &failed);
 
 	/*
 	 * Write SLRU stats struct
 	 */
 	pgstat_build_snapshot_fixed(PGSTAT_KIND_SLRU);
-	write_chunk_s(fpout, &pgStatLocal.snapshot.slru);
+	write_chunk_s(fpout, &pgStatLocal.snapshot.slru, &failed);
 
 	/*
 	 * Write WAL stats struct
 	 */
 	pgstat_build_snapshot_fixed(PGSTAT_KIND_WAL);
-	write_chunk_s(fpout, &pgStatLocal.snapshot.wal);
+	write_chunk_s(fpout, &pgStatLocal.snapshot.wal, &failed);
 
 	/*
 	 * Walk through the stats entries
@@ -1350,8 +1374,8 @@ pgstat_write_statsfile(void)
 		if (!kind_info->to_serialized_name)
 		{
 			/* normal stats entry, identified by PgStat_HashKey */
-			fputc('S', fpout);
-			write_chunk_s(fpout, &ps->key);
+			write_char(fpout, 'S', &failed);
+			write_chunk_s(fpout, &ps->key, &failed);
 		}
 		else
 		{
@@ -1360,35 +1384,43 @@ pgstat_write_statsfile(void)
 
 			kind_info->to_serialized_name(shstats, &name);
 
-			fputc('N', fpout);
-			write_chunk_s(fpout, &ps->key.kind);
-			write_chunk_s(fpout, &name);
+			write_char(fpout, 'N', &failed);
+			write_chunk_s(fpout, &ps->key.kind, &failed);
+			write_chunk_s(fpout, &name, &failed);
 		}
 
 		/* Write except the header part of the entry */
 		write_chunk(fpout,
 					pgstat_get_entry_data(ps->key.kind, shstats),
-					pgstat_get_entry_len(ps->key.kind));
+					pgstat_get_entry_len(ps->key.kind), &failed);
 	}
 	dshash_seq_term(&hstat);
 
 	/*
 	 * No more output to be done. Close the temp file and replace the old
-	 * pgstat.stat with it.  The ferror() check replaces testing for error
-	 * after each individual fputc or fwrite (in write_chunk()) above.
+	 * pgstat.stat with it.  The error check replaces testing for error after
+	 * each individual write above.
 	 */
-	fputc('E', fpout);
+	write_char(fpout, 'E', &failed);
 
-	if (ferror(fpout))
+	if (failed)
 	{
 		ereport(LOG,
 				(errcode_for_file_access(),
 				 errmsg("could not write temporary statistics file \"%s\": %m",
 						tmpfile)));
-		FreeFile(fpout);
+		BufFileCloseTransient(fpout);
 		unlink(tmpfile);
+		return;
 	}
-	else if (FreeFile(fpout) < 0)
+
+	/*
+	 * XXX This might PANIC, see FileClose(). Don't we need special behaviour
+	 * for statistics?
+	 */
+	vfd = BufFileTransientGetVfd(fpout);
+	BufFileCloseTransient(fpout);
+	if (!FileIsClosed(vfd))
 	{
 		ereport(LOG,
 				(errcode_for_file_access(),
@@ -1408,9 +1440,25 @@ pgstat_write_statsfile(void)
 
 /* helpers for pgstat_read_statsfile() */
 static bool
-read_chunk(FILE *fpin, void *ptr, size_t len)
+read_chunk(TransientBufFile *fpin, void *ptr, size_t len)
 {
-	return fread(ptr, 1, len, fpin) == len;
+	bool	result = true;
+	/*
+	 * In pgstat.c we don't want ERROR. XXX Should we pass elevel to
+	 * BufFileOpenTransient()?
+	 */
+	PG_TRY();
+	{
+		result = (BufFileReadTransient(fpin, ptr, len) == len);
+	}
+	PG_CATCH();
+	{
+		/* buffile.c should not need to clean any resources (e.g. locks) */
+		result = false;
+	}
+	PG_END_TRY();
+
+	return result;
 }
 
 #define read_chunk_s(fpin, ptr) read_chunk(fpin, ptr, sizeof(*ptr))
@@ -1424,7 +1472,7 @@ read_chunk(FILE *fpin, void *ptr, size_t len)
 static void
 pgstat_read_statsfile(void)
 {
-	FILE	   *fpin;
+	TransientBufFile	*fpin;
 	int32		format_id;
 	bool		found;
 	const char *statfile = PGSTAT_STAT_PERMANENT_FILENAME;
@@ -1444,7 +1492,7 @@ pgstat_read_statsfile(void)
 	 * has not yet written the stats file for the first time.  Any other
 	 * failure condition is suspicious.
 	 */
-	if ((fpin = AllocateFile(statfile, PG_BINARY_R)) == NULL)
+	if ((fpin = BufFileOpenTransient(statfile, O_RDONLY | PG_BINARY)) == NULL)
 	{
 		if (errno != ENOENT)
 			ereport(LOG,
@@ -1504,7 +1552,9 @@ pgstat_read_statsfile(void)
 	 */
 	for (;;)
 	{
-		int			t = fgetc(fpin);
+		char			t;
+
+		read_chunk(fpin, &t, 1);
 
 		switch (t)
 		{
@@ -1548,7 +1598,7 @@ pgstat_read_statsfile(void)
 						if (!kind_info->from_serialized_name(&name, &key))
 						{
 							/* skip over data for entry we don't care about */
-							if (fseek(fpin, pgstat_get_entry_len(kind), SEEK_CUR) != 0)
+							if (BufFileSeekTransient(fpin, pgstat_get_entry_len(kind), SEEK_CUR) != 0)
 								goto error;
 
 							continue;
@@ -1585,8 +1635,30 @@ pgstat_read_statsfile(void)
 				}
 			case 'E':
 				/* check that 'E' actually signals end of file */
-				if (fgetc(fpin) != EOF)
-					goto error;
+				{
+					bool	is_eof = true;
+
+					PG_TRY();
+					{
+						is_eof = (BufFileReadTransient(fpin, &t, 1) == 0);
+					}
+					PG_CATCH();
+					{
+						/*
+						 * If we caught ERROR, we can't tell whether the file
+						 * ends here. Just set is_eof to false so that error
+						 * is reported below.
+						 *
+						 * buffile.c should not need to clean any resources
+						 * (e.g. locks)
+						 */
+						is_eof = false;
+					}
+					PG_END_TRY();
+
+					if (!is_eof)
+						goto error;
+				}
 
 				goto done;
 
@@ -1596,7 +1668,7 @@ pgstat_read_statsfile(void)
 	}
 
 done:
-	FreeFile(fpin);
+	BufFileCloseTransient(fpin);
 
 	elog(DEBUG2, "removing permanent stats file \"%s\"", statfile);
 	unlink(statfile);
