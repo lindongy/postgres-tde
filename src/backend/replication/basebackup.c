@@ -1106,11 +1106,6 @@ sendFileWithContent(bbsink *sink, const char *filename, const char *content,
 					backup_manifest_info *manifest)
 {
 	struct stat statbuf;
-	pg_checksum_context checksum_ctx;
-
-	if (pg_checksum_init(&checksum_ctx, manifest->checksum_type) < 0)
-		elog(ERROR, "could not initialize checksum of file \"%s\"",
-			 filename);
 
 	/*
 	 * Construct a stat struct for the backup_label file we're injecting in
