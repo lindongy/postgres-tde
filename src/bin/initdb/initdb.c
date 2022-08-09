@@ -2904,7 +2904,7 @@ main(int argc, char *argv[])
 		{"data-checksums", no_argument, NULL, 'k'},
 #ifdef	USE_ENCRYPTION
 		{"encryption-key-command", required_argument, NULL, 'K'},
-		{"key-bits", required_argument, NULL, 15},
+		{"key-bits", required_argument, NULL, 17},
 #endif							/* USE_ENCRYPTION */
 		{"allow-group-access", no_argument, NULL, 'g'},
 		{"discard-caches", no_argument, NULL, 14},
