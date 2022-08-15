@@ -39,6 +39,7 @@
 #include "catalog/pg_authid.h"
 #include "commands/async.h"
 #include "commands/prepare.h"
+#include "commands/tablespace.h"
 #include "commands/user.h"
 #include "commands/vacuum.h"
 #include "commands/variable.h"
@@ -1797,6 +1798,17 @@ static struct config_bool ConfigureNamesBool[] =
 			GUC_NOT_IN_SAMPLE
 		},
 		&IgnoreSystemIndexes,
+		false,
+		NULL, NULL, NULL
+	},
+
+	{
+		{"allow_in_place_tablespaces", PGC_SUSET, DEVELOPER_OPTIONS,
+			gettext_noop("Allows tablespaces directly inside pg_tblspc, for testing."),
+			NULL,
+			GUC_NOT_IN_SAMPLE
+		},
+		&allow_in_place_tablespaces,
 		false,
 		NULL, NULL, NULL
 	},
@@ -8903,7 +8915,16 @@ ShowAllGUCConfig(DestReceiver *dest)
 			isnull[1] = true;
 		}
 
-		values[2] = PointerGetDatum(cstring_to_text(conf->short_desc));
+		if (conf->short_desc)
+		{
+			values[2] = PointerGetDatum(cstring_to_text(conf->short_desc));
+			isnull[2] = false;
+		}
+		else
+		{
+			values[2] = PointerGetDatum(NULL);
+			isnull[2] = true;
+		}
 
 		/* send it to dest */
 		do_tup_output(tstate, values, isnull);
@@ -8915,7 +8936,8 @@ ShowAllGUCConfig(DestReceiver *dest)
 			pfree(setting);
 			pfree(DatumGetPointer(values[1]));
 		}
-		pfree(DatumGetPointer(values[2]));
+		if (conf->short_desc)
+			pfree(DatumGetPointer(values[2]));
 	}
 
 	end_tup_output(tstate);
@@ -9093,7 +9115,7 @@ GetConfigOptionByNum(int varnum, const char **values, bool *noshow)
 	values[3] = _(config_group_names[conf->group]);
 
 	/* short_desc */
-	values[4] = _(conf->short_desc);
+	values[4] = conf->short_desc != NULL ? _(conf->short_desc) : NULL;
 
 	/* extra_desc */
 	values[5] = conf->long_desc != NULL ? _(conf->long_desc) : NULL;
