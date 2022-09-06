@@ -224,6 +224,7 @@ struct TransientBufFile
 	/* The underlying file. */
 	BufFileSegment	file;;
 	char		*path;
+	int		elevel;
 };
 
 /*
@@ -255,7 +256,8 @@ static size_t BufFileWriteCommon(BufFileCommon *file, void *ptr, size_t size,
 static int16 BufFileGetUsefulBytes(File segment, off_t offset,
 								   PGAlignedBlock *buffer);
 static void BufFileAdjustUsefulBytes(BufFileCommon *file,
-									 BufFileSegment *segments);
+									 BufFileSegment *segments,
+									 int elevel);
 
 /*
  * Create BufFile and perform the common initialization.
@@ -665,7 +667,7 @@ BufFileLoadBuffer(BufFile *file)
 	/* we choose not to advance curOffset here */
 
 	if (data_encrypted)
-		BufFileAdjustUsefulBytes(f, file->files);
+		BufFileAdjustUsefulBytes(f, file->files, ERROR);
 
 	if (f->nbytes > 0)
 		pgBufferUsage.temp_blks_read++;
@@ -725,7 +727,8 @@ BufFileDumpBuffer(BufFile *file)
 								 file->common.buffer.data + wpos,
 								 bytestowrite,
 								 file->common.curOffset,
-								 WAIT_EVENT_BUFFILE_WRITE);
+								 WAIT_EVENT_BUFFILE_WRITE,
+								 ERROR);
 		if (bytestowrite <= 0)
 			ereport(ERROR,
 					(errcode_for_file_access(),
@@ -843,7 +846,8 @@ BufFileDumpBufferEncrypted(BufFile *file, bool last_in_segment)
 							 encrypt_buf.data,
 							 bytestowrite,
 							 file->common.curOffset,
-							 WAIT_EVENT_BUFFILE_WRITE);
+							 WAIT_EVENT_BUFFILE_WRITE,
+							 ERROR);
 
 	/* Set or update the cached size. */
 	if (thisfile->size == InvalidSegmentSize ||
@@ -929,11 +933,23 @@ BufFileFlush(BufFileCommon *file, bool is_transient)
 			BufFileDumpBuffer((BufFile *) file);
 		else
 			BufFileDumpBufferEncrypted((BufFile *) file, false);
+
+		Assert(!file->dirty);
 	}
 	else
-		BufFileDumpBufferTransient((TransientBufFile *) file);
+	{
+		TransientBufFile *tf = (TransientBufFile *) file;
 
-	Assert(!file->dirty);
+		BufFileDumpBufferTransient(tf);
+
+		if (file->dirty)
+		{
+			/* Only reached if tf->elevel < ERROR */
+			ereport(tf->elevel,
+					(errcode_for_file_access(),
+					 errmsg("could not flush file \"%s\": %m", tf->path)));
+		}
+	}
 }
 
 /*
@@ -1421,7 +1437,7 @@ BufFileAppend(BufFile *target, BufFile *source)
  * according to fileFlags, but not both.
  */
 TransientBufFile *
-BufFileOpenTransient(const char *path, int fileFlags)
+BufFileOpenTransient(const char *path, int fileFlags, int elevel)
 {
 	bool		readOnly;
 	bool		append = false;
@@ -1494,6 +1510,7 @@ BufFileOpenTransient(const char *path, int fileFlags)
 	file->file.vfd = vfd;
 	file->file.size = InvalidSegmentSize;
 	file->path = pstrdup(path);
+	file->elevel = elevel;
 
 	if (fcommon->append)
 	{
@@ -1517,6 +1534,8 @@ BufFileOpenTransient(const char *path, int fileFlags)
 			fcommon->curOffset -= BLCKSZ;
 		}
 		BufFileLoadBufferTransient(file);
+		if (file->common.nbytes < 0)
+			return NULL;
 
 		if (fcommon->append && fcommon->nbytes > 0)
 		{
@@ -1542,6 +1561,7 @@ BufFileCloseTransient(TransientBufFile *file)
 
 		if (file->common.dirty)
 		{
+			/* Raise WARNING deliberately, even if file->elevel is ERROR. */
 			ereport(WARNING,
 					(errcode_for_file_access(),
 					 errmsg("could not flush file \"%s\": %m", file->path)));
@@ -1580,16 +1600,19 @@ BufFileLoadBufferTransient(TransientBufFile *file)
 								   WAIT_EVENT_BUFFILE_READ);
 
 	if (file->common.nbytes < 0)
-		ereport(ERROR,
+	{
+		ereport(file->elevel,
 				(errcode_for_file_access(),
 				 errmsg("could not read file \"%s\": %m",
 						FilePathName(file->file.vfd))));
+		return;
+	}
 	/* we choose not to advance offset here */
 
 	if (!data_encrypted)
 		return;
 
-	BufFileAdjustUsefulBytes(&file->common, NULL);
+	BufFileAdjustUsefulBytes(&file->common, NULL, file->elevel);
 }
 
 /*
@@ -1645,7 +1668,8 @@ BufFileDumpBufferTransient(TransientBufFile *file)
 						 write_ptr,
 						 bytestowrite,
 						 file->common.curOffset,
-						 WAIT_EVENT_BUFFILE_WRITE);
+						 WAIT_EVENT_BUFFILE_WRITE,
+						 file->elevel);
 
 	/* For encryption purposes, see BufFileTweak().*/
 	blocks_written++;
@@ -1657,10 +1681,13 @@ BufFileDumpBufferTransient(TransientBufFile *file)
 
 	/* if write didn't set errno, assume problem is no disk space */
 	if (nwritten != bytestowrite)
-		ereport(ERROR,
+	{
+		ereport(file->elevel,
 				(errcode_for_file_access(),
 				 errmsg("could not write to file \"%s\": %m",
 						FilePathName(seg->vfd))));
+		return;
+	}
 
 	file->common.curOffset += nwritten;
 	file->common.dirty = false;
@@ -1776,6 +1803,14 @@ BufFileSeekTransient(TransientBufFile *file, off_t offset, int whence)
 	}
 	/* Otherwise, must reposition buffer, so flush any dirty data */
 	BufFileFlush(&file->common, true);
+	if (file->common.dirty)
+	{
+		/* Only reached if file->elevel < ERROR */
+		ereport(file->elevel,
+				(errcode_for_file_access(),
+				 errmsg("could not flush file \"%s\": %m", file->path)));
+		return EOF;
+	}
 
 	if (!data_encrypted)
 	{
@@ -1793,6 +1828,8 @@ BufFileSeekTransient(TransientBufFile *file, off_t offset, int whence)
 		fc->pos = newOffset % BLCKSZ;
 		fc->curOffset = newOffset - file->common.pos;
 		BufFileLoadBufferTransient(file);
+		if (file->common.nbytes < 0)
+			return EOF;
 	}
 	return 0;
 }
@@ -1822,6 +1859,18 @@ BufFileReadCommon(BufFileCommon *file, void *ptr, size_t size,
 		return nread;
 
 	BufFileFlush(file, is_transient);
+	if (file->dirty)
+	{
+		TransientBufFile	*tf = (TransientBufFile *) file;
+		Assert(is_transient);
+
+		/* Only reached if tf->elevel < ERROR */
+		ereport(tf->elevel,
+				(errcode_for_file_access(),
+				 errmsg("could not flush file \"%s\": %m", tf->path)));
+		return nread;
+	}
+
 
 	while (size > 0)
 	{
@@ -1852,7 +1901,12 @@ BufFileReadCommon(BufFileCommon *file, void *ptr, size_t size,
 				if (!is_transient)
 					BufFileLoadBuffer((BufFile *) file);
 				else
+				{
 					BufFileLoadBufferTransient((TransientBufFile *) file);
+					/* Only reached if elevel < ERROR. */
+					if (file->nbytes < 0)
+						break;
+				}
 
 				if (BUFFER_IS_EMPTY(file))
 					break;		/* no more data available */
@@ -1943,7 +1997,12 @@ BufFileWriteCommon(BufFileCommon *file, void *ptr, size_t size,
 					}
 				}
 				else
+				{
 					BufFileDumpBufferTransient((TransientBufFile *) file);
+					/* Only reached if elevel < ERROR */
+					if (file->dirty)
+						return nwritten;
+				}
 			}
 			else
 			{
@@ -2102,18 +2161,26 @@ BufFileGetUsefulBytes(File segment, off_t offset, PGAlignedBlock *buffer)
  * 'segments' is an array of file segments, or NULL for a transient file.
  */
 static void
-BufFileAdjustUsefulBytes(BufFileCommon *file, BufFileSegment *segments)
+BufFileAdjustUsefulBytes(BufFileCommon *file, BufFileSegment *segments,
+						 int elevel)
 {
 	BufFilePageHeader	*hdr;
 	bool is_transient = segments == NULL;
 
-	/* This function is only need for encrypted files. */
+	/* This function is only needed for encrypted files. */
 	Assert(data_encrypted);
 
 	/*
 	 * Only the whole blocks are written/read in the data_encrypted case.
 	 */
-	Assert(file->nbytes % BLCKSZ == 0);
+	if (file->nbytes % BLCKSZ != 0 || file->curOffset % BLCKSZ != 0)
+	{
+		ereport(elevel,
+				(errmsg("incorrect size of encrypted BufFile")));
+		/* Mark the buffer contents invalid. */
+		file->nbytes = -1;
+		return;
+	}
 
 	if (file->nbytes == 0)
 	{
@@ -2147,8 +2214,15 @@ BufFileAdjustUsefulBytes(BufFileCommon *file, BufFileSegment *segments)
 					  EDK_BUFFILE);
 
 		/* Isn't the header corrupt? */
-		Assert(hdr->nbytes <= file->nbytes);
-		Assert(hdr->nbytes >= SizeOfBufFilePageHeader);
+		if (hdr->nbytes > file->nbytes ||
+			hdr->nbytes < SizeOfBufFilePageHeader)
+		{
+			ereport(elevel,
+					(errmsg("encrypted BufFile has corrupt page header")));
+			/* Mark the buffer contents invalid. */
+			file->nbytes = -1;
+			return;
+		}
 
 		/* Adjust the usage information if needed. */
 		if (hdr->nbytes < file->nbytes)
@@ -2322,7 +2396,8 @@ BufFileTruncateFileSet(BufFile *file, int fileno, off_t offset)
 											buffer.data,
 											BLCKSZ,
 											off_page,
-											WAIT_EVENT_BUFFILE_WRITE);
+											WAIT_EVENT_BUFFILE_WRITE,
+											ERROR);
 						if (written <= 0 || written != BLCKSZ)
 							ereport(ERROR,
 									(errcode_for_file_access(),

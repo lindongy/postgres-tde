@@ -1590,9 +1590,16 @@ PathNameOpenFilePerm(const char *fileName, int fileFlags, mode_t fileMode)
 	 */
 	fnamecopy = strdup(fileName);
 	if (fnamecopy == NULL)
-		ereport(ERROR,
+	{
+		/*
+		 * Some callers (especially BufFileOpenTransient() in the TDE fork)
+		 * might dislike ERROR here.
+		 */
+		ereport(WARNING,
 				(errcode(ERRCODE_OUT_OF_MEMORY),
 				 errmsg("out of memory")));
+		return -1;
+	}
 
 	file = AllocateVfd();
 	vfdP = &VfdCache[file];
@@ -2175,7 +2182,7 @@ retry:
 
 int
 FileWrite(File file, char *buffer, int amount, off_t offset,
-		  uint32 wait_event_info)
+		  uint32 wait_event_info, int elevel)
 {
 	int			returnCode;
 	Vfd		   *vfdP;
@@ -2211,10 +2218,15 @@ FileWrite(File file, char *buffer, int amount, off_t offset,
 
 			newTotal += past_write - vfdP->fileSize;
 			if (newTotal > (uint64) temp_file_limit * (uint64) 1024)
-				ereport(ERROR,
+			{
+				ereport(elevel,
 						(errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
 						 errmsg("temporary file size exceeds temp_file_limit (%dkB)",
 								temp_file_limit)));
+
+				/* Only reached if elevel < ERROR */
+				return -1;
+			}
 		}
 	}
 

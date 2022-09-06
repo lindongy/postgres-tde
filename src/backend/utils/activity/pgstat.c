@@ -1242,20 +1242,8 @@ write_chunk(TransientBufFile *fpout, void *ptr, size_t len, bool *failed)
 	if (*failed)
 		return;
 
-	/*
-	 * In pgstat.c we don't want ERROR. XXX Should we pass elevel to
-	 * BufFileOpenTransient()?
-	 */
-	PG_TRY();
-	{
-		BufFileWriteTransient(fpout, ptr, len);
-	}
-	PG_CATCH();
-	{
-		/* buffile.c should not need to clean any resources (e.g. locks) */
+	if (BufFileWriteTransient(fpout, ptr, len) != len)
 		*failed = true;
-	}
-	PG_END_TRY();
 }
 
 #define write_chunk_s(fpout, ptr, failed) \
@@ -1296,7 +1284,8 @@ pgstat_write_statsfile(void)
 	/*
 	 * Open the statistics temp file to write out the current values.
 	 */
-	fpout = BufFileOpenTransient(tmpfile, O_CREAT | O_WRONLY | PG_BINARY);
+	fpout = BufFileOpenTransient(tmpfile, O_CREAT | O_WRONLY | PG_BINARY,
+								 WARNING);
 	if (fpout == NULL)
 	{
 		ereport(LOG,
@@ -1442,23 +1431,7 @@ pgstat_write_statsfile(void)
 static bool
 read_chunk(TransientBufFile *fpin, void *ptr, size_t len)
 {
-	bool	result = true;
-	/*
-	 * In pgstat.c we don't want ERROR. XXX Should we pass elevel to
-	 * BufFileOpenTransient()?
-	 */
-	PG_TRY();
-	{
-		result = (BufFileReadTransient(fpin, ptr, len) == len);
-	}
-	PG_CATCH();
-	{
-		/* buffile.c should not need to clean any resources (e.g. locks) */
-		result = false;
-	}
-	PG_END_TRY();
-
-	return result;
+	return (BufFileReadTransient(fpin, ptr, len) == len);
 }
 
 #define read_chunk_s(fpin, ptr) read_chunk(fpin, ptr, sizeof(*ptr))
@@ -1492,7 +1465,7 @@ pgstat_read_statsfile(void)
 	 * has not yet written the stats file for the first time.  Any other
 	 * failure condition is suspicious.
 	 */
-	if ((fpin = BufFileOpenTransient(statfile, O_RDONLY | PG_BINARY)) == NULL)
+	if ((fpin = BufFileOpenTransient(statfile, O_RDONLY | PG_BINARY, WARNING)) == NULL)
 	{
 		if (errno != ENOENT)
 			ereport(LOG,

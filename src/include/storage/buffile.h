@@ -178,7 +178,8 @@ extern void BufFileDeleteFileSet(FileSet *fileset, const char *name,
 								 bool missing_ok);
 extern void BufFileTruncateFileSet(BufFile *file, int fileno, off_t offset);
 
-extern TransientBufFile *BufFileOpenTransient(const char *path, int fileFlags);
+extern TransientBufFile *BufFileOpenTransient(const char *path, int fileFlags,
+											  int elevel);
 extern void BufFileCloseTransient(TransientBufFile *file);
 extern File BufFileTransientGetVfd(TransientBufFile *file);
 extern size_t BufFileReadTransient(TransientBufFile *file, void *ptr,

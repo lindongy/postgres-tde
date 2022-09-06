@@ -3551,7 +3551,8 @@ ReorderBufferSerializeTXN(ReorderBuffer *rb, ReorderBufferTXN *txn)
 
 			/* open segment, create it if necessary */
 			file = BufFileOpenTransient(path,
-										O_CREAT | O_WRONLY | O_APPEND | PG_BINARY);
+										O_CREAT | O_WRONLY | O_APPEND | PG_BINARY,
+										ERROR);
 		}
 
 		ReorderBufferSerializeChange(rb, txn, file, change);
@@ -4051,7 +4052,7 @@ ReorderBufferRestoreChanges(ReorderBuffer *rb, ReorderBufferTXN *txn,
 			ReorderBufferSerializedPath(path, MyReplicationSlot, txn->xid,
 										*segno);
 
-			*file = BufFileOpenTransient(path, O_RDONLY | PG_BINARY);
+			*file = BufFileOpenTransient(path, O_RDONLY | PG_BINARY, ERROR);
 			if (*file == NULL)
 			{
 				Assert(errno == ENOENT);
