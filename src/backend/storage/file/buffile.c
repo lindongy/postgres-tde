@@ -1594,10 +1594,16 @@ BufFileOpenTransient(const char *path, int fileFlags,
 						  pos,
 						  WAIT_EVENT_BUFFILE_READ);
 		if (nbytes != sizeof(off_t))
+		{
+			/* Like above. */
 			ereport(elevel,
 					(errcode_for_file_access(),
 					 errmsg("could not read padding info from TransientBufFile \"%s\": %m",
 							path)));
+			pfree(fcommon->useful);
+			pfree(file);
+			return NULL;
+		}
 		Assert(fcommon->useful[0] > 0);
 
 		if (fcommon->append)
