@@ -3636,7 +3636,8 @@ pgstat_write_statsfiles(bool permanent, bool allDbs)
 	 * Open the statistics temp file to write out the current values.
 	 */
 	fpout = BufFileOpenTransient(tmpfile,
-								 O_CREAT | O_WRONLY | O_APPEND | PG_BINARY);
+								 O_CREAT | O_WRONLY | O_APPEND | PG_BINARY,
+								 WARNING);
 	if (fpout == NULL)
 	{
 		ereport(LOG,
@@ -3827,7 +3828,8 @@ pgstat_write_db_statsfile(PgStat_StatDBEntry *dbentry, bool permanent)
 	 * Open the statistics temp file to write out the current values.
 	 */
 	fpout = BufFileOpenTransient(tmpfile,
-								 O_CREAT | O_WRONLY | O_APPEND | PG_BINARY);
+								 O_CREAT | O_WRONLY | O_APPEND | PG_BINARY,
+								 WARNING);
 	if (fpout == NULL)
 	{
 		ereport(LOG,
@@ -4026,7 +4028,8 @@ pgstat_read_statsfiles(Oid onlydb, bool permanent, bool deep)
 	 * condition is suspicious.
 	 */
 	if ((fpin = BufFileOpenTransient(statfile,
-									 O_RDONLY | PG_BINARY)) == NULL)
+									 O_RDONLY | PG_BINARY,
+									 WARNING)) == NULL)
 	{
 		if (errno != ENOENT)
 			ereport(pgStatRunningInCollector ? LOG : WARNING,
@@ -4307,7 +4310,8 @@ pgstat_read_db_statsfile(Oid databaseid, HTAB *tabhash, HTAB *funchash,
 	 * condition is suspicious.
 	 */
 	if ((fpin = BufFileOpenTransient(statfile,
-									 O_RDONLY | PG_BINARY)) == NULL)
+									 O_RDONLY | PG_BINARY,
+									 WARNING)) == NULL)
 	{
 		if (errno != ENOENT)
 			ereport(pgStatRunningInCollector ? LOG : WARNING,
@@ -4474,7 +4478,8 @@ pgstat_read_db_statsfile_timestamp(Oid databaseid, bool permanent,
 	 * complaining about.
 	 */
 	if ((fpin = BufFileOpenTransient(statfile,
-									 O_RDONLY | PG_BINARY)) == NULL)
+									 O_RDONLY | PG_BINARY,
+									 WARNING)) == NULL)
 	{
 		if (errno != ENOENT)
 			ereport(pgStatRunningInCollector ? LOG : WARNING,
