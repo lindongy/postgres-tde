@@ -1492,9 +1492,10 @@ BufFileOpenTransient(const char *path, int fileFlags, int elevel)
 		if (errno == ENOENT)
 			return NULL;
 
-		ereport(ERROR,
+		ereport(elevel,
 				(errcode_for_file_access(),
 				 errmsg("could not open file \"%s\": %m", path)));
+		return NULL;
 	}
 
 	file = (TransientBufFile *) palloc0(sizeof(TransientBufFile));
