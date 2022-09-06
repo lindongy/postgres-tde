@@ -2342,7 +2342,8 @@ ReorderBufferSerializeTXN(ReorderBuffer *rb, ReorderBufferTXN *txn)
 			/* open segment, create it if necessary */
 			file = BufFileOpenTransient(path,
 										O_CREAT | O_WRONLY | O_APPEND | PG_BINARY,
-										tweak_base);
+										tweak_base,
+										ERROR);
 		}
 
 		ReorderBufferSerializeChange(rb, txn, file, change);
@@ -2582,7 +2583,8 @@ ReorderBufferRestoreChanges(ReorderBuffer *rb, ReorderBufferTXN *txn,
 			if (data_encrypted)
 				ReorderBufferTweakBase(txn, tweak_base);
 			*file = BufFileOpenTransient(path, O_RDONLY | PG_BINARY,
-										 tweak_base);
+										 tweak_base,
+										 ERROR);
 			if (*file == NULL)
 			{
 				Assert(errno == ENOENT);

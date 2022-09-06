@@ -79,7 +79,8 @@ extern void FileClose(File file);
 extern bool FileIsClosed(File file);
 extern int	FilePrefetch(File file, off_t offset, int amount, uint32 wait_event_info);
 extern int	FileRead(File file, char *buffer, int amount, off_t offset, uint32 wait_event_info);
-extern int	FileWrite(File file, char *buffer, int amount, off_t offset, uint32 wait_event_info);
+extern int	FileWrite(File file, char *buffer, int amount, off_t offset,
+					  uint32 wait_event_info, int elevel);
 extern int	FileSync(File file, uint32 wait_event_info);
 extern off_t FileSize(File file);
 extern int	FileTruncate(File file, off_t offset, uint32 wait_event_info);

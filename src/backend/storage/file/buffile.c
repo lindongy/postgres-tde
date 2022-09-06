@@ -168,6 +168,7 @@ struct TransientBufFile
 
 	/* Path-dependent part of the encryption tweak. */
 	char	tweakBase[TWEAK_BASE_SIZE];
+	int		elevel;
 };
 
 static BufFile *makeBufFileCommon(int nfiles);
@@ -176,7 +177,7 @@ static void extendBufFile(BufFile *file);
 static void BufFileLoadBuffer(BufFile *file);
 static void BufFileDumpBuffer(BufFile *file);
 static void BufFileDumpBufferEncrypted(BufFile *file);
-static void	BufFileFlush(BufFile *file);
+static void BufFileFlush(BufFileCommon *file, bool is_transient);
 static File MakeNewSharedSegment(BufFile *file, int segment);
 
 static void BufFileTweak(char *tweak, BufFileCommon *file, bool is_transient);
@@ -553,7 +554,7 @@ BufFileExportShared(BufFile *file)
 	/* It's probably a bug if someone calls this twice. */
 	Assert(!file->common.readOnly);
 
-	BufFileFlush(file);
+	BufFileFlush(&file->common, false);
 	file->common.readOnly = true;
 }
 
@@ -568,7 +569,7 @@ BufFileClose(BufFile *file)
 	int			i;
 
 	/* flush any unwritten data */
-	BufFileFlush(file);
+	BufFileFlush(&file->common, false);
 	/* close and delete the underlying file(s) */
 	for (i = 0; i < file->numFiles; i++)
 		FileClose(file->files[i]);
@@ -745,7 +746,8 @@ BufFileDumpBuffer(BufFile *file)
 								 file->common.buffer.data + wpos,
 								 bytestowrite,
 								 file->common.curOffset,
-								 WAIT_EVENT_BUFFILE_WRITE);
+								 WAIT_EVENT_BUFFILE_WRITE,
+								 ERROR);
 		if (bytestowrite <= 0)
 			ereport(ERROR,
 					(errcode_for_file_access(),
@@ -857,7 +859,8 @@ BufFileDumpBufferEncrypted(BufFile *file)
 							 encrypt_buf.data,
 							 bytestowrite,
 							 file->common.curOffset,
-							 WAIT_EVENT_BUFFILE_WRITE);
+							 WAIT_EVENT_BUFFILE_WRITE,
+							 ERROR);
 	if (bytestowrite <= 0 || bytestowrite != BLCKSZ)
 		return;				/* failed to write */
 
@@ -903,7 +906,8 @@ BufFileDumpBufferEncrypted(BufFile *file)
 									(char *) &useful,
 									sizeof(useful),
 									file->common.curOffset,
-									WAIT_EVENT_BUFFILE_WRITE);
+									WAIT_EVENT_BUFFILE_WRITE,
+									ERROR);
 			if (bytes_extra != sizeof(useful))
 				return;		/* failed to write */
 		}
@@ -971,17 +975,34 @@ BufFileWrite(BufFile *file, void *ptr, size_t size)
  * Like fflush(), except that I/O errors are reported with ereport().
  */
 static void
-BufFileFlush(BufFile *file)
+BufFileFlush(BufFileCommon *file, bool is_transient)
 {
-	if (file->common.dirty)
+	if (!file->dirty)
+		return;
+
+	if (!is_transient)
 	{
 		if (!data_encrypted)
-			BufFileDumpBuffer(file);
+			BufFileDumpBuffer((BufFile *) file);
 		else
-			BufFileDumpBufferEncrypted(file);
-	}
+			BufFileDumpBufferEncrypted((BufFile *) file);
 
-	Assert(!file->common.dirty);
+		Assert(!file->dirty);
+	}
+	else
+	{
+		TransientBufFile *tf = (TransientBufFile *) file;
+
+		BufFileDumpBufferTransient(tf);
+
+		if (file->dirty)
+		{
+			/* Only reached if tf->elevel < ERROR */
+			ereport(tf->elevel,
+					(errcode_for_file_access(),
+					 errmsg("could not flush file \"%s\": %m", tf->path)));
+		}
+	}
 }
 
 /*
@@ -1048,7 +1069,7 @@ BufFileSeek(BufFile *file, int fileno, off_t offset, int whence)
 		return 0;
 	}
 	/* Otherwise, must reposition buffer, so flush any dirty data */
-	BufFileFlush(file);
+	BufFileFlush(&file->common, false);
 
 	/*
 	 * At this point and no sooner, check for seek past last segment. The
@@ -1430,7 +1451,8 @@ BufFileAppendMetadata(BufFile *target, BufFile *source)
  */
 TransientBufFile *
 BufFileOpenTransient(const char *path, int fileFlags,
-					 char tweak_base[TWEAK_BASE_SIZE])
+					 char tweak_base[TWEAK_BASE_SIZE],
+					 int elevel)
 {
 	bool		readOnly;
 	bool		append = false;
@@ -1484,9 +1506,10 @@ BufFileOpenTransient(const char *path, int fileFlags,
 		if (errno == ENOENT)
 			return NULL;
 
-		ereport(ERROR,
+		ereport(elevel,
 				(errcode_for_file_access(),
 				 errmsg("could not open file \"%s\": %m", path)));
+		return NULL;
 	}
 
 	file = (TransientBufFile *) palloc0(sizeof(TransientBufFile));
@@ -1501,16 +1524,20 @@ BufFileOpenTransient(const char *path, int fileFlags,
 	fcommon->nuseful = 1;
 	file->vfd = vfd;
 	file->path = pstrdup(path);
+	file->elevel = elevel;
 
 	if (data_encrypted)
 		memcpy(file->tweakBase, tweak_base, TWEAK_BASE_SIZE);
 
 	size = FileSize(file->vfd);
 	if (size < 0)
-		ereport(ERROR,
+	{
+		ereport(file->elevel,
 				(errcode_for_file_access(),
 				 errmsg("could not initialize TransientBufFile for file \"%s\": %m",
 						path)));
+		return NULL;
+	}
 
 	if (fcommon->append)
 	{
@@ -1539,10 +1566,15 @@ BufFileOpenTransient(const char *path, int fileFlags,
 		 * The word must immediately follow the last buffer of the segment.
 		 */
 		if (pos < 0 || pos % BLCKSZ != 0)
-			ereport(ERROR,
+		{
+			ereport(elevel,
 					(errcode_for_file_access(),
 					 errmsg("could not find padding info in TransientBufFile \"%s\": %m",
 							path)));
+			pfree(fcommon->useful);
+			pfree(file);
+			return NULL;
+		}
 
 		errno = 0;
 		nbytes = FileRead(file->vfd,
@@ -1551,10 +1583,16 @@ BufFileOpenTransient(const char *path, int fileFlags,
 						  pos,
 						  WAIT_EVENT_BUFFILE_READ);
 		if (nbytes != sizeof(off_t))
-			ereport(ERROR,
+		{
+			/* Like above. */
+			ereport(elevel,
 					(errcode_for_file_access(),
 					 errmsg("could not read padding info from TransientBufFile \"%s\": %m",
 							path)));
+			pfree(fcommon->useful);
+			pfree(file);
+			return NULL;
+		}
 		Assert(fcommon->useful[0] > 0);
 
 		if (fcommon->append)
@@ -1571,6 +1609,8 @@ BufFileOpenTransient(const char *path, int fileFlags,
 
 			/* Load the existing contents of the buffer. */
 			BufFileLoadBufferTransient(file);
+			if (file->common.nbytes < 0)
+				return NULL;
 		}
 	}
 
@@ -1591,6 +1631,7 @@ BufFileCloseTransient(TransientBufFile *file)
 
 		if (file->common.dirty)
 		{
+			/* Raise WARNING deliberately, even if file->elevel is ERROR. */
 			ereport(WARNING,
 					(errcode_for_file_access(),
 					 errmsg("could not flush file \"%s\": %m", file->path)));
@@ -1760,7 +1801,8 @@ retry:
 						 write_ptr,
 						 bytestowrite,
 						 file->common.curOffset,
-						 WAIT_EVENT_BUFFILE_WRITE);
+						 WAIT_EVENT_BUFFILE_WRITE,
+						 file->elevel);
 
 	/* if write didn't set errno, assume problem is no disk space */
 	if (nwritten != bytestowrite && errno == 0)
@@ -1823,7 +1865,8 @@ retry:
 									(char *) &useful,
 									sizeof(useful),
 									file->common.curOffset,
-									WAIT_EVENT_BUFFILE_WRITE);
+									WAIT_EVENT_BUFFILE_WRITE,
+									file->elevel);
 			if (bytes_extra != sizeof(useful))
 				return;			/* failed to write */
 		}
@@ -1873,7 +1916,24 @@ BufFileReadCommon(BufFileCommon *file, void *ptr, size_t size,
 		 */
 		Assert(!is_transient);
 
-		BufFileFlush((BufFile *) file);
+		BufFileFlush(file, is_transient);
+
+		if (file->dirty)
+		{
+			TransientBufFile	*tf = (TransientBufFile *) file;
+
+			/*
+			 * BufFileFlush() should have thrown ERROR should have been raised
+			 * for !is_transient.
+			 */
+			Assert(is_transient);
+
+			/* Only reached if tf->elevel < ERROR */
+			ereport(tf->elevel,
+					(errcode_for_file_access(),
+					 errmsg("could not flush file \"%s\": %m", tf->path)));
+			return nread;
+		}
 	}
 
 	while (size > 0)
@@ -1905,7 +1965,12 @@ BufFileReadCommon(BufFileCommon *file, void *ptr, size_t size,
 				if (!is_transient)
 					BufFileLoadBuffer((BufFile *) file);
 				else
+				{
 					BufFileLoadBufferTransient((TransientBufFile *) file);
+					/* Only reached if elevel < ERROR. */
+					if (file->nbytes < 0)
+						break;
+				}
 
 				if (file->nbytes <= 0)
 					break;		/* no more data available */
@@ -1925,7 +1990,12 @@ BufFileReadCommon(BufFileCommon *file, void *ptr, size_t size,
 				if (!is_transient)
 					BufFileLoadBuffer((BufFile *) file);
 				else
+				{
 					BufFileLoadBufferTransient((TransientBufFile *) file);
+					/* Only reached if elevel < ERROR. */
+					if (file->nbytes < 0)
+						break;
+				}
 
 				Assert(file->nbytes >= nbytes_orig);
 				if (file->nbytes == nbytes_orig)
