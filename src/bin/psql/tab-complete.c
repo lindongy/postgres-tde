@@ -1873,7 +1873,7 @@ psql_completion(const char *text, int start, int end)
 		COMPLETE_WITH("(", "PUBLICATION");
 	/* ALTER SUBSCRIPTION <name> SET ( */
 	else if (HeadMatches("ALTER", "SUBSCRIPTION", MatchAny) && TailMatches("SET", "("))
-		COMPLETE_WITH("binary", "slot_name", "streaming", "synchronous_commit", "disable_on_error");
+		COMPLETE_WITH("binary", "disable_on_error", "slot_name", "streaming", "synchronous_commit");
 	/* ALTER SUBSCRIPTION <name> SKIP ( */
 	else if (HeadMatches("ALTER", "SUBSCRIPTION", MatchAny) && TailMatches("SKIP", "("))
 		COMPLETE_WITH("lsn");
@@ -1927,7 +1927,7 @@ psql_completion(const char *text, int start, int end)
 
 	/* ALTER EXTENSION <name> */
 	else if (Matches("ALTER", "EXTENSION", MatchAny))
-		COMPLETE_WITH("ADD", "DROP", "UPDATE TO", "SET SCHEMA");
+		COMPLETE_WITH("ADD", "DROP", "UPDATE", "SET SCHEMA");
 
 	/* ALTER EXTENSION <name> UPDATE */
 	else if (Matches("ALTER", "EXTENSION", MatchAny, "UPDATE"))
@@ -3152,8 +3152,8 @@ psql_completion(const char *text, int start, int end)
 	/* Complete "CREATE SUBSCRIPTION <name> ...  WITH ( <opt>" */
 	else if (HeadMatches("CREATE", "SUBSCRIPTION") && TailMatches("WITH", "("))
 		COMPLETE_WITH("binary", "connect", "copy_data", "create_slot",
-					  "enabled", "slot_name", "streaming",
-					  "synchronous_commit", "two_phase", "disable_on_error");
+					  "disable_on_error", "enabled", "slot_name", "streaming",
+					  "synchronous_commit", "two_phase");
 
 /* CREATE TRIGGER --- is allowed inside CREATE SCHEMA, so use TailMatches */
 
@@ -5159,6 +5159,10 @@ _complete_from_query(const char *simple_query,
 
 		/* Clean up */
 		termPQExpBuffer(&query_buffer);
+		if (schemaname)
+			free(schemaname);
+		if (objectname)
+			free(objectname);
 		free(e_object_like);
 		if (e_schemaname)
 			free(e_schemaname);

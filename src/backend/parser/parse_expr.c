@@ -2150,6 +2150,14 @@ transformRowExpr(ParseState *pstate, RowExpr *r, bool allowDefault)
 	newr->args = transformExpressionList(pstate, r->args,
 										 pstate->p_expr_kind, allowDefault);
 
+	/* Disallow more columns than will fit in a tuple */
+	if (list_length(newr->args) > MaxTupleAttributeNumber)
+		ereport(ERROR,
+				(errcode(ERRCODE_TOO_MANY_COLUMNS),
+				 errmsg("ROW expressions can have at most %d entries",
+						MaxTupleAttributeNumber),
+				 parser_errposition(pstate, r->location)));
+
 	/* Barring later casting, we consider the type RECORD */
 	newr->row_typeid = RECORDOID;
 	newr->row_format = COERCE_IMPLICIT_CAST;
@@ -3457,7 +3465,7 @@ checkJsonOutputFormat(ParseState *pstate, const JsonFormat *format,
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 					 errmsg("unsupported JSON encoding"),
-					 errhint("only UTF8 JSON encoding is supported"),
+					 errhint("Only UTF8 JSON encoding is supported."),
 					 parser_errposition(pstate, format->location)));
 	}
 }
@@ -4574,7 +4582,25 @@ transformJsonSerializeExpr(ParseState *pstate, JsonSerializeExpr *expr)
 	JsonReturning *returning;
 
 	if (expr->output)
+	{
 		returning = transformJsonOutput(pstate, expr->output, true);
+
+		if (returning->typid != BYTEAOID)
+		{
+			char		typcategory;
+			bool		typispreferred;
+
+			get_type_category_preferred(returning->typid, &typcategory,
+										&typispreferred);
+			if (typcategory != TYPCATEGORY_STRING)
+				ereport(ERROR,
+						(errcode(ERRCODE_DATATYPE_MISMATCH),
+						 errmsg("cannot use RETURNING type %s in %s",
+								format_type_be(returning->typid),
+								"JSON_SERIALIZE()"),
+						 errhint("Try returning a string type or bytea.")));
+		}
+	}
 	else
 	{
 		/* RETURNING TEXT FORMAT JSON is by default */

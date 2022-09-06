@@ -3134,42 +3134,71 @@ dumpDatabase(Archive *fout)
 
 	/*
 	 * pg_largeobject comes from the old system intact, so set its
-	 * relfrozenxids and relminmxids.
+	 * relfrozenxids, relminmxids and relfilenode.
 	 */
 	if (dopt->binary_upgrade)
 	{
 		PGresult   *lo_res;
 		PQExpBuffer loFrozenQry = createPQExpBuffer();
 		PQExpBuffer loOutQry = createPQExpBuffer();
+		PQExpBuffer loHorizonQry = createPQExpBuffer();
 		int			i_relfrozenxid,
+					i_relfilenode,
+					i_oid,
 					i_relminmxid;
 
 		/*
 		 * pg_largeobject
 		 */
 		if (fout->remoteVersion >= 90300)
-			appendPQExpBuffer(loFrozenQry, "SELECT relfrozenxid, relminmxid\n"
+			appendPQExpBuffer(loFrozenQry, "SELECT relfrozenxid, relminmxid, relfilenode, oid\n"
 							  "FROM pg_catalog.pg_class\n"
-							  "WHERE oid = %u;\n",
-							  LargeObjectRelationId);
+							  "WHERE oid IN (%u, %u);\n",
+							  LargeObjectRelationId, LargeObjectLOidPNIndexId);
 		else
-			appendPQExpBuffer(loFrozenQry, "SELECT relfrozenxid, 0 AS relminmxid\n"
+			appendPQExpBuffer(loFrozenQry, "SELECT relfrozenxid, 0 AS relminmxid, relfilenode, oid\n"
 							  "FROM pg_catalog.pg_class\n"
-							  "WHERE oid = %u;\n",
-							  LargeObjectRelationId);
+							  "WHERE oid IN (%u, %u);\n",
+							  LargeObjectRelationId, LargeObjectLOidPNIndexId);
 
-		lo_res = ExecuteSqlQueryForSingleRow(fout, loFrozenQry->data);
+		lo_res = ExecuteSqlQuery(fout, loFrozenQry->data, PGRES_TUPLES_OK);
 
 		i_relfrozenxid = PQfnumber(lo_res, "relfrozenxid");
 		i_relminmxid = PQfnumber(lo_res, "relminmxid");
+		i_relfilenode = PQfnumber(lo_res, "relfilenode");
+		i_oid = PQfnumber(lo_res, "oid");
 
-		appendPQExpBufferStr(loOutQry, "\n-- For binary upgrade, set pg_largeobject relfrozenxid and relminmxid\n");
-		appendPQExpBuffer(loOutQry, "UPDATE pg_catalog.pg_class\n"
-						  "SET relfrozenxid = '%u', relminmxid = '%u'\n"
-						  "WHERE oid = %u;\n",
-						  atooid(PQgetvalue(lo_res, 0, i_relfrozenxid)),
-						  atooid(PQgetvalue(lo_res, 0, i_relminmxid)),
-						  LargeObjectRelationId);
+		appendPQExpBufferStr(loHorizonQry, "\n-- For binary upgrade, set pg_largeobject relfrozenxid and relminmxid\n");
+		appendPQExpBufferStr(loOutQry, "\n-- For binary upgrade, preserve pg_largeobject and index relfilenodes\n");
+		for (int i = 0; i < PQntuples(lo_res); ++i)
+		{
+			Oid		oid;
+			Oid		relfilenode;
+
+			appendPQExpBuffer(loHorizonQry, "UPDATE pg_catalog.pg_class\n"
+							  "SET relfrozenxid = '%u', relminmxid = '%u'\n"
+							  "WHERE oid = %u;\n",
+							  atooid(PQgetvalue(lo_res, i, i_relfrozenxid)),
+							  atooid(PQgetvalue(lo_res, i, i_relminmxid)),
+							  atooid(PQgetvalue(lo_res, i, i_oid)));
+
+			oid = atooid(PQgetvalue(lo_res, i, i_oid));
+			relfilenode = atooid(PQgetvalue(lo_res, i, i_relfilenode));
+
+			if (oid == LargeObjectRelationId)
+				appendPQExpBuffer(loOutQry,
+								  "SELECT pg_catalog.binary_upgrade_set_next_heap_relfilenode('%u'::pg_catalog.oid);\n",
+								  relfilenode);
+			else if (oid == LargeObjectLOidPNIndexId)
+				appendPQExpBuffer(loOutQry,
+								  "SELECT pg_catalog.binary_upgrade_set_next_index_relfilenode('%u'::pg_catalog.oid);\n",
+								  relfilenode);
+		}
+
+		appendPQExpBufferStr(loOutQry,
+							 "TRUNCATE pg_catalog.pg_largeobject;\n");
+		appendPQExpBufferStr(loOutQry, loHorizonQry->data);
+
 		ArchiveEntry(fout, nilCatalogId, createDumpId(),
 					 ARCHIVE_OPTS(.tag = "pg_largeobject",
 								  .description = "pg_largeobject",
@@ -3179,6 +3208,7 @@ dumpDatabase(Archive *fout)
 		PQclear(lo_res);
 
 		destroyPQExpBuffer(loFrozenQry);
+		destroyPQExpBuffer(loHorizonQry);
 		destroyPQExpBuffer(loOutQry);
 	}
 

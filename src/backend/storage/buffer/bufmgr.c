@@ -638,18 +638,28 @@ ReadRecentBuffer(RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum,
 
 	if (BufferIsLocal(recent_buffer))
 	{
-		bufHdr = GetBufferDescriptor(-recent_buffer - 1);
+		int			b = -recent_buffer - 1;
+
+		bufHdr = GetLocalBufferDescriptor(b);
 		buf_state = pg_atomic_read_u32(&bufHdr->state);
 
 		/* Is it still valid and holding the right tag? */
 		if ((buf_state & BM_VALID) && BUFFERTAGS_EQUAL(tag, bufHdr->tag))
 		{
-			/* Bump local buffer's ref and usage counts. */
+			/*
+			 * Bump buffer's ref and usage counts. This is equivalent of
+			 * PinBuffer for a shared buffer.
+			 */
+			if (LocalRefCount[b] == 0)
+			{
+				if (BUF_STATE_GET_USAGECOUNT(buf_state) < BM_MAX_USAGE_COUNT)
+				{
+					buf_state += BUF_USAGECOUNT_ONE;
+					pg_atomic_unlocked_write_u32(&bufHdr->state, buf_state);
+				}
+			}
+			LocalRefCount[b]++;
 			ResourceOwnerRememberBuffer(CurrentResourceOwner, recent_buffer);
-			LocalRefCount[-recent_buffer - 1]++;
-			if (BUF_STATE_GET_USAGECOUNT(buf_state) < BM_MAX_USAGE_COUNT)
-				pg_atomic_write_u32(&bufHdr->state,
-									buf_state + BUF_USAGECOUNT_ONE);
 
 			pgBufferUsage.local_blks_hit++;
 
@@ -3818,23 +3828,19 @@ RelationCopyStorageUsingBuffer(Relation src, Relation dst, ForkNumber forkNum,
 		srcBuf = ReadBufferWithoutRelcache(src->rd_node, forkNum, blkno,
 										   RBM_NORMAL, bstrategy_src,
 										   permanent);
+		LockBuffer(srcBuf, BUFFER_LOCK_SHARE);
 		srcPage = BufferGetPage(srcBuf);
-		if (PageIsNew(srcPage) || PageIsEmpty(srcPage))
-		{
-			ReleaseBuffer(srcBuf);
-			continue;
-		}
 
 		/* Use P_NEW to extend the destination relation. */
 		dstBuf = ReadBufferWithoutRelcache(dst->rd_node, forkNum, P_NEW,
 										   RBM_NORMAL, bstrategy_dst,
 										   permanent);
 		LockBuffer(dstBuf, BUFFER_LOCK_EXCLUSIVE);
+		dstPage = BufferGetPage(dstBuf);
 
 		START_CRIT_SECTION();
 
 		/* Copy page data from the source to the destination. */
-		dstPage = BufferGetPage(dstBuf);
 		memcpy(dstPage, srcPage, BLCKSZ);
 		MarkBufferDirty(dstBuf);
 
@@ -3845,7 +3851,7 @@ RelationCopyStorageUsingBuffer(Relation src, Relation dst, ForkNumber forkNum,
 		END_CRIT_SECTION();
 
 		UnlockReleaseBuffer(dstBuf);
-		ReleaseBuffer(srcBuf);
+		UnlockReleaseBuffer(srcBuf);
 	}
 }
 
