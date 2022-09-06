@@ -4915,7 +4915,8 @@ pgstat_write_statsfiles(bool permanent, bool allDbs)
 		pgstat_tweak_base(permanent, true, InvalidOid, tweak_base);
 	fpout = BufFileOpenTransient(tmpfile,
 								 O_CREAT | O_WRONLY | O_APPEND | PG_BINARY,
-								 tweak_base);
+								 tweak_base,
+								 WARNING);
 	if (fpout == NULL)
 	{
 		ereport(LOG,
@@ -5089,7 +5090,8 @@ pgstat_write_db_statsfile(PgStat_StatDBEntry *dbentry, bool permanent)
 		pgstat_tweak_base(permanent, false, dbid, tweak_base);
 	fpout = BufFileOpenTransient(tmpfile,
 								 O_CREAT | O_WRONLY | O_APPEND | PG_BINARY,
-								 tweak_base);
+								 tweak_base,
+								 WARNING);
 	if (fpout == NULL)
 	{
 		ereport(LOG,
@@ -5291,7 +5293,8 @@ pgstat_read_statsfiles(Oid onlydb, bool permanent, bool deep)
 		pgstat_tweak_base(permanent, true, InvalidOid, tweak_base);
 	if ((fpin = BufFileOpenTransient(statfile,
 									 O_RDONLY | PG_BINARY,
-									 tweak_base)) == NULL)
+									 tweak_base,
+									 WARNING)) == NULL)
 	{
 		if (errno != ENOENT)
 			ereport(pgStatRunningInCollector ? LOG : WARNING,
@@ -5524,7 +5527,8 @@ pgstat_read_db_statsfile(Oid databaseid, HTAB *tabhash, HTAB *funchash,
 		pgstat_tweak_base(permanent, false, databaseid, tweak_base);
 	if ((fpin = BufFileOpenTransient(statfile,
 									 O_RDONLY | PG_BINARY,
-									 tweak_base)) == NULL)
+									 tweak_base,
+									 WARNING)) == NULL)
 	{
 		if (errno != ENOENT)
 			ereport(pgStatRunningInCollector ? LOG : WARNING,
@@ -5692,7 +5696,8 @@ pgstat_read_db_statsfile_timestamp(Oid databaseid, bool permanent,
 		pgstat_tweak_base(permanent, true, InvalidOid, tweak_base);
 	if ((fpin = BufFileOpenTransient(statfile,
 									 O_RDONLY | PG_BINARY,
-									 tweak_base)) == NULL)
+									 tweak_base,
+									 WARNING)) == NULL)
 	{
 		if (errno != ENOENT)
 			ereport(pgStatRunningInCollector ? LOG : WARNING,

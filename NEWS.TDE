@@ -1,3 +1,16 @@
+TDE_1.0.4
+=========
+
+Bug Fixes
+---------
+
+1. Reset the statistics if the statistics file is corrupt.
+
+The particular problem was an encrypted statistics file whose size was not a
+whole multiple of BLCKSZ (typically 8 kB). Although there can be other kinds
+of corruption, this one is very easy to identify and handle.
+
+
 TDE_1.0.3
 =========
 

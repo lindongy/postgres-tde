@@ -406,7 +406,7 @@ buffile_open_transient(PG_FUNCTION_ARGS)
 	 * (e.g. for troubleshooting purposes).
 	 */
 	memset(tweak_base, 0, TWEAK_BASE_SIZE);
-	bft = BufFileOpenTransient(path, flags, tweak_base);
+	bft = BufFileOpenTransient(path, flags, tweak_base, ERROR);
 	MemoryContextSwitchTo(old_cxt);
 
 	PG_RETURN_VOID();
