@@ -1542,10 +1542,13 @@ BufFileOpenTransient(const char *path, int fileFlags,
 
 	size = FileSize(file->vfd);
 	if (size < 0)
-		ereport(ERROR,
+	{
+		ereport(file->elevel,
 				(errcode_for_file_access(),
 				 errmsg("could not initialize TransientBufFile for file \"%s\": %m",
 						path)));
+		return NULL;
+	}
 
 	if (fcommon->append)
 	{
