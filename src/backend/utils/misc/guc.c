@@ -3580,7 +3580,13 @@ static struct config_int ConfigureNamesInt[] =
 			GUC_NOT_IN_SAMPLE | GUC_UNIT_BLOCKS
 		},
 		&buffile_seg_blocks,
-		BUFFILE_SEG_BLOCKS, 2, BUFFILE_SEG_BLOCKS,
+		/*
+		 * The segment file size is configurable via this GUC for testing
+		 * purposes, however it should be limited so that multiplication by
+		 * BLCKSZ does not overflow. Actually we restrict the size even more,
+		 * to 1 GB, just like PG core does.
+		 */
+		BUFFILE_SEG_BLOCKS, 2, 0x40000000 / BLCKSZ,
 		NULL, assign_buffile_seg_blocks, NULL
 	},
 

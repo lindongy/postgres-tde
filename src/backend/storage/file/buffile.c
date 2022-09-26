@@ -948,7 +948,7 @@ BufFileSeek(BufFile *file, int fileno, off_t offset, int whence)
 				 * file in which each page contains some metadata
 				 * (BufFilePageHeader).
 				 */
-				pos_log = fileno * BYTES_PER_SEGMENT_LOGICAL;
+				pos_log = (off_t) fileno * BYTES_PER_SEGMENT_LOGICAL;
 
 				/*
 				 * We don't expect anyone to seek back more than the file
@@ -2138,7 +2138,7 @@ BufFileTruncateShared(BufFile *file, int fileno, off_t offset)
 		 * the data, so compute the real position in our file in which each
 		 * page contains some metadata (BufFilePageHeader).
 		 */
-		pos_log = fileno * BYTES_PER_SEGMENT_LOGICAL + offset;
+		pos_log = (off_t) fileno * BYTES_PER_SEGMENT_LOGICAL + offset;
 		pos_phys = BufFileLogicalToPhysicalPos(pos_log);
 
 		fileno = pos_phys / BYTES_PER_SEGMENT;
