@@ -7,7 +7,7 @@
  * Portions Copyright (c) 2010-2022, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
- *	  src/backend/replication/basebackup.c
+ *	  src/backend/backup/basebackup.c
  *
  *-------------------------------------------------------------------------
  */
@@ -17,13 +17,17 @@
 #include <unistd.h>
 #include <time.h>
 
-#include "access/xlog_internal.h"	/* for pg_start/stop_backup */
+#include "access/xlog_internal.h"
+#include "backup/backup_manifest.h"
+#include "backup/basebackup.h"
+#include "backup/basebackup_sink.h"
+#include "backup/basebackup_target.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_control.h"
+#include "commands/defrem.h"
 #include "common/compression.h"
 #include "common/controldata_utils.h"
 #include "common/file_perm.h"
-#include "commands/defrem.h"
 #include "lib/stringinfo.h"
 #include "miscadmin.h"
 #include "nodes/pg_list.h"
@@ -31,10 +35,6 @@
 #include "pgtar.h"
 #include "port.h"
 #include "postmaster/syslogger.h"
-#include "replication/basebackup.h"
-#include "replication/basebackup_sink.h"
-#include "replication/basebackup_target.h"
-#include "replication/backup_manifest.h"
 #include "replication/walsender.h"
 #include "replication/walsender_private.h"
 #include "storage/bufpage.h"
