@@ -656,6 +656,15 @@ XLogEncryptionTweak(char *tweak, TimeLineID timeline, XLogSegNo segment,
 	tweak += sizeof(timeline);
 	memcpy(tweak, &segment, sizeof(XLogSegNo));
 	tweak += sizeof(XLogSegNo);
+	/*
+	 * With the AES-CTR mode, the IV is a counter. Since the encryption engine
+	 * treats the counter as big-endian, we must store it in the same byte
+	 * order to make sure that increments done internally by OpenSSL don't
+	 * overflow into the data we set here.
+	 */
+#ifndef WORDS_BIGENDIAN
+	offset = pg_ntoh32(offset);
+#endif
 	memcpy(tweak, &offset, sizeof(offset));
 }
 

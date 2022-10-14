@@ -15,6 +15,12 @@ of corruption, this one is very easy to identify and handle.
 Integer type may be insufficient if there the temporary file has too many
 segments.
 
+3. Eliminate the risk that the same initialization vector (IV) will be used to
+encrypt different WAL blocks.
+
+So far the layout of the IV was such that the internal counter of the OpenSSL
+engine could overflow into the segment offset.
+
 
 TDE_1.1.1
 =========
