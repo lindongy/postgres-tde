@@ -259,7 +259,8 @@ sample_encryption(char *buf)
  *
  * Input and output buffer may point to the same location.
  *
- * "size" must be a (non-zero) multiple of ENCRYPTION_BLOCK.
+ * "size" must be a (non-zero) multiple of AES_BLOCK_SIZE, unless the cipher
+ * is AES-CTR. (AES-CBC is used for temporary files.)
  *
  * "tweak" value must be an array of at least TWEAK_SIZE bytes. If NULL is
  * passed, we suppose that the input data starts with PageHeaderData. In this
@@ -599,9 +600,10 @@ init_encryption_context(EVP_CIPHER_CTX **ctx_p, bool encrypt, bool buffile)
 
 	/*
 	 * No padding is needed. For relation pages the input block size should
-	 * already be a multiple of ENCRYPTION_BLOCK, while for WAL we want to
-	 * avoid encryption of the unused (zeroed) part of the page, see
-	 * backend/storage/file/README.encryption.
+	 * already be a multiple of AES_BLOCK_SIZE (per openssl/aes.h).
+	 * Furthermore, we use the AES-CTR cipher for both relations and WAL. (As
+	 * for the temporary files, we encrypt BLCKSZ bytes at a time, which is
+	 * also a multiple of AES_BLOCK_SIZE.)
 	 *
 	 * XXX Is this setting worth when we don't call EVP_EncryptFinal_ex()
 	 * anyway? (Given the block_size==1, EVP_EncryptFinal_ex() wouldn't do
