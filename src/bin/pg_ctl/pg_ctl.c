@@ -153,6 +153,8 @@ static void do_kill(pgpid_t pid);
 static void print_msg(const char *msg);
 static void adjust_data_dir(void);
 static char *get_config_variable(const char *var_name, size_t res_size);
+static char *find_config_variable_in_post_opts(const char *var_name);
+static char *find_short_opt_in_post_opts(const char *opt);
 #ifdef USE_ENCRYPTION
 static char *get_first_csv_item(char *csv_list);
 static void get_postmaster_address(char **host_p, char **port_str_p);
@@ -2371,6 +2373,8 @@ adjust_data_dir(void)
 		return;
 	}
 
+	/* Must be a configuration directory, so find the data directory */
+
 	filename = get_config_variable("data_directory", MAXPGPATH);
 
 	if (filename)
@@ -2392,7 +2396,27 @@ get_config_variable(const char *var_name, size_t res_size)
 	char	*result, *cmd;
 	FILE	   *fd;
 
-	/* Must be a configuration directory, so find the data directory */
+	/*
+	 * Unlike the community PG, the retrieval of a configuration parameter is
+	 * not that rare in the TDE fork. Therefore we need to pay more attention
+	 * to situations where "post_opts" also contains the '-C' option, because
+	 * that can override the '-C <var_name>' option we add here (e.g. the
+	 * pg_ctl execution in pg_checksums/t/002_actions.pl), and eventually
+	 * postgres can return value of another GUC than "var_name" to
+	 * us.
+	 *
+	 * However, if we only ignored "post_opts", we could miss the value of
+	 * "var_name" passed this way. Therefore, we first check if the variable
+	 * is in "post_opts". A known case is that pg_upgrade passes
+	 * 'unix_socket_directories' to pg_ctl in regression tests.
+	 */
+	if (post_opts && strlen(post_opts) > 0)
+	{
+		result = find_config_variable_in_post_opts(var_name);
+		if (result)
+			return result;
+	}
+	/* Not there, so we can safely ignore post_opts below. */
 
 	/* we use a private my_exec_path to avoid interfering with later uses */
 	if (exec_path == NULL)
@@ -2401,22 +2425,6 @@ get_config_variable(const char *var_name, size_t res_size)
 		my_exec_path = pg_strdup(exec_path);
 
 	/* it's important for -C to be the first option, see main.c */
-	/*
-	 * Note on merging into the TDE: in the PG core, post_opts is appended, but
-	 * it breaks pg_ctl if it's passed "config-only" directory via the -D
-	 * option and at the same time post_opts contains the -C option - see
-	 * adjust_data_dir(). (The problem is that the -C option from post_opts
-	 * overrides the first -C option we pass to postgres.) On the other hand,
-	 * if -D points to a regular data directory, adjust_data_dir() does not
-	 * get to this invocation of postgres at all, so is not a problem to use
-	 * post_opts here (although it's not useful either).
-	 *
-	 * However, in the TDE fork, we do need to get invoke postgres to get some
-	 * other variables, and thus there's a higher chance that the -C option in
-	 * the post_opts string breaks something. (In particular, the regression
-	 * test 002_actions.pl in pg_checksums does that.) Therefore we omit
-	 * post_opts here.
-	 */
 	cmd = psprintf("\"%s\" -C %s %s",
 				   my_exec_path,
 				   var_name,
@@ -2480,6 +2488,107 @@ get_first_csv_item(char *csv_list)
 		result[end - start] = '\0';
 
 	return result;
+}
+
+static char *
+find_config_variable_in_post_opts(const char *var_name)
+{
+	char	*p, *p_save, *start, *end, *result;
+
+	p = strstr(post_opts, var_name);
+	if (p == NULL)
+	{
+		/*
+		 * In special cases, the value can be passed to the postmaster using a
+		 * "dedicated" option.
+		 */
+		if (strcmp(var_name, "port") == 0)
+			return find_short_opt_in_post_opts("-p");
+	}
+
+	/* Is the name preceded by the -c option? */
+	if ((p - post_opts) < 3)
+		return NULL;
+
+	p_save = p;
+	p--;
+	if (!isspace(*p))
+		return NULL;
+
+	while (p > post_opts && isspace(*p))
+		p--;
+
+	if ((p - post_opts) == 0)
+		return NULL;
+
+	if (*p != 'c' || *(p - 1) != '-')
+		return NULL;
+
+	p = p_save;
+
+	/* Skip the variable name. */
+	p += strlen(var_name);
+
+	if (*p != '=')
+		return NULL;
+
+	p++;
+	start = p;
+	while (*p != '\0' && !isspace(*p))
+		p++;
+
+	/* 'end' actually points to the first character following the value. */
+	end = p;
+
+	if (*start == '\'' || *start == '\"')
+	{
+		char	q = *start;
+
+		end--;
+		if ((end - start) > 1 && *end == q)
+		{
+			start++;
+			result = pnstrdup(start, end - start);
+			return result;
+		}
+	}
+	else if ((end - start) > 0)
+	{
+		result = pnstrdup(start, end - start);
+		return result;
+	}
+
+	return NULL;
+}
+
+static char *
+find_short_opt_in_post_opts(const char *opt)
+{
+	char	*p, *start, *result;
+
+	while ((p = strstr(post_opts, opt)) != NULL)
+	{
+		p += strlen(opt);
+		/* Is this a part of another (possibly long) option? */
+		if (!isspace(*p))
+			continue;
+
+		while (*p != '\0' && isspace(*p))
+			p++;
+
+		if (*p == '\0')
+			/* Should not happen, but it's not our problem. */
+			return NULL;
+
+		/* The value starts here. */
+		start = p;
+		while (*p != '\0' && !isspace(*p))
+			p++;
+		result = pnstrdup(start, p - start);
+		return result;
+	}
+
+	return NULL;
 }
 
 /*
