@@ -496,7 +496,7 @@ decrypt_block(const char *input, char *output, Size size, char *tweak,
 		return;
 	}
 
-	ctx = data_kind != EDK_BUFFILE ? ctx_encrypt : ctx_encrypt_buffile;
+	ctx = data_kind != EDK_BUFFILE ? ctx_decrypt : ctx_decrypt_buffile;
 
 	/*
 	 * The amount of decrypted data should be a multiple of the encryption
