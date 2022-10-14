@@ -10,6 +10,11 @@ The particular problem was an encrypted statistics file whose size was not a
 whole multiple of BLCKSZ (typically 8 kB). Although there can be other kinds
 of corruption, this one is very easy to identify and handle.
 
+2. Fixed overflow during computation of temporary file read/write position.
+
+Integer type may be insufficient if there the temporary file has too many
+segments.
+
 
 TDE_1.1.1
 =========

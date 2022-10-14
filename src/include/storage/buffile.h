@@ -94,8 +94,7 @@ extern int buffile_seg_blocks_logical;
 static inline off_t
 BufFileLogicalToPhysicalPos(off_t pos)
 {
-	off_t	last_seg_bytes, result;
-	int	full_segs;
+	off_t	last_seg_bytes, result,	full_segs;
 
 	if (!data_encrypted)
 		return pos;
@@ -106,9 +105,8 @@ BufFileLogicalToPhysicalPos(off_t pos)
 	last_seg_bytes = pos % BYTES_PER_SEGMENT_LOGICAL;
 	if (last_seg_bytes > 0)
 	{
-		off_t	full_blocks;
-		int		last_block_usage;
-		int		useful_per_block = BLCKSZ - SizeOfBufFilePageHeader;
+		off_t	full_blocks, last_block_usage;
+		off_t	useful_per_block = BLCKSZ - SizeOfBufFilePageHeader;
 
 		full_blocks = last_seg_bytes / useful_per_block;
 		result += full_blocks * BLCKSZ;
@@ -130,8 +128,7 @@ BufFileLogicalToPhysicalPos(off_t pos)
 static inline off_t
 BufFilePhysicalToLogicalPos(off_t pos)
 {
-	int		full_segs;
-	off_t	last_seg_bytes, result;
+	off_t	full_segs, last_seg_bytes, result;
 
 	if (!data_encrypted)
 		return pos;
@@ -142,8 +139,7 @@ BufFilePhysicalToLogicalPos(off_t pos)
 	last_seg_bytes = pos % BYTES_PER_SEGMENT;
 	if (last_seg_bytes > 0)
 	{
-		off_t	full_blocks;
-		int		last_block_usage;
+		off_t	full_blocks, last_block_usage;
 
 		full_blocks = last_seg_bytes / BLCKSZ;
 		last_block_usage = last_seg_bytes % BLCKSZ;
