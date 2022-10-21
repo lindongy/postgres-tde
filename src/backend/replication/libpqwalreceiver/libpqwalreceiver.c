@@ -6,7 +6,6 @@
  * loaded as a dynamic module to avoid linking the main server binary with
  * libpq.
  *
- * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
  * Portions Copyright (c) 2010-2022, PostgreSQL Global Development Group
  *
  *
@@ -481,10 +480,6 @@ libpqrcv_startstreaming(WalReceiverConn *conn,
 	else
 		appendStringInfo(&cmd, " TIMELINE %u",
 						 options->proto.physical.startpointTLI);
-
-	/* Request decryption of the stream if appropriate. */
-	if (!options->logical && options->proto.physical.decrypt)
-		appendStringInfo(&cmd, " DECRYPT");
 
 	/* Start streaming. */
 	res = libpqrcv_PQexec(conn->streamConn, cmd.data);

@@ -37,7 +37,6 @@
  * record, wait for it to be replicated to the standby, and then exit.
  *
  *
- * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
  * Portions Copyright (c) 2010-2022, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
@@ -79,7 +78,6 @@
 #include "replication/walsender.h"
 #include "replication/walsender_private.h"
 #include "storage/condition_variable.h"
-#include "storage/encryption.h"
 #include "storage/fd.h"
 #include "storage/ipc.h"
 #include "storage/pmsignal.h"
@@ -678,8 +676,6 @@ SendTimeLineHistory(TimeLineHistoryCmd *cmd)
 	pq_endmessage(&buf);
 }
 
-static bool decrypt_stream = false;
-
 /*
  * Handle START_REPLICATION command.
  *
@@ -851,20 +847,6 @@ StartReplication(StartReplicationCmd *cmd)
 
 		/* Main loop of walsender */
 		replication_active = true;
-
-		if (cmd->decrypt)
-		{
-			if (data_encrypted)
-				decrypt_stream = true;
-			else
-			{
-				ereport(NOTICE,
-						(errmsg("decryption requested but the cluster is not encrypted")));
-				decrypt_stream = false;
-			}
-		}
-		else
-			decrypt_stream = false;
 
 		WalSndLoop(XLogSendPhysical);
 
@@ -2986,7 +2968,7 @@ retry:
 											 * only WalSndSegmentOpen controls
 											 * whether new TLI is needed. */
 				 &errinfo,
-				 decrypt_stream))
+				 false))
 		WALReadRaiseError(&errinfo);
 
 	/*
@@ -2995,7 +2977,7 @@ retry:
 	 * IV, we've got to decrypt the data and encrypt it while taking the new
 	 * TLI into account.
 	 */
-	if (data_encrypted && !decrypt_stream && tli_req != xlogreader->seg.ws_tli)
+	if (data_encrypted && tli_req != xlogreader->seg.ws_tli)
 	{
 		XLogRecPtr	reencr_ptr = startptr;
 		int	reencr_nbytes = nbytes;

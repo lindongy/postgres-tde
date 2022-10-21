@@ -5,7 +5,6 @@
  *
  * Author: Magnus Hagander <magnus@hagander.net>
  *
- * Portions Copyright (c) 2019-2022, CYBERTEC PostgreSQL International GmbH
  * Portions Copyright (c) 1996-2022, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
@@ -51,7 +50,6 @@ static bool do_create_slot = false;
 static bool slot_exists_ok = false;
 static bool do_drop_slot = false;
 static bool do_sync = true;
-static bool decrypt = false;
 static bool synchronous = false;
 static char *replication_slot = NULL;
 static pg_compress_algorithm compression_algorithm = PG_COMPRESSION_NONE;
@@ -94,9 +92,6 @@ usage(void)
 	printf(_("      --synchronous      flush write-ahead log immediately after writing\n"));
 	printf(_("  -v, --verbose          output verbose messages\n"));
 	printf(_("  -V, --version          output version information, then exit\n"));
-#ifdef	USE_ENCRYPTION
-	printf(_("  -y, --decrypt          receive the data decrypted\n"));
-#endif	/* USE_ENCRYPTION */
 	printf(_("  -Z, --compress=METHOD[:DETAIL]\n"
 			 "                         compress as specified\n"));
 	printf(_("  -?, --help             show this help, then exit\n"));
@@ -654,7 +649,6 @@ StreamLog(void)
 	stream.standby_message_timeout = standby_message_timeout;
 	stream.synchronous = synchronous;
 	stream.do_sync = do_sync;
-	stream.decrypt = decrypt;
 	stream.mark_done = false;
 	stream.walmethod = CreateWalDirectoryMethod(basedir,
 												compression_algorithm,
@@ -750,7 +744,7 @@ main(int argc, char **argv)
 		}
 	}
 
-	while ((c = getopt_long(argc, argv, "D:d:E:h:p:U:s:S:nwWvyZ:",
+	while ((c = getopt_long(argc, argv, "D:d:E:h:p:U:s:S:nwWvZ:",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -797,11 +791,6 @@ main(int argc, char **argv)
 			case 'v':
 				verbose++;
 				break;
-#ifdef	USE_ENCRYPTION
-			case 'y':
-				decrypt = true;
-				break;
-#endif	/* USE_ENCRYPTION */
 			case 'Z':
 				parse_compress_options(optarg, &compression_algorithm_str,
 									   &compression_detail);
