@@ -958,7 +958,7 @@ lazy_scan_heap(LVRelState *vacrel)
 			 * upper-level FSM pages.  Note we have not yet processed blkno.
 			 */
 			FreeSpaceMapVacuumRange(vacrel->rel, next_fsm_block_to_vacuum,
-									blkno, InvalidXLogRecPtr);
+									blkno);
 			next_fsm_block_to_vacuum = blkno;
 
 			/* Report that we are once again scanning the heap */
@@ -1081,7 +1081,7 @@ lazy_scan_heap(LVRelState *vacrel)
 				if (blkno - next_fsm_block_to_vacuum >= VACUUM_FSM_EVERY_PAGES)
 				{
 					FreeSpaceMapVacuumRange(vacrel->rel, next_fsm_block_to_vacuum,
-											blkno, InvalidXLogRecPtr);
+											blkno);
 					next_fsm_block_to_vacuum = blkno;
 				}
 
@@ -1269,8 +1269,7 @@ lazy_scan_heap(LVRelState *vacrel)
 	 * not there were indexes, and whether or not we bypassed index vacuuming.
 	 */
 	if (blkno > next_fsm_block_to_vacuum)
-		FreeSpaceMapVacuumRange(vacrel->rel, next_fsm_block_to_vacuum, blkno,
-								InvalidXLogRecPtr);
+		FreeSpaceMapVacuumRange(vacrel->rel, next_fsm_block_to_vacuum, blkno);
 
 	/* report all blocks vacuumed */
 	pgstat_progress_update_param(PROGRESS_VACUUM_HEAP_BLKS_VACUUMED, blkno);

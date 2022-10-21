@@ -261,6 +261,9 @@ GetRecordedFreeSpace(Relation rel, BlockNumber heapBlk)
  * otherwise the caller is responsible for calling smgrtruncate()
  * to truncate the FSM pages, and FreeSpaceMapVacuumRange()
  * to update upper-level pages in the FSM.
+ *
+ * Valid recptr is passed when the function is called during WAL replay, see
+ * visibilitymap_set() for explanation.
  */
 BlockNumber
 FreeSpaceMapPrepareTruncateRel(Relation rel, BlockNumber nblocks,
@@ -272,7 +275,6 @@ FreeSpaceMapPrepareTruncateRel(Relation rel, BlockNumber nblocks,
 	Buffer		buf;
 
 	Assert(InRecovery || XLogRecPtrIsInvalid(recptr));
-
 
 	/*
 	 * If no FSM has been created yet for this relation, there's nothing to
@@ -369,13 +371,9 @@ FreeSpaceMapVacuum(Relation rel)
  * have new free-space information, so update only the upper-level slots
  * covering that block range.  end == InvalidBlockNumber is equivalent to
  * "all the rest of the relation".
- *
- * Valid recptr is passed when the function is called during WAL replay, see
- * visibilitymap_set() for explanation.
  */
 void
-FreeSpaceMapVacuumRange(Relation rel, BlockNumber start, BlockNumber end,
-						XLogRecPtr recptr)
+FreeSpaceMapVacuumRange(Relation rel, BlockNumber start, BlockNumber end)
 {
 	bool		dummy;
 

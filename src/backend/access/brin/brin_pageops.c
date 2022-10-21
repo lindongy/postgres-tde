@@ -139,8 +139,7 @@ brin_doupdate(Relation idxrel, BlockNumber pagesPerRange,
 				brin_initialize_empty_new_buffer(idxrel, newbuf);
 			UnlockReleaseBuffer(newbuf);
 			if (extended)
-				FreeSpaceMapVacuumRange(idxrel, newblk, newblk + 1,
-										InvalidXLogRecPtr);
+				FreeSpaceMapVacuumRange(idxrel, newblk, newblk + 1);
 		}
 		return false;
 	}
@@ -161,8 +160,7 @@ brin_doupdate(Relation idxrel, BlockNumber pagesPerRange,
 				brin_initialize_empty_new_buffer(idxrel, newbuf);
 			UnlockReleaseBuffer(newbuf);
 			if (extended)
-				FreeSpaceMapVacuumRange(idxrel, newblk, newblk + 1,
-										InvalidXLogRecPtr);
+				FreeSpaceMapVacuumRange(idxrel, newblk, newblk + 1);
 		}
 		return false;
 	}
@@ -217,8 +215,7 @@ brin_doupdate(Relation idxrel, BlockNumber pagesPerRange,
 				brin_initialize_empty_new_buffer(idxrel, newbuf);
 			UnlockReleaseBuffer(newbuf);
 			if (extended)
-				FreeSpaceMapVacuumRange(idxrel, newblk, newblk + 1,
-										InvalidXLogRecPtr);
+				FreeSpaceMapVacuumRange(idxrel, newblk, newblk + 1);
 		}
 
 		return true;
@@ -319,8 +316,7 @@ brin_doupdate(Relation idxrel, BlockNumber pagesPerRange,
 		if (extended)
 		{
 			RecordPageWithFreeSpace(idxrel, newblk, freespace);
-			FreeSpaceMapVacuumRange(idxrel, newblk, newblk + 1,
-									InvalidXLogRecPtr);
+			FreeSpaceMapVacuumRange(idxrel, newblk, newblk + 1);
 		}
 
 		return true;
@@ -473,8 +469,7 @@ brin_doinsert(Relation idxrel, BlockNumber pagesPerRange,
 	if (extended)
 	{
 		RecordPageWithFreeSpace(idxrel, blk, freespace);
-		FreeSpaceMapVacuumRange(idxrel, blk, blk + 1,
-								InvalidXLogRecPtr);
+		FreeSpaceMapVacuumRange(idxrel, blk, blk + 1);
 	}
 
 	return off;
@@ -800,8 +795,7 @@ brin_getinsertbuffer(Relation irel, Buffer oldbuf, Size itemsz,
 
 				if (*extended)
 				{
-					FreeSpaceMapVacuumRange(irel, newblk, newblk + 1,
-											InvalidXLogRecPtr);
+					FreeSpaceMapVacuumRange(irel, newblk, newblk + 1);
 					/* shouldn't matter, but don't confuse caller */
 					*extended = false;
 				}

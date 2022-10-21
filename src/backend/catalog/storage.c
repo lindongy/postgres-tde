@@ -413,8 +413,7 @@ RelationTruncate(Relation rel, BlockNumber nblocks)
 	 * possibility of corruption after a crash anyway.
 	 */
 	if (need_fsm_vacuum)
-		FreeSpaceMapVacuumRange(rel, nblocks, InvalidBlockNumber,
-								InvalidXLogRecPtr);
+		FreeSpaceMapVacuumRange(rel, nblocks, InvalidBlockNumber);
 }
 
 /*
@@ -1098,8 +1097,7 @@ smgr_redo(XLogReaderState *record)
 		 */
 		if (need_fsm_vacuum)
 			FreeSpaceMapVacuumRange(rel, xlrec->blkno,
-									InvalidBlockNumber,
-									lsn);
+									InvalidBlockNumber);
 
 		FreeFakeRelcacheEntry(rel);
 	}

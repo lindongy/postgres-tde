@@ -266,8 +266,7 @@ RelationAddExtraBlocks(Relation relation, BulkInsertState bistate)
 	 * subsequent insertion activity sees all of those nifty free pages we
 	 * just inserted.
 	 */
-	FreeSpaceMapVacuumRange(relation, firstBlock, blockNum + 1,
-							InvalidXLogRecPtr);
+	FreeSpaceMapVacuumRange(relation, firstBlock, blockNum + 1);
 }
 
 /*

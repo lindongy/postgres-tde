@@ -1315,8 +1315,7 @@ terminate_brin_buildstate(BrinBuildState *state)
 		blk = BufferGetBlockNumber(state->bs_currentInsertBuf);
 		ReleaseBuffer(state->bs_currentInsertBuf);
 		RecordPageWithFreeSpace(state->bs_irel, blk, freespace);
-		FreeSpaceMapVacuumRange(state->bs_irel, blk, blk + 1,
-								InvalidXLogRecPtr);
+		FreeSpaceMapVacuumRange(state->bs_irel, blk, blk + 1);
 	}
 
 	brin_free_desc(state->bs_bdesc);

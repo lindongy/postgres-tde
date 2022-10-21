@@ -36,6 +36,6 @@ extern BlockNumber FreeSpaceMapPrepareTruncateRel(Relation rel,
 												  XLogRecPtr recptr);
 extern void FreeSpaceMapVacuum(Relation rel);
 extern void FreeSpaceMapVacuumRange(Relation rel, BlockNumber start,
-									BlockNumber end, XLogRecPtr recptr);
+									BlockNumber end);
 
 #endif							/* FREESPACE_H_ */
