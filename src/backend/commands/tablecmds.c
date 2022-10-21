@@ -10002,6 +10002,8 @@ CloneForeignKeyConstraints(List **wqueue, Relation parentRel,
  * clone those constraints to the given partition.  This is to be called
  * when the partition is being created or attached.
  *
+ * This ignores self-referencing FKs; those are handled by CloneFkReferencing.
+ *
  * This recurses to partitions, if the relation being attached is partitioned.
  * Recursion is done by calling addFkRecurseReferenced.
  */
@@ -10085,6 +10087,17 @@ CloneFkReferenced(Relation parentRel, Relation partitionRel)
 		 * going to clone the parent.
 		 */
 		if (list_member_oid(clone, constrForm->conparentid))
+		{
+			ReleaseSysCache(tuple);
+			continue;
+		}
+
+		/*
+		 * Don't clone self-referencing foreign keys, which can be in the
+		 * partitioned table or in the partition-to-be.
+		 */
+		if (constrForm->conrelid == RelationGetRelid(parentRel) ||
+			constrForm->conrelid == RelationGetRelid(partitionRel))
 		{
 			ReleaseSysCache(tuple);
 			continue;
@@ -10338,16 +10351,6 @@ CloneFkReferencing(List **wqueue, Relation parentRel, Relation partRel)
 
 		/* No dice.  Set up to create our own constraint */
 		fkconstraint = makeNode(Constraint);
-		if (ConstraintNameIsUsed(CONSTRAINT_RELATION,
-								 RelationGetRelid(partRel),
-								 NameStr(constrForm->conname)))
-			fkconstraint->conname =
-				ChooseConstraintName(RelationGetRelationName(partRel),
-									 ChooseForeignKeyConstraintNameAddition(fkconstraint->fk_attrs),
-									 "fkey",
-									 RelationGetNamespace(partRel), NIL);
-		else
-			fkconstraint->conname = pstrdup(NameStr(constrForm->conname));
 		fkconstraint->fk_upd_action = constrForm->confupdtype;
 		fkconstraint->fk_del_action = constrForm->confdeltype;
 		fkconstraint->deferrable = constrForm->condeferrable;
@@ -10362,6 +10365,16 @@ CloneFkReferencing(List **wqueue, Relation parentRel, Relation partRel)
 			fkconstraint->fk_attrs = lappend(fkconstraint->fk_attrs,
 											 makeString(NameStr(att->attname)));
 		}
+		if (ConstraintNameIsUsed(CONSTRAINT_RELATION,
+								 RelationGetRelid(partRel),
+								 NameStr(constrForm->conname)))
+			fkconstraint->conname =
+				ChooseConstraintName(RelationGetRelationName(partRel),
+									 ChooseForeignKeyConstraintNameAddition(fkconstraint->fk_attrs),
+									 "fkey",
+									 RelationGetNamespace(partRel), NIL);
+		else
+			fkconstraint->conname = pstrdup(NameStr(constrForm->conname));
 
 		indexOid = constrForm->conindid;
 		constrOid =
@@ -10615,6 +10628,9 @@ GetForeignKeyActionTriggers(Relation trigrel,
 			continue;
 		if (trgform->tgrelid != confrelid)
 			continue;
+		/* Only ever look at "action" triggers on the PK side. */
+		if (RI_FKey_trigger_type(trgform->tgfoid) != RI_TRIGGER_PK)
+			continue;
 		if (TRIGGER_FOR_DELETE(trgform->tgtype))
 		{
 			Assert(*deleteTriggerOid == InvalidOid);
@@ -10625,8 +10641,11 @@ GetForeignKeyActionTriggers(Relation trigrel,
 			Assert(*updateTriggerOid == InvalidOid);
 			*updateTriggerOid = trgform->oid;
 		}
+#ifndef USE_ASSERT_CHECKING
+		/* In an assert-enabled build, continue looking to find duplicates */
 		if (OidIsValid(*deleteTriggerOid) && OidIsValid(*updateTriggerOid))
 			break;
+#endif
 	}
 
 	if (!OidIsValid(*deleteTriggerOid))
@@ -10670,6 +10689,9 @@ GetForeignKeyCheckTriggers(Relation trigrel,
 			continue;
 		if (trgform->tgrelid != conrelid)
 			continue;
+		/* Only ever look at "check" triggers on the FK side. */
+		if (RI_FKey_trigger_type(trgform->tgfoid) != RI_TRIGGER_FK)
+			continue;
 		if (TRIGGER_FOR_INSERT(trgform->tgtype))
 		{
 			Assert(*insertTriggerOid == InvalidOid);
@@ -10680,8 +10702,11 @@ GetForeignKeyCheckTriggers(Relation trigrel,
 			Assert(*updateTriggerOid == InvalidOid);
 			*updateTriggerOid = trgform->oid;
 		}
+#ifndef USE_ASSERT_CHECKING
+		/* In an assert-enabled build, continue looking to find duplicates. */
 		if (OidIsValid(*insertTriggerOid) && OidIsValid(*updateTriggerOid))
 			break;
+#endif
 	}
 
 	if (!OidIsValid(*insertTriggerOid))
@@ -16436,33 +16461,6 @@ AlterTableNamespace(AlterObjectSchemaStmt *stmt, Oid *oldschema)
 	/* Get and lock schema OID and check its permissions. */
 	newrv = makeRangeVar(stmt->newschema, RelationGetRelationName(rel), -1);
 	nspOid = RangeVarGetAndCheckCreationNamespace(newrv, NoLock, NULL);
-
-	/*
-	 * Check that setting the relation to a different schema won't result in a
-	 * publication having both a schema and the same schema's table, as this
-	 * is not supported.
-	 */
-	if (stmt->objectType == OBJECT_TABLE)
-	{
-		ListCell   *lc;
-		List	   *schemaPubids = GetSchemaPublications(nspOid);
-		List	   *relPubids = GetRelationPublications(RelationGetRelid(rel));
-
-		foreach(lc, relPubids)
-		{
-			Oid			pubid = lfirst_oid(lc);
-
-			if (list_member_oid(schemaPubids, pubid))
-				ereport(ERROR,
-						errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("cannot move table \"%s\" to schema \"%s\"",
-							   RelationGetRelationName(rel), stmt->newschema),
-						errdetail("The schema \"%s\" and same schema's table \"%s\" cannot be part of the same publication \"%s\".",
-								  stmt->newschema,
-								  RelationGetRelationName(rel),
-								  get_publication_name(pubid, false)));
-		}
-	}
 
 	/* common checks on switching namespaces */
 	CheckSetNamespace(oldNspOid, nspOid);

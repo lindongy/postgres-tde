@@ -426,7 +426,7 @@ pgstat_discard_stats(void)
 	{
 		ereport(DEBUG2,
 				(errcode_for_file_access(),
-				 errmsg("unlinked permanent statistics file \"%s\"",
+				 errmsg_internal("unlinked permanent statistics file \"%s\"",
 						PGSTAT_STAT_PERMANENT_FILENAME)));
 	}
 
@@ -1070,7 +1070,7 @@ pgstat_prep_pending_entry(PgStat_Kind kind, Oid dboid, Oid objoid, bool *created
 	if (unlikely(!pgStatPendingContext))
 	{
 		pgStatPendingContext =
-			AllocSetContextCreate(CacheMemoryContext,
+			AllocSetContextCreate(TopMemoryContext,
 								  "PgStat Pending",
 								  ALLOCSET_SMALL_SIZES);
 	}
@@ -1380,7 +1380,7 @@ pgstat_write_statsfile(void)
 			/* stats entry identified by name on disk (e.g. slots) */
 			NameData	name;
 
-			kind_info->to_serialized_name(shstats, &name);
+			kind_info->to_serialized_name(&ps->key, shstats, &name);
 
 			write_char(fpout, 'N', &failed);
 			write_chunk_s(fpout, &ps->key.kind, &failed);

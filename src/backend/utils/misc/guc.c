@@ -1223,16 +1223,6 @@ static struct config_bool ConfigureNamesBool[] =
 		NULL, NULL, NULL
 	},
 	{
-		{"enable_group_by_reordering", PGC_USERSET, QUERY_TUNING_METHOD,
-			gettext_noop("enable reordering of GROUP BY key"),
-			NULL,
-			GUC_EXPLAIN
-		},
-		&enable_group_by_reordering,
-		true,
-		NULL, NULL, NULL
-	},
-	{
 		{"geqo", PGC_USERSET, QUERY_TUNING_GEQO,
 			gettext_noop("Enables genetic query optimization."),
 			gettext_noop("This algorithm attempts to do planning without "
@@ -2856,8 +2846,8 @@ static struct config_int ConfigureNamesInt[] =
 
 	{
 		{"wal_decode_buffer_size", PGC_POSTMASTER, WAL_RECOVERY,
-			gettext_noop("Maximum buffer size for reading ahead in the WAL during recovery."),
-			gettext_noop("This controls the maximum distance we can read ahead in the WAL to prefetch referenced blocks."),
+			gettext_noop("Buffer size for reading ahead in the WAL during recovery."),
+			gettext_noop("Maximum distance to read ahead in the WAL to prefetch referenced data blocks."),
 			GUC_UNIT_BYTE
 		},
 		&wal_decode_buffer_size,
@@ -3514,7 +3504,7 @@ static struct config_int ConfigureNamesInt[] =
 	{
 		{"tcp_keepalives_count", PGC_USERSET, CONN_AUTH_SETTINGS,
 			gettext_noop("Maximum number of TCP keepalive retransmits."),
-			gettext_noop("This controls the number of consecutive keepalive retransmits that can be "
+			gettext_noop("Number of consecutive keepalive retransmits that can be "
 						 "lost before a connection is considered dead. A value of 0 uses the "
 						 "system default."),
 		},
@@ -5003,7 +4993,7 @@ static struct config_enum ConfigureNamesEnum[] =
 
 	{
 		{"stats_fetch_consistency", PGC_USERSET, STATS_CUMULATIVE,
-			gettext_noop("Sets the consistency of accesses to statistics data"),
+			gettext_noop("Sets the consistency of accesses to statistics data."),
 			NULL
 		},
 		&pgstat_fetch_consistency,
@@ -5094,7 +5084,7 @@ static struct config_enum ConfigureNamesEnum[] =
 
 	{
 		{"recovery_prefetch", PGC_SIGHUP, WAL_RECOVERY,
-			gettext_noop("Prefetch referenced blocks during recovery"),
+			gettext_noop("Prefetch referenced blocks during recovery."),
 			gettext_noop("Look ahead in the WAL to find references to uncached data.")
 		},
 		&recovery_prefetch,

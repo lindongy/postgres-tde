@@ -864,7 +864,7 @@ parse_basebackup_options(List *options, basebackup_options *opt)
 			if (!parse_compress_algorithm(optval, &opt->compression))
 				ereport(ERROR,
 						(errcode(ERRCODE_SYNTAX_ERROR),
-						 errmsg("unrecognized compression algorithm \"%s\"",
+						 errmsg("unrecognized compression algorithm: \"%s\"",
 								optval)));
 			o_compression = true;
 		}
@@ -909,7 +909,7 @@ parse_basebackup_options(List *options, basebackup_options *opt)
 		if (target_detail_str != NULL)
 			ereport(ERROR,
 					(errcode(ERRCODE_SYNTAX_ERROR),
-					 errmsg("target '%s' does not accept a target detail",
+					 errmsg("target \"%s\" does not accept a target detail",
 							target_str)));
 		opt->send_to_client = true;
 	}
@@ -920,7 +920,7 @@ parse_basebackup_options(List *options, basebackup_options *opt)
 	if (o_compression_detail && !o_compression)
 		ereport(ERROR,
 				(errcode(ERRCODE_SYNTAX_ERROR),
-				 errmsg("compression detail requires compression")));
+				 errmsg("compression detail cannot be specified unless compression is enabled")));
 
 	if (o_compression)
 	{

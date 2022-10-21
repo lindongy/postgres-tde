@@ -907,10 +907,6 @@ createdb(ParseState *pstate, const CreatedbStmt *stmt)
 					 errmsg("unrecognized locale provider: %s",
 							locproviderstr)));
 	}
-	if (diculocale && dblocprovider != COLLPROVIDER_ICU)
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-				 errmsg("ICU locale cannot be specified unless locale provider is ICU")));
 	if (distemplate && distemplate->arg)
 		dbistemplate = defGetBoolean(distemplate);
 	if (dallowconnections && dallowconnections->arg)
@@ -995,7 +991,7 @@ createdb(ParseState *pstate, const CreatedbStmt *stmt)
 		else
 			ereport(ERROR,
 					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-					 errmsg("invalid create database strategy %s", strategy),
+					 errmsg("invalid create database strategy \"%s\"", strategy),
 					 errhint("Valid strategies are \"wal_log\", and \"file_copy\".")));
 	}
 
@@ -1033,6 +1029,12 @@ createdb(ParseState *pstate, const CreatedbStmt *stmt)
 
 	if (dblocprovider == COLLPROVIDER_ICU)
 	{
+		if (!(is_encoding_supported_by_icu(encoding)))
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+					 errmsg("encoding \"%s\" is not supported with ICU provider",
+							pg_encoding_to_char(encoding))));
+
 		/*
 		 * This would happen if template0 uses the libc provider but the new
 		 * database uses icu.
@@ -1041,10 +1043,16 @@ createdb(ParseState *pstate, const CreatedbStmt *stmt)
 			ereport(ERROR,
 					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 					 errmsg("ICU locale must be specified")));
-	}
 
-	if (dblocprovider == COLLPROVIDER_ICU)
 		check_icu_locale(dbiculocale);
+	}
+	else
+	{
+		if (dbiculocale)
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+					 errmsg("ICU locale cannot be specified unless locale provider is ICU")));
+	}
 
 	/*
 	 * Check that the new encoding and locale settings match the source

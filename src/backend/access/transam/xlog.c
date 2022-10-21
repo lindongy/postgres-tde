@@ -1782,7 +1782,7 @@ AdvanceXLInsertBuffer(XLogRecPtr upto, TimeLineID tli, bool opportunistic)
 	XLogRecPtr	NewPageEndPtr = InvalidXLogRecPtr;
 	XLogRecPtr	NewPageBeginPtr;
 	XLogPageHeader NewPage;
-	int			npages = 0;
+	int			npages pg_attribute_unused() = 0;
 
 	LWLockAcquire(WALBufMappingLock, LW_EXCLUSIVE);
 
@@ -5481,6 +5481,12 @@ StartupXLOG(void)
 	EndOfLogTLI = endOfRecoveryInfo->endOfLogTLI;
 	abortedRecPtr = endOfRecoveryInfo->abortedRecPtr;
 	missingContrecPtr = endOfRecoveryInfo->missingContrecPtr;
+
+	/*
+	 * Reset ps status display, so as no information related to recovery
+	 * shows up.
+	 */
+	set_ps_display("");
 
 	/*
 	 * When recovering from a backup (we are in recovery, and archive recovery

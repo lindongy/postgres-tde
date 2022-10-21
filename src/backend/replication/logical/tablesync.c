@@ -937,8 +937,8 @@ fetch_remote_table_info(char *nspname, char *relname,
 	 *
 	 * 2) one of the subscribed publications has puballtables set to true
 	 *
-	 * 3) one of the subscribed publications is declared as ALL TABLES IN
-	 * SCHEMA that includes this relation
+	 * 3) one of the subscribed publications is declared as TABLES IN SCHEMA
+	 * that includes this relation
 	 */
 	if (walrcv_server_version(LogRepWorkerWalRcvConn) >= 150000)
 	{
@@ -1320,7 +1320,7 @@ LogicalRepSyncTableStart(XLogRecPtr *origin_startpos)
 	if (check_enable_rls(RelationGetRelid(rel), InvalidOid, false) == RLS_ENABLED)
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("\"%s\" cannot replicate into relation with row-level security enabled: \"%s\"",
+				 errmsg("user \"%s\" cannot replicate into relation with row-level security enabled: \"%s\"",
 						GetUserNameFromId(GetUserId(), true),
 						RelationGetRelationName(rel))));
 
