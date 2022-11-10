@@ -222,7 +222,7 @@ typedef struct
 	uint32		large_object;
 	bool		date_is_int;
 	bool		float8_pass_by_value;
-	bool		data_checksum_version;
+	uint32		data_checksum_version;
 	uint8		data_cipher;
 	uint8		encryption_verification[ENCRYPTION_SAMPLE_SIZE];
 } ControlData;
