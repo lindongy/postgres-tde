@@ -286,9 +286,6 @@ ginHeapTupleFastInsert(GinState *ginstate, GinTupleCollector *collector)
 		memset(&sublist, 0, sizeof(GinMetaPageData));
 		makeSublist(index, collector->tuples, collector->ntuples, &sublist);
 
-		if (needWal)
-			XLogBeginInsert();
-
 		/*
 		 * metapage was unlocked, see above
 		 */
@@ -308,6 +305,9 @@ ginHeapTupleFastInsert(GinState *ginstate, GinTupleCollector *collector)
 
 			metadata->nPendingPages = sublist.nPendingPages;
 			metadata->nPendingHeapTuples = sublist.nPendingHeapTuples;
+
+			if (needWal)
+				XLogBeginInsert();
 		}
 		else
 		{
@@ -336,7 +336,10 @@ ginHeapTupleFastInsert(GinState *ginstate, GinTupleCollector *collector)
 			metadata->nPendingHeapTuples += sublist.nPendingHeapTuples;
 
 			if (needWal)
+			{
+				XLogBeginInsert();
 				XLogRegisterBuffer(1, buffer, REGBUF_STANDARD);
+			}
 		}
 	}
 	else
@@ -362,10 +365,10 @@ ginHeapTupleFastInsert(GinState *ginstate, GinTupleCollector *collector)
 
 		data.ntuples = collector->ntuples;
 
+		START_CRIT_SECTION();
+
 		if (needWal)
 			XLogBeginInsert();
-
-		START_CRIT_SECTION();
 
 		/*
 		 * Increase counter of heap tuples
