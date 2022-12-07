@@ -2458,38 +2458,6 @@ get_config_variable(const char *var_name, size_t res_size)
 	return result;
 }
 
-#ifdef USE_ENCRYPTION
-/*
- * Get the first item of comma-separated list or NULL if there's no valid
- * item.
- */
-static char *
-get_first_csv_item(char *csv_list)
-{
-	char	*start, *end, *result;
-
-	start = csv_list;
-	/* First, skip the leading space. */
-	while (isspace(*start))
-		start++;
-	if (*start == '\0')
-		return NULL;
-
-	end = start;
-	while (*end != '\0' && *end != ',' && !isspace(*end))
-		end++;
-	if (end == start)
-		return NULL;
-
-	result = pg_strdup(start);
-
-	/* Trim the string if needed. */
-	if (*end != '\0')
-		result[end - start] = '\0';
-
-	return result;
-}
-
 static char *
 find_config_variable_in_post_opts(const char *var_name)
 {
@@ -2589,6 +2557,38 @@ find_short_opt_in_post_opts(const char *opt)
 	}
 
 	return NULL;
+}
+
+#ifdef USE_ENCRYPTION
+/*
+ * Get the first item of comma-separated list or NULL if there's no valid
+ * item.
+ */
+static char *
+get_first_csv_item(char *csv_list)
+{
+	char	*start, *end, *result;
+
+	start = csv_list;
+	/* First, skip the leading space. */
+	while (isspace(*start))
+		start++;
+	if (*start == '\0')
+		return NULL;
+
+	end = start;
+	while (*end != '\0' && *end != ',' && !isspace(*end))
+		end++;
+	if (end == start)
+		return NULL;
+
+	result = pg_strdup(start);
+
+	/* Trim the string if needed. */
+	if (*end != '\0')
+		result[end - start] = '\0';
+
+	return result;
 }
 
 /*

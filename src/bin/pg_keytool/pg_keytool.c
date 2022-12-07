@@ -267,7 +267,7 @@ main(int argc, char **argv)
 		}
 	}
 #else
-	pg_log_fatal(ENCRYPTION_NOT_SUPPORTED_MSG);
+	pg_fatal(ENCRYPTION_NOT_SUPPORTED_MSG);
 	exit(EXIT_FAILURE);
 #endif							/* USE_ENCRYPTION */
 	return 0;
