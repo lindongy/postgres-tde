@@ -414,8 +414,7 @@ gist_indexsortbuild(GISTBuildState *state)
 	 * Empty page has no valid LSN, therefore encryption is not applicable.
 	 */
 	page = palloc0(BLCKSZ);
-	RelationOpenSmgr(state->indexrel);
-	smgrextend(state->indexrel->rd_smgr, MAIN_FORKNUM, GIST_ROOT_BLKNO,
+	smgrextend(RelationGetSmgr(state->indexrel), MAIN_FORKNUM, GIST_ROOT_BLKNO,
 			   page, true);
 	state->pages_allocated++;
 	state->pages_written++;
@@ -455,7 +454,6 @@ gist_indexsortbuild(GISTBuildState *state)
 	gist_indexsortbuild_flush_ready_pages(state);
 
 	/* Write out the root */
-	RelationOpenSmgr(state->indexrel);
 
 	buf = (char *) pagestate->page;
 	PageSetLSN(buf, GistBuildLSN);
@@ -471,7 +469,7 @@ gist_indexsortbuild(GISTBuildState *state)
 	}
 
 	PageSetChecksumInplace(buf, GIST_ROOT_BLKNO);
-	smgrwrite(state->indexrel->rd_smgr, MAIN_FORKNUM, GIST_ROOT_BLKNO,
+	smgrwrite(RelationGetSmgr(state->indexrel), MAIN_FORKNUM, GIST_ROOT_BLKNO,
 			  buf, true);
 
 	/*
@@ -495,10 +493,7 @@ gist_indexsortbuild(GISTBuildState *state)
 	 * still not be on disk when the crash occurs.
 	 */
 	if (RelationNeedsWAL(state->indexrel))
-	{
-		RelationOpenSmgr(state->indexrel);
-		smgrimmedsync(state->indexrel->rd_smgr, MAIN_FORKNUM);
-	}
+		smgrimmedsync(RelationGetSmgr(state->indexrel), MAIN_FORKNUM);
 }
 
 /*
@@ -602,8 +597,6 @@ gist_indexsortbuild_flush_ready_pages(GISTBuildState *state)
 	if (state->ready_num_pages == 0)
 		return;
 
-	RelationOpenSmgr(state->indexrel);
-
 	for (int i = 0; i < state->ready_num_pages; i++)
 	{
 		Page		page = state->ready_pages[i];
@@ -627,7 +620,7 @@ gist_indexsortbuild_flush_ready_pages(GISTBuildState *state)
 		}
 
 		PageSetChecksumInplace(buf, blkno);
-		smgrextend(state->indexrel->rd_smgr, MAIN_FORKNUM, blkno, buf, true);
+		smgrextend(RelationGetSmgr(state->indexrel), MAIN_FORKNUM, blkno, buf, true);
 
 		state->pages_written++;
 	}
@@ -916,7 +909,8 @@ gistBuildCallback(Relation index,
 	 */
 	if ((buildstate->buildMode == GIST_BUFFERING_AUTO &&
 		 buildstate->indtuples % BUFFERING_MODE_SWITCH_CHECK_STEP == 0 &&
-		 effective_cache_size < smgrnblocks(index->rd_smgr, MAIN_FORKNUM)) ||
+		 effective_cache_size < smgrnblocks(RelationGetSmgr(index),
+											MAIN_FORKNUM)) ||
 		(buildstate->buildMode == GIST_BUFFERING_STATS &&
 		 buildstate->indtuples >= BUFFERING_MODE_TUPLE_SIZE_STATS_TARGET))
 	{

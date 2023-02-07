@@ -590,9 +590,6 @@ PrefetchBuffer(Relation reln, ForkNumber forkNum, BlockNumber blockNum)
 	Assert(RelationIsValid(reln));
 	Assert(BlockNumberIsValid(blockNum));
 
-	/* Open it at the smgr level if not already done */
-	RelationOpenSmgr(reln);
-
 	if (RelationUsesLocalBuffers(reln))
 	{
 		/* see comments in ReadBufferExtended */
@@ -602,12 +599,12 @@ PrefetchBuffer(Relation reln, ForkNumber forkNum, BlockNumber blockNum)
 					 errmsg("cannot access temporary tables of other sessions")));
 
 		/* pass it off to localbuf.c */
-		return PrefetchLocalBuffer(reln->rd_smgr, forkNum, blockNum);
+		return PrefetchLocalBuffer(RelationGetSmgr(reln), forkNum, blockNum);
 	}
 	else
 	{
 		/* pass it to the shared buffer version */
-		return PrefetchSharedBuffer(reln->rd_smgr, forkNum, blockNum);
+		return PrefetchSharedBuffer(RelationGetSmgr(reln), forkNum, blockNum);
 	}
 }
 
@@ -758,9 +755,6 @@ ReadBufferExtended(Relation reln, ForkNumber forkNum, BlockNumber blockNum,
 	bool		hit;
 	Buffer		buf;
 
-	/* Open it at the smgr level if not already done */
-	RelationOpenSmgr(reln);
-
 	/*
 	 * Reject attempts to read non-local temporary relations; we would be
 	 * likely to get wrong data since we have no visibility into the owning
@@ -776,7 +770,7 @@ ReadBufferExtended(Relation reln, ForkNumber forkNum, BlockNumber blockNum,
 	 * miss.
 	 */
 	pgstat_count_buffer_read(reln);
-	buf = ReadBuffer_common(reln->rd_smgr, reln->rd_rel->relpersistence,
+	buf = ReadBuffer_common(RelationGetSmgr(reln), reln->rd_rel->relpersistence,
 							forkNum, blockNum, mode, strategy, &hit);
 	if (hit)
 		pgstat_count_buffer_hit(reln);
@@ -3035,10 +3029,7 @@ RelationGetNumberOfBlocksInFork(Relation relation, ForkNumber forkNum)
 		case RELKIND_SEQUENCE:
 		case RELKIND_INDEX:
 		case RELKIND_PARTITIONED_INDEX:
-			/* Open it at the smgr level if not already done */
-			RelationOpenSmgr(relation);
-
-			return smgrnblocks(relation->rd_smgr, forkNum);
+			return smgrnblocks(RelationGetSmgr(relation), forkNum);
 
 		case RELKIND_RELATION:
 		case RELKIND_TOASTVALUE:
@@ -3617,9 +3608,6 @@ FlushRelationBuffers(Relation rel)
 	int			i;
 	BufferDesc *bufHdr;
 
-	/* Open rel at the smgr level if not already done */
-	RelationOpenSmgr(rel);
-
 	if (RelationUsesLocalBuffers(rel))
 	{
 		for (i = 0; i < NLocBuffer; i++)
@@ -3658,7 +3646,8 @@ FlushRelationBuffers(Relation rel)
 				}
 
 				PageSetChecksumInplace(localpage, bufHdr->tag.blockNum);
-				smgrwrite(rel->rd_smgr,
+
+				smgrwrite(RelationGetSmgr(rel),
 						  bufHdr->tag.forkNum,
 						  bufHdr->tag.blockNum,
 						  localpage,
@@ -3699,7 +3688,7 @@ FlushRelationBuffers(Relation rel)
 		{
 			PinBuffer_Locked(bufHdr);
 			LWLockAcquire(BufferDescriptorGetContentLock(bufHdr), LW_SHARED);
-			FlushBuffer(bufHdr, rel->rd_smgr);
+			FlushBuffer(bufHdr, RelationGetSmgr(rel));
 			LWLockRelease(BufferDescriptorGetContentLock(bufHdr));
 			UnpinBuffer(bufHdr, true);
 		}
