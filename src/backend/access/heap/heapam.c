@@ -5869,6 +5869,10 @@ heap_abort_speculative(Relation relation, ItemPointer tid)
  *
  * tuple is an in-memory tuple structure containing the data to be written
  * over the target tuple.  Also, tuple->t_self identifies the target tuple.
+ *
+ * Note that the tuple updated here had better not come directly from the
+ * syscache if the relation has a toast relation as this tuple could
+ * include toast values that have been expanded, causing a failure here.
  */
 void
 heap_inplace_update(Relation relation, HeapTuple tuple)
@@ -8031,8 +8035,7 @@ heap_xlog_visible(XLogReaderState *record)
 		/*
 		 * We don't bump the LSN of the heap page when setting the visibility
 		 * map bit (unless checksums or wal_hint_bits is enabled, in which
-		 * case we must), because that would generate an unworkable volume of
-		 * full-page writes.  This exposes us to torn page hazards, but since
+		 * case we must). This exposes us to torn page hazards, but since
 		 * we're not inspecting the existing page contents in any way, we
 		 * don't care.
 		 *
@@ -8045,6 +8048,9 @@ heap_xlog_visible(XLogReaderState *record)
 		page = BufferGetPage(buffer);
 
 		PageSetAllVisible(page);
+
+		if (XLogHintBitIsNeeded())
+			PageSetLSN(page, lsn);
 
 		MarkBufferDirty(buffer);
 	}
@@ -9130,8 +9136,7 @@ heap_sync(Relation rel)
 
 	/* main heap */
 	FlushRelationBuffers(rel);
-	/* FlushRelationBuffers will have opened rd_smgr */
-	smgrimmedsync(rel->rd_smgr, MAIN_FORKNUM);
+	smgrimmedsync(RelationGetSmgr(rel), MAIN_FORKNUM);
 
 	/* FSM is not critical, don't bother syncing it */
 
@@ -9142,7 +9147,7 @@ heap_sync(Relation rel)
 
 		toastrel = table_open(rel->rd_rel->reltoastrelid, AccessShareLock);
 		FlushRelationBuffers(toastrel);
-		smgrimmedsync(toastrel->rd_smgr, MAIN_FORKNUM);
+		smgrimmedsync(RelationGetSmgr(toastrel), MAIN_FORKNUM);
 		table_close(toastrel, AccessShareLock);
 	}
 }

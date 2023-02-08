@@ -362,10 +362,8 @@ end_heap_rewrite(RewriteState state)
 			buf = encrypt_buf.data;
 		}
 
-		RelationOpenSmgr(state->rs_new_rel);
-
 		PageSetChecksumInplace(buf, state->rs_blockno);
-		smgrextend(state->rs_new_rel->rd_smgr, MAIN_FORKNUM, state->rs_blockno,
+		smgrextend(RelationGetSmgr(state->rs_new_rel), MAIN_FORKNUM, state->rs_blockno,
 				   buf, true);
 	}
 
@@ -741,8 +739,6 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 			 * fsync for this write; we'll do it ourselves in
 			 * end_heap_rewrite.
 			 */
-			RelationOpenSmgr(state->rs_new_rel);
-
 			/*
 			 * Encrypt only if we have valid IV. It should be always except
 			 * when log_newpage() encountered an empty page - it should be
@@ -760,7 +756,7 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 			}
 
 			PageSetChecksumInplace(buf, state->rs_blockno);
-			smgrextend(state->rs_new_rel->rd_smgr, MAIN_FORKNUM,
+			smgrextend(RelationGetSmgr(state->rs_new_rel), MAIN_FORKNUM,
 					   state->rs_blockno, buf, true);
 
 			state->rs_blockno++;

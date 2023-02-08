@@ -659,9 +659,6 @@ _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 	char	*buf;
 	XLogRecPtr	lsn = InvalidXLogRecPtr;
 
-	/* Ensure rd_smgr is open (could have been closed by relcache flush!) */
-	RelationOpenSmgr(wstate->index);
-
 	/* XLOG stuff */
 	if (wstate->btws_use_wal)
 	{
@@ -683,13 +680,12 @@ _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 	{
 		if (!wstate->btws_zeropage)
 			wstate->btws_zeropage = (Page) palloc0(BLCKSZ);
-
 		/* don't set checksum for all-zero page */
 		/*
 		 * Encryption: no need to enforce LSN, all-zero page won't be
 		 * encrypted anyway.
 		 */
-		smgrextend(wstate->index->rd_smgr, MAIN_FORKNUM,
+		smgrextend(RelationGetSmgr(wstate->index), MAIN_FORKNUM,
 				   wstate->btws_pages_written++,
 				   (char *) wstate->btws_zeropage,
 				   true);
@@ -722,13 +718,13 @@ _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 	if (blkno == wstate->btws_pages_written)
 	{
 		/* extending the file... */
-		smgrextend(wstate->index->rd_smgr, MAIN_FORKNUM, blkno, buf, true);
+		smgrextend(RelationGetSmgr(wstate->index), MAIN_FORKNUM, blkno, buf, true);
 		wstate->btws_pages_written++;
 	}
 	else
 	{
 		/* overwriting a block we zero-filled before */
-		smgrwrite(wstate->index->rd_smgr, MAIN_FORKNUM, blkno, buf, true);
+		smgrwrite(RelationGetSmgr(wstate->index), MAIN_FORKNUM, blkno, buf, true);
 	}
 
 	pfree(page);
@@ -1333,10 +1329,7 @@ _bt_load(BTWriteState *wstate, BTSpool *btspool, BTSpool *btspool2)
 	 * occurs.
 	 */
 	if (RelationNeedsWAL(wstate->index))
-	{
-		RelationOpenSmgr(wstate->index);
-		smgrimmedsync(wstate->index->rd_smgr, MAIN_FORKNUM);
-	}
+		smgrimmedsync(RelationGetSmgr(wstate->index), MAIN_FORKNUM);
 }
 
 /*
