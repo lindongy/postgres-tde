@@ -1,3 +1,12 @@
+TDE_1.1.4
+=========
+
+Bug Fixes
+---------
+
+Fixed configure.ac so it generates the correct configure script.
+
+
 TDE_1.1.3
 =========
 
