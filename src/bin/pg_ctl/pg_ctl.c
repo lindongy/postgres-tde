@@ -153,8 +153,7 @@ static void do_kill(pgpid_t pid);
 static void print_msg(const char *msg);
 static void adjust_data_dir(void);
 static char *get_config_variable(const char *var_name, size_t res_size);
-static char *find_config_variable_in_post_opts(const char *var_name);
-static char *find_short_opt_in_post_opts(const char *opt);
+static char *remove_out_opts_from_post_opts(void);
 #ifdef USE_ENCRYPTION
 static char *get_first_csv_item(char *csv_list);
 static void get_postmaster_address(char **host_p, char **port_str_p);
@@ -2395,6 +2394,7 @@ get_config_variable(const char *var_name, size_t res_size)
 			   *my_exec_path;
 	char	*result, *cmd;
 	FILE	   *fd;
+	char	*post_opts_adjusted = NULL;
 
 	/*
 	 * Unlike the community PG, the retrieval of a configuration parameter is
@@ -2402,21 +2402,12 @@ get_config_variable(const char *var_name, size_t res_size)
 	 * to situations where "post_opts" also contains the '-C' option, because
 	 * that can override the '-C <var_name>' option we add here (e.g. the
 	 * pg_ctl execution in pg_checksums/t/002_actions.pl), and eventually
-	 * postgres can return value of another GUC than "var_name" to
-	 * us.
-	 *
-	 * However, if we only ignored "post_opts", we could miss the value of
-	 * "var_name" passed this way. Therefore, we first check if the variable
-	 * is in "post_opts". A known case is that pg_upgrade passes
-	 * 'unix_socket_directories' to pg_ctl in regression tests.
+	 * postgres can return value of another GUC than our "var_name" to
+	 * us. Removal of the -C options from post_opts seems to be the simplest
+	 * solution.
 	 */
 	if (post_opts && strlen(post_opts) > 0)
-	{
-		result = find_config_variable_in_post_opts(var_name);
-		if (result)
-			return result;
-	}
-	/* Not there, so we can safely ignore post_opts below. */
+		post_opts_adjusted = remove_out_opts_from_post_opts();
 
 	/* we use a private my_exec_path to avoid interfering with later uses */
 	if (exec_path == NULL)
@@ -2425,10 +2416,11 @@ get_config_variable(const char *var_name, size_t res_size)
 		my_exec_path = pg_strdup(exec_path);
 
 	/* it's important for -C to be the first option, see main.c */
-	cmd = psprintf("\"%s\" -C %s %s",
+	cmd = psprintf("\"%s\" -C %s %s%s",
 				   my_exec_path,
 				   var_name,
-				   pgdata_opt ? pgdata_opt : "");
+				   pgdata_opt ? pgdata_opt : "",
+				   post_opts_adjusted ? post_opts_adjusted : "");
 
 	result = pg_malloc(res_size);
 	fd = popen(cmd, "r");
@@ -2458,105 +2450,77 @@ get_config_variable(const char *var_name, size_t res_size)
 	return result;
 }
 
+/*
+ * Return post_opts with all occurrences of the -C option removed.
+ */
 static char *
-find_config_variable_in_post_opts(const char *var_name)
+remove_out_opts_from_post_opts(void)
 {
-	char	*p, *p_save, *start, *end, *result;
+	char	*result, *start, *c;
+	bool	found;
 
-	p = strstr(post_opts, var_name);
-	if (p == NULL)
+	if (post_opts == NULL || strlen(post_opts) == 0)
+		return NULL;
+
+	result = pstrdup(post_opts);
+
+	while ((start = strstr(result, "-C")) != NULL)
 	{
+		char	*res_new, *end;
+		int		start_pos, end_pos, remains;
+
+		start_pos = start - result;
+
+		/* Skip the option, space and value. */
+		end = start;
+		end += strlen("-C");
 		/*
-		 * In special cases, the value can be passed to the postmaster using a
-		 * "dedicated" option.
+		 * Make sure we don't overrun the string end, but don't care about
+		 * corrupt options. (Such will make the postgres process fail anyway.)
 		 */
-		if (strcmp(var_name, "port") == 0)
-			return find_short_opt_in_post_opts("-p");
-	}
+		while (isspace(*end) && *end != '\0')
+			end++;
+		while (!isspace(*end) && *end != '\0')
+			end++;
+		end_pos = end - result;
 
-	/* Is the name preceded by the -c option? */
-	if ((p - post_opts) < 3)
-		return NULL;
-
-	p_save = p;
-	p--;
-	if (!isspace(*p))
-		return NULL;
-
-	while (p > post_opts && isspace(*p))
-		p--;
-
-	if ((p - post_opts) == 0)
-		return NULL;
-
-	if (*p != 'c' || *(p - 1) != '-')
-		return NULL;
-
-	p = p_save;
-
-	/* Skip the variable name. */
-	p += strlen(var_name);
-
-	if (*p != '=')
-		return NULL;
-
-	p++;
-	start = p;
-	while (*p != '\0' && !isspace(*p))
-		p++;
-
-	/* 'end' actually points to the first character following the value. */
-	end = p;
-
-	if (*start == '\'' || *start == '\"')
-	{
-		char	q = *start;
-
-		end--;
-		if ((end - start) > 1 && *end == q)
+		res_new = (char *) palloc0(strlen(result) + 1);
+		c = res_new;
+		/* Copy the part in front of the option, if there's some. */
+		if (start_pos > 0)
 		{
-			start++;
-			result = pnstrdup(start, end - start);
-			return result;
+			memcpy(c, result, start_pos);
+			c += start_pos;
 		}
+		/* Likewise, the part following the option. */
+		remains = strlen(result) - end_pos;
+		if (remains > 0)
+			memcpy(c, result + end_pos, remains);
+
+		pfree(result);
+		result = res_new;
 	}
-	else if ((end - start) > 0)
+
+	/* Return NULL if only whitespace is left. */
+	c = result;
+	found = false;
+	while (*c != '\0')
 	{
-		result = pnstrdup(start, end - start);
-		return result;
+		if (!isspace(*c))
+		{
+			found = true;
+			break;
+		}
+
+		c++;
 	}
-
-	return NULL;
-}
-
-static char *
-find_short_opt_in_post_opts(const char *opt)
-{
-	char	*p, *start, *result;
-
-	while ((p = strstr(post_opts, opt)) != NULL)
+	if (!found)
 	{
-		p += strlen(opt);
-		/* Is this a part of another (possibly long) option? */
-		if (!isspace(*p))
-			continue;
-
-		while (*p != '\0' && isspace(*p))
-			p++;
-
-		if (*p == '\0')
-			/* Should not happen, but it's not our problem. */
-			return NULL;
-
-		/* The value starts here. */
-		start = p;
-		while (*p != '\0' && !isspace(*p))
-			p++;
-		result = pnstrdup(start, p - start);
-		return result;
+		pfree(result);
+		return NULL;
 	}
 
-	return NULL;
+	return result;
 }
 
 #ifdef USE_ENCRYPTION
