@@ -540,7 +540,7 @@ typedef struct
 	int			MaxBackends;
 #ifdef USE_ENCRYPTION
 	bool		data_encrypted;
-	unsigned char encryption_key[ENCRYPTION_KEY_LENGTH];
+	ShmemEncryptionKey	*encryption_key;
 #endif
 #ifdef WIN32
 	HANDLE		PostmasterHandle;
@@ -1422,20 +1422,40 @@ PostmasterMain(int argc, char *argv[])
 	 * If encryption key is needed and we don't have it yet, call ServerLoop()
 	 * in a restricted mode which allows a client application to send us the
 	 * key. Regular client connections are not allowed yet.
-	 *
-	 * (If encryption_setup_done is true, it probably means that postmaster is
-	 * restarting after crash.)
 	 */
-	if (data_encrypted && !encryption_setup_done)
+	if (data_encrypted)
 	{
 		char	sample[ENCRYPTION_SAMPLE_SIZE];
+
+		Assert(!encryption_setup_done);
 
 		/*
 		 * If the key command is in the configuration file, just run it,
 		 * otherwise let frontend application deliver it via FE/BE protocol.
 		 */
 		if (encryption_key_command)
+		{
 			run_encryption_key_command(DataDir);
+
+#ifdef EXEC_BACKEND
+			/*
+			 * The encryption key should not be shared via BackendParameters
+			 * because that way it would end up in the "variables
+			 * file". (Mis)use encryption_key_shmem to pass the key to the
+			 * backends, but don't bother setting the ->received field: if the
+			 * key command is present in the configuration file, no backend
+			 * should ever try to send the key to the postmaster and the
+			 * postmaster should not check this field.
+			 */
+			memcpy(encryption_key_shmem->data, encryption_key,
+				   ENCRYPTION_KEY_LENGTH);
+
+			/*
+			 * Make sure the key is visible before we start any process below.
+			 */
+			pg_write_barrier();
+#endif
+		}
 		else
 		{
 			status = ServerLoop(true);
@@ -1447,11 +1467,15 @@ PostmasterMain(int argc, char *argv[])
 				encryption_key_shmem->empty)
 				ereport(FATAL, (errmsg("Encryption key not received.")));
 
+			/* Make sure the key itself has been fetched. */
+			pg_read_barrier();
+
 			/*
 			 * Take a local copy of the key so that we don't have to receive
 			 * it again if restarting after a crash.
 			 */
-			memcpy(encryption_key, encryption_key_shmem, ENCRYPTION_KEY_LENGTH);
+			memcpy(encryption_key, encryption_key_shmem->data,
+				   ENCRYPTION_KEY_LENGTH);
 		}
 
 		/* Finalize the setup. */
@@ -1872,8 +1896,8 @@ ServerLoop(bool receive_encryption_key)
 			{
 				/*
 				 * Make sure the key is read from main memory again if it had
-				 * been prefetched before processEncryptionKey() could have
-				 * written it there.
+				 * been prefetched before processEncryptionKeyMessage() could
+				 * have written it there.
 				 */
 				pg_read_barrier();
 
@@ -2208,8 +2232,8 @@ ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done)
 				key_only_backend = true;
 
 				/*
-				 * processEncryptionKey() will finalize the key delivery as
-				 * soon as shared memory can be accessed.
+				 * shareEncryptionKey() will finalize the key delivery as soon
+				 * as shared memory can be accessed.
 				 */
 				return STATUS_OK;
 			}
@@ -2663,7 +2687,7 @@ processCancelRequest(Port *port, void *pkt)
 
 #ifdef USE_ENCRYPTION
 /*
- * Process a message from backend that contains the encryption key.
+ * Process a message that contains the encryption key.
  *
  * If valid key message was received, either initialize the encryption_key
  * variable or set got_empty_key_msg, and return true. In such a case,
@@ -4380,6 +4404,19 @@ PostmasterStateMachine(void)
 
 		reset_shared();
 
+#ifdef EXEC_BACKEND
+		/*
+		 * Now that the shared memory has been reset, make sure the encryption
+		 * key is there again. See the EXEC_BACKEND code in PostmasterMain().
+		 */
+		if (data_encrypted)
+		{
+			memcpy(encryption_key_shmem->data, encryption_key,
+				   ENCRYPTION_KEY_LENGTH);
+			pg_write_barrier();
+		}
+#endif
+
 		StartupPID = StartupDataBase();
 		Assert(StartupPID != 0);
 		StartupStatus = STARTUP_RUNNING;
@@ -4548,8 +4585,8 @@ BackendStartup(Port *port)
 	/*
 	 * Pass down canAcceptConnections state.
 	 *
-	 * The special case of data_encrypted means that we might need special
-	 * backend to receive encryption key.
+	 * Allow the "key-only backend" special case too. ProcessStartupPacket()
+	 * will check whether it's actually that case.
 	 */
 	cac = port->canAcceptConnections = canAcceptConnections(BACKEND_TYPE_NORMAL);
 	bn->dead_end = (port->canAcceptConnections != CAC_OK &&
@@ -5326,7 +5363,12 @@ SubPostmasterMain(int argc, char *argv[])
 		strcmp(argv[1], "--forkavlauncher") == 0 ||
 		strcmp(argv[1], "--forkavworker") == 0 ||
 		strcmp(argv[1], "--forkboot") == 0 ||
-		strncmp(argv[1], "--forkbgworker=", 15) == 0)
+		strncmp(argv[1], "--forkbgworker=", 15) == 0 ||
+		/*
+		 * The stats collector needs to read the encryption key from the
+		 * shared memory.
+		 */
+		strcmp(argv[1], "--forkcol") == 0)
 		PGSharedMemoryReAttach();
 	else
 		PGSharedMemoryNoReAttach();
@@ -5349,6 +5391,16 @@ SubPostmasterMain(int argc, char *argv[])
 	/* In EXEC_BACKEND case we will not have inherited these settings */
 	pqinitmask();
 	PG_SETMASK(&BlockSig);
+
+	/*
+	 * Now that we can access the shared memory, copy the key to the local
+	 * variable. (The syslogger is not attached to the shared memory, but it
+	 * has nothing to do with encryption.)
+	 */
+	if (data_encrypted &&
+		strcmp(argv[1], "--forklog") != 0)
+		memcpy(encryption_key, encryption_key_shmem->data,
+			   ENCRYPTION_KEY_LENGTH);
 
 	/* Read in remaining GUC variables */
 	read_nondefault_variables();
@@ -6650,7 +6702,7 @@ save_backend_variables(BackendParameters *param, Port *port,
 	param->MaxBackends = MaxBackends;
 #ifdef USE_ENCRYPTION
 	param->data_encrypted = data_encrypted;
-	memcpy(param->encryption_key, encryption_key, ENCRYPTION_KEY_LENGTH);
+	param->encryption_key = encryption_key_shmem;
 #endif
 
 #ifdef WIN32
@@ -6890,7 +6942,7 @@ restore_backend_variables(BackendParameters *param, Port *port)
 
 #ifdef USE_ENCRYPTION
 	data_encrypted = param->data_encrypted;
-	memcpy(encryption_key, param->encryption_key, ENCRYPTION_KEY_LENGTH);
+	encryption_key_shmem = param->encryption_key;
 #endif
 
 #ifdef WIN32
