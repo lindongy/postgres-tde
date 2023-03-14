@@ -154,6 +154,7 @@ write_kdf_file(char *dir)
 {
 	char		path[MAXPGPATH];
 	int			fd;
+	char		buf[KDF_PARAMS_FILE_SIZE];
 
 	/* Account for both file separator and terminating NULL character. */
 	if ((strlen(dir) + 1 + strlen(KDF_PARAMS_FILE) + 1) > MAXPGPATH)
@@ -179,7 +180,9 @@ write_kdf_file(char *dir)
 		exit(EXIT_FAILURE);
 	}
 
-	if (write(fd, &KDFParams, KDF_PARAMS_FILE_SIZE) != KDF_PARAMS_FILE_SIZE)
+	memset(buf, 0, KDF_PARAMS_FILE_SIZE);
+	memcpy(buf, &KDFParams, SizeOfKDFParamsData);
+	if (write(fd, buf, KDF_PARAMS_FILE_SIZE) != KDF_PARAMS_FILE_SIZE)
 	{
 		/* if write didn't set errno, assume problem is no disk space */
 		if (errno == 0)
