@@ -261,6 +261,7 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
 	if (tweak == NULL)
 	{
 		size_t	unencr_size;
+		PageXLogRecPtr	rec_ptr;
 		char	*c = tweak_loc;
 
 		Assert(block != InvalidBlockNumber);
@@ -284,7 +285,8 @@ encrypt_block(const char *input, char *output, Size size, char *tweak,
 		 * one we write to "output" below, and it would be impossible to
 		 * decrypt the page.
 		 */
-		PageSetLSN(c, lsn);
+		PageXLogRecPtrSet(rec_ptr, lsn);
+		memcpy(c, &rec_ptr, sizeof(PageXLogRecPtr));
 		c += sizeof(PageXLogRecPtr);
 
 		/*
