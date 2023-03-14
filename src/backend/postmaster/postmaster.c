@@ -394,6 +394,14 @@ static DNSServiceRef bonjour_sdref = NULL;
 /* Is the only purpose of this backend to receive encryption key? */
 static bool key_only_backend = false;
 
+/*
+ * Is it possible that the backend being started is there to receive the
+ * encryption key?
+ */
+#define MAY_BE_KEY_ONLY_BACKEND(cac) \
+	(data_encrypted && encryption_key_command == NULL && \
+	 (cac) == CAC_STARTUP)
+
 /* Has the "key only backend" received an empty key message? */
 static bool got_empty_key_msg = false;
 #endif	/* USE_ENCRYPTION */
@@ -2223,7 +2231,7 @@ ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done)
 	 */
 	if (proto == ENCRYPTION_KEY_MSG_CODE)
 	{
-		if (data_encrypted)
+		if (MAY_BE_KEY_ONLY_BACKEND(port->canAcceptConnections))
 		{
 			if (ssl_done || gss_done)
 				ereport(DEBUG1,
@@ -4613,7 +4621,7 @@ BackendStartup(Port *port)
 	cac = port->canAcceptConnections = canAcceptConnections(BACKEND_TYPE_NORMAL);
 	bn->dead_end = (port->canAcceptConnections != CAC_OK &&
 					port->canAcceptConnections != CAC_SUPERUSER &&
-					!(data_encrypted && cac == CAC_STARTUP));
+					!MAY_BE_KEY_ONLY_BACKEND(cac));
 
 	/*
 	 * Unless it's a dead_end child, assign it a child slot number
