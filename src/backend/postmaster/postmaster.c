@@ -394,6 +394,10 @@ static DNSServiceRef bonjour_sdref = NULL;
 /* Is the only purpose of this backend to receive encryption key? */
 static bool key_only_backend = false;
 
+/* Has the "key only backend" received an empty key message? */
+static bool got_empty_key_msg = false;
+#endif	/* USE_ENCRYPTION */
+
 /*
  * Is it possible that the backend being started is there to receive the
  * encryption key?
@@ -401,10 +405,6 @@ static bool key_only_backend = false;
 #define MAY_BE_KEY_ONLY_BACKEND(cac) \
 	(data_encrypted && encryption_key_command == NULL && \
 	 (cac) == CAC_STARTUP)
-
-/* Has the "key only backend" received an empty key message? */
-static bool got_empty_key_msg = false;
-#endif	/* USE_ENCRYPTION */
 
 /*
  * postmaster.c - function prototypes
