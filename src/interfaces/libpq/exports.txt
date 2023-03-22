@@ -176,10 +176,6 @@ PQresultMemorySize        173
 PQhostaddr                174
 PQgssEncInUse             175
 PQgetgssctx               176
-PQconnectSSLHandshake     177
-PQpacketSend              178
-PQconnectionSSLMode       179
-PQconnectedToSocket       180
 PQsetSSLKeyPassHook_OpenSSL         177
 PQgetSSLKeyPassHook_OpenSSL         178
 PQdefaultSSLKeyPassHook_OpenSSL     179
@@ -190,3 +186,7 @@ PQpipelineStatus          183
 PQsetTraceFlags           184
 PQmblenBounded            185
 PQsendFlushRequest        186
+PQconnectSSLHandshake     187
+PQpacketSend              188
+PQconnectionSSLMode       189
+PQconnectedToSocket       190
