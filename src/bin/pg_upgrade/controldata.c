@@ -507,7 +507,7 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 		}
 		else if ((p = strstr(bufin, "Encryption key length")) != NULL)
 		{
-			uint	key_bits;
+			unsigned int	key_bits;
 
 			p = strchr(p, ':');
 
