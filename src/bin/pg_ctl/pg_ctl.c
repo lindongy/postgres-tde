@@ -1033,11 +1033,11 @@ do_start(void)
 #endif	/* USE_ENCRYPTION */
 
 	pm_pid = start_postmaster();
+#ifdef USE_ENCRYPTION
 #ifdef WIN32
 	sk_args.pmProcess = postmasterProcess;
 #endif
 
-#ifdef USE_ENCRYPTION
 	sk_args.pm_pid = pm_pid;
 	sk_args.pm_exited = false;
 	if (encryption_key_command)
