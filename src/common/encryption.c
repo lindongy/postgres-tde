@@ -160,7 +160,7 @@ read_encryption_key_f(FILE *f, char *command)
 	int		read_len, c;
 
 	read_len = 0;
-	while ((c = fgetc(f)) != EOF && c != '\n')
+	while ((c = fgetc(f)) != EOF && c != '\n' && c != '\r')
 	{
 		if (read_len >= ENCRYPTION_KEY_CHARS)
 		{
