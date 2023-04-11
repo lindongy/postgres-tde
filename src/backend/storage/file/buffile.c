@@ -1980,7 +1980,7 @@ BufFileGetUsefulBytes(File segment, off_t offset, PGAlignedBlock *buffer)
 				 WAIT_EVENT_BUFFILE_READ) != sizeof(*buffer))
 		ereport(ERROR,
 				(errcode_for_file_access(),
-				 errmsg("could not read the page from BufFile \"%s\" at offset %zu: %m",
+				 errmsg("could not read the page from BufFile \"%s\" at offset %zd: %m",
 						FilePathName(segment), offset)));;
 
 	/* Get the number of useful bytes in the last buffer. */
