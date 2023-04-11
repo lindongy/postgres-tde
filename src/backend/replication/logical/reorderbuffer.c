@@ -2207,9 +2207,19 @@ ReorderBufferProcessTXN(ReorderBuffer *rb, ReorderBufferTXN *txn,
 					/* user-triggered change */
 					if (!IsToastRelation(relation))
 					{
+						MemoryContext oldcontext;
+
 						ReorderBufferToastReplace(rb, txn, relation, change);
+
+						/*
+						 * We are paranoid about the output plugin's treatment
+						 * of memory contexts, see the related comment in
+						 * ReorderBufferRestoreChanges()
+						 */
+						oldcontext = CurrentMemoryContext;
 						ReorderBufferApplyChange(rb, txn, relation, change,
 												 streaming);
+						MemoryContextSwitchTo(oldcontext);
 
 						/*
 						 * Only clear reassembled toast chunks if we're sure
@@ -2315,6 +2325,7 @@ ReorderBufferProcessTXN(ReorderBuffer *rb, ReorderBufferTXN *txn,
 						int			nrelids = change->data.truncate.nrelids;
 						int			nrelations = 0;
 						Relation   *relations;
+						MemoryContext oldcontext;
 
 						relations = palloc0(nrelids * sizeof(Relation));
 						for (i = 0; i < nrelids; i++)
@@ -2334,9 +2345,16 @@ ReorderBufferProcessTXN(ReorderBuffer *rb, ReorderBufferTXN *txn,
 						}
 
 						/* Apply the truncate. */
+						/*
+						 * We are paranoid about the output plugin's treatment
+						 * of memory contexts, see the related comment in
+						 * ReorderBufferRestoreChanges()
+						 */
+						oldcontext = CurrentMemoryContext;
 						ReorderBufferApplyTruncate(rb, txn, nrelations,
 												   relations, change,
 												   streaming);
+						MemoryContextSwitchTo(oldcontext);
 
 						for (i = 0; i < nrelations; i++)
 							RelationClose(relations[i]);
@@ -4076,7 +4094,15 @@ ReorderBufferRestoreChanges(ReorderBuffer *rb, ReorderBufferTXN *txn,
 			ReorderBufferSerializedPath(path, MyReplicationSlot, txn->xid,
 										*segno);
 
-			*file = BufFileOpenTransient(path, O_RDONLY | PG_BINARY, ERROR);
+			/*
+			 * Make sure that the correct memory context is used. A third
+			 * party output plugin was seen that switches to a different
+			 * context and forgets to restore our context.
+			 */
+			MemoryContextSwitchTo(rb->context);
+
+			*file = BufFileOpenTransient(path, O_RDONLY | PG_BINARY,
+										 ERROR);
 			if (*file == NULL)
 			{
 				Assert(errno == ENOENT);
