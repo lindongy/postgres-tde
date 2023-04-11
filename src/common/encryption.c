@@ -173,7 +173,7 @@ read_encryption_key_f(FILE *f, char *command, int *key_len_p)
 	Assert(key_len == 0 || key_len == 16 || key_len == 24 || key_len == 32);
 
 	read_len = 0;
-	while ((c = fgetc(f)) != EOF && c != '\n')
+	while ((c = fgetc(f)) != EOF && c != '\n' && c != '\r')
 	{
 		if (read_len >= ENCRYPTION_KEY_MAX_CHARS)
 		{
