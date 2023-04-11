@@ -1614,8 +1614,18 @@ ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid,
 					/* user-triggered change */
 					if (!IsToastRelation(relation))
 					{
+						MemoryContext oldcontext;
+
 						ReorderBufferToastReplace(rb, txn, relation, change);
+
+						/*
+						 * We are paranoid about the output plugin's treatment
+						 * of memory contexts, see the related comment in
+						 * ReorderBufferRestoreChanges()
+						 */
+						oldcontext = CurrentMemoryContext;
 						rb->apply_change(rb, txn, relation, change);
+						MemoryContextSwitchTo(oldcontext);
 
 						/*
 						 * Only clear reassembled toast chunks if we're sure
@@ -1695,6 +1705,7 @@ ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid,
 						int			nrelids = change->data.truncate.nrelids;
 						int			nrelations = 0;
 						Relation   *relations;
+						MemoryContext oldcontext;
 
 						relations = palloc0(nrelids * sizeof(Relation));
 						for (i = 0; i < nrelids; i++)
@@ -1713,7 +1724,14 @@ ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid,
 							relations[nrelations++] = relation;
 						}
 
+						/*
+						 * We are paranoid about the output plugin's treatment
+						 * of memory contexts, see the related comment in
+						 * ReorderBufferRestoreChanges()
+						 */
+						oldcontext = CurrentMemoryContext;
 						rb->apply_truncate(rb, txn, nrelations, relations, change);
+						MemoryContextSwitchTo(oldcontext);
 
 						for (i = 0; i < nrelations; i++)
 							RelationClose(relations[i]);
@@ -2600,9 +2618,16 @@ ReorderBufferRestoreChanges(ReorderBuffer *rb, ReorderBufferTXN *txn,
 
 			if (data_encrypted)
 				ReorderBufferTweakBase(txn, tweak_base);
+
+			/*
+			 * Make sure that the correct memory context is used. A third
+			 * party output plugin was seen that switches to a different
+			 * context and forgets to restore our context.
+			 */
+			MemoryContextSwitchTo(rb->context);
+
 			*file = BufFileOpenTransient(path, O_RDONLY | PG_BINARY,
-										 tweak_base,
-										 ERROR);
+										 tweak_base, ERROR);
 			if (*file == NULL)
 			{
 				Assert(errno == ENOENT);
