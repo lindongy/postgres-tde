@@ -201,15 +201,6 @@ parseCommandLine(int argc, char *argv[])
 #ifdef USE_ENCRYPTION
 			case 'K':
 				encryption_key_command = pg_strdup(optarg);
-
-				/*
-				 * If the command is a command line option, it probably means
-				 * that the clusters do not have it in postgresql.conf, and
-				 * therefore we must pass it to pg_ctl when starting them.
-				 */
-				snprintf(encryption_key_command_opt,
-						 strlen(encryption_key_command) + 7,
-						 " -K \"%s\"", encryption_key_command);
 				break;
 #endif	/* USE_ENCRYPTION */
 

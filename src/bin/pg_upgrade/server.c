@@ -259,61 +259,6 @@ start_postmaster(ClusterInfo *cluster, bool report_and_exit_on_error)
 			 cluster->pgopts ? cluster->pgopts : "", socket_string);
 
 	/*
-	 * If encryption key needs to be sent, run a separate process now and let
-	 * it send the key to the postmaster.  We cannot send the key later in the
-	 * current process because the exec_prog call below blocks until the
-	 * postmaster succeeds or fails to start (and it will definitely fail if
-	 * it receives no key).
-	 */
-	if (encryption_setup_done && !cluster->has_encr_key_cmd)
-#ifdef USE_ENCRYPTION
-	{
-		SendKeyArgs	sk_args;
-		char	port_str[6];
-#ifndef WIN32
-		pid_t sender;
-#else
-		HANDLE sender;
-#endif
-
-		snprintf(port_str, sizeof(port_str), "%d", cluster->port);
-
-		/* in child process */
-		sk_args.host = cluster->sockdir; /* If NULL, then libpq will use
-										  * its default. */
-		sk_args.port = port_str;
-		sk_args.encryption_key = encryption_key;
-		/* XXX Find out the postmaster PID ? */
-		sk_args.pm_pid = 0;
-		sk_args.error_msg = NULL;
-
-#ifndef WIN32
-		pg_log(PG_VERBOSE, "sending encryption key to postmaster\n");
-		sender = fork();
-		if (sender == 0)
-		{
-			send_key_to_postmaster(&sk_args);
-			if (sk_args.error_msg)
-				pg_fatal("%s", sk_args.error_msg);
-			exit(EXIT_SUCCESS);
-		}
-		else if (sender < 0)
-			pg_fatal("could not create key sender process");
-#else	/* WIN32 */
-		pg_log(PG_VERBOSE, "sending encryption key to postmaster\n");
-		sender = _beginthreadex(NULL, 0, (void *) send_key_to_postmaster, &sk_args, 0, NULL);
-		if (sender == 0)
-			pg_fatal("could not create background thread: %m");
-#endif	/* WIN32 */
-	}
-#else	/* USE_ENCRYPTION */
-	{
-		/* User should not be able to enable encryption. */
-		Assert(false);
-	}
-#endif	/* USE_ENCRYPTION */
-
-	/*
 	 * Don't throw an error right away, let connecting throw the error because
 	 * it might supply a reason for the failure.
 	 */

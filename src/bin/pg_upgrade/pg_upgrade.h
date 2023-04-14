@@ -271,8 +271,6 @@ typedef struct
 	char		major_version_str[64];	/* string PG_VERSION of cluster */
 	uint32		bin_version;	/* version returned from pg_ctl */
 	const char *tablespace_suffix;	/* directory specification */
-	bool	has_encr_key_cmd;		/* is encryption key command in the config
-									 * file? */
 } ClusterInfo;
 
 

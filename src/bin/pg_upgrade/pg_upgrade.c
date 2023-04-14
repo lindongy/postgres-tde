@@ -140,13 +140,10 @@ main(int argc, char **argv)
 
 	check_cluster_compatibility(live_check);
 
-	check_and_dump_old_cluster(live_check);
-
 #ifdef USE_ENCRYPTION
 	/* Try to get the encryption key command from postgresql.conf. */
 	key_cmd_pgconf = get_encryption_key_command(old_cluster.bindir,
 												old_cluster.pgconfig);
-	old_cluster.has_encr_key_cmd = key_cmd_pgconf != NULL;
 #endif
 
 	/*
@@ -193,19 +190,26 @@ main(int argc, char **argv)
 		run_encryption_key_command(old_cluster.pgdata, &key_len);
 		encr_key_arg.data = encryption_key;
 		encr_key_arg.length = key_len;
+
+		/* The command line option for pg_ctl. */
+		snprintf(encryption_key_command_opt,
+				 strlen(encryption_key_command) + 7,
+				 " -K \"%s\"", encryption_key_command);
+
 		encryption_setup_done = true;
 	}
 
 	/* Check if the new cluster has the key command in postgresql.conf. */
 	key_cmd_pgconf = get_encryption_key_command(new_cluster.bindir,
 												new_cluster.pgconfig);
-	new_cluster.has_encr_key_cmd = key_cmd_pgconf != NULL;
 #else
 	{
 		/* User should not be able to pass the -K option. */
 		Assert(false);
 	}
 #endif	/* USE_ENCRYPTION */
+
+	check_and_dump_old_cluster(live_check);
 
 	/* -- NEW -- */
 	start_postmaster(&new_cluster, true);
