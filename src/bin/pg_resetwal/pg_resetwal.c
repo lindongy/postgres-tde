@@ -833,10 +833,10 @@ PrintControlValues(bool guessed)
 		printf(_("Encryption key length:                %d\n"),
 			   DATA_CIPHER_GET_KEY_LENGTH(ControlFile.data_cipher) * 8);
 		printf(_("Data encryption fingerprint:          %08X%08X%08X%08X\n"),
-			   htonl(((uint32 *) ControlFile.encryption_verification)[0]),
-			   htonl(((uint32 *) ControlFile.encryption_verification)[1]),
-			   htonl(((uint32 *) ControlFile.encryption_verification)[2]),
-			   htonl(((uint32 *) ControlFile.encryption_verification)[3]));
+			   (uint32) htonl(((uint32 *) ControlFile.encryption_verification)[0]),
+			   (uint32) htonl(((uint32 *) ControlFile.encryption_verification)[1]),
+			   (uint32) htonl(((uint32 *) ControlFile.encryption_verification)[2]),
+			   (uint32) htonl(((uint32 *) ControlFile.encryption_verification)[3]));
 	}
 }
 
