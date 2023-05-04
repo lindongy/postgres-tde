@@ -1465,8 +1465,7 @@ BufFileOpenTransient(const char *path, int fileFlags, int elevel)
 		/*
 		 * We can only emulate the append behavior by setting curOffset to
 		 * file size because if the underlying file was opened in append mode,
-		 * we could not rewrite the old value of file->common.useful[0] with
-		 * data.
+		 * we could not rewrite the last block when adding data to it.
 		 */
 		if (fileFlags & O_APPEND)
 		{
@@ -1513,13 +1512,11 @@ BufFileOpenTransient(const char *path, int fileFlags, int elevel)
 	file->path = pstrdup(path);
 	file->elevel = elevel;
 
-	if (fcommon->append)
-	{
-		/* Position the buffer at the end of the file. */
+	/* Position the buffer as appropriate. */
+	if (fcommon->append || (fileFlags & O_APPEND))
 		fcommon->curOffset = BufFileSegmentSize(&file->file);
-	}
 	else
-		fcommon->curOffset = 0L;
+		fcommon->curOffset = 0;
 
 	/*
 	 * When reading, or when writing in the append mode, we need to consider
