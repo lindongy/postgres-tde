@@ -1550,11 +1550,9 @@ BufFileOpenTransient(const char *path, int fileFlags,
 		return NULL;
 	}
 
-	if (fcommon->append)
-	{
-		/* Position the buffer at the end of the file. */
+	/* Position the buffer as appropriate. */
+	if (fcommon->append || (fileFlags & O_APPEND))
 		fcommon->curOffset = size;
-	}
 	else
 		fcommon->curOffset = 0L;
 
