@@ -1,3 +1,47 @@
+TDE_1.1.5
+=========
+
+Bug Fixes
+---------
+
+1. Do not let the -o option break retrieval of configuration variables.
+
+When pg_ctl runs postgres just to retrieve a value of a configuration variable
+(GUC), it passes the -C option to postgres. In such case it should not pass
+the -C options contained in the value of the pg_ctl's -o option.
+
+2. Do not write the encryption key to the "variables file".
+
+On Windows, the postmaster writes various parameters to a file from which a
+new backend reads them. So far we also used this file to pass the encryption
+key to the backend. Although the file is unlinked by the new backend shortly,
+there used to be non-zero time window when the encryption key was on the
+disk. Now we pass the key to the new backend via shared memory.
+
+3. Do not allow a "key-only backend" to read the startup packet.
+
+If the backend that is only launched to receive the encryption key tries to
+read the startup packet, it can cause server crash. The problem was only
+observed on Windows, probably due to slower startup of backends.
+
+4. Fixed some Windows specific compiler errors and warnings.
+
+5. Recognize the Windows line delimiter when reading the encryption key.
+
+6. Do not let the logical replication plugin sneak-in wrong memory context.
+
+The logical replication output plugin of pglogical 2.2.1 uses it's own memory
+context, but sometimes it forgets to restore the original one. With our
+implementation of temporary files this could lead to server crash.
+
+7. Write data to the correct file offset during logical replication.
+
+When the data does not fit into memory, the server writes it to disk. On
+Windows we saw a crash because an incorrect offset was passed to pwrite(). (On
+Linux this bug was shadowed be a known bug of pwrite(), see "man 2 pwrite",
+while there's no such system call on Windows.)
+
+
 TDE_1.1.4
 =========
 
