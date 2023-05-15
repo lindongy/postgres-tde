@@ -9,6 +9,10 @@
 #
 #-------------------------------------------------------------------------
 
+# We could adjust the tests so that the relations are first decrypted and then
+# corrupted, but not sure if that would add much value.
+PGENCRKEYCMD =
+
 PGFILEDESC = "pg_amcheck - detect corruption within database relations"
 PGAPPICON=win32
 
