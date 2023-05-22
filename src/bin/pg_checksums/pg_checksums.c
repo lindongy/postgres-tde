@@ -26,6 +26,7 @@
 #include "common/file_perm.h"
 #include "common/file_utils.h"
 #include "common/logging.h"
+#include "common/string.h"
 #include "fe_utils/option_utils.h"
 #include "getopt_long.h"
 #include "pg_getopt.h"
@@ -193,6 +194,7 @@ scan_file(const char *fn, int segmentno)
 	BlockNumber blockno;
 	int			flags;
 	int64		blocks_written_in_file = 0;
+	CipherKind	cipher = DATA_CIPHER_GET_KIND(ControlFile->data_cipher);
 
 	Assert(mode == PG_MODE_ENABLE ||
 		   mode == PG_MODE_CHECK);
@@ -232,11 +234,14 @@ scan_file(const char *fn, int segmentno)
 		current_size += r;
 
 		/*
-		 * New pages have no checksum yet, unless it's encrypted - see
-		 * PageSetChecksumCopy() for explanation.
+		 * New pages have no checksum yet. Note that PageIsNew() cannot be
+		 * used for encrypted pages because the field it checks can be zero
+		 * just due to the encryption. Since PageIsNew() implies IsAllZero()
+		 * (see PageIsVerifiedExtended()), we can use the latter when
+		 * necessary.
 		 */
-		if (DATA_CIPHER_GET_KIND(ControlFile->data_cipher) == PG_CIPHER_NONE &&
-			PageIsNew(header))
+		if ((cipher == PG_CIPHER_NONE && PageIsNew(header)) ||
+			(cipher != PG_CIPHER_NONE && IsAllZero(buf.data, BLCKSZ)))
 			continue;
 
 		csum = pg_checksum_page(buf.data, blockno + segmentno * RELSEG_SIZE);

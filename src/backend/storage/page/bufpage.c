@@ -83,7 +83,9 @@ PageInit(Page page, Size pageSize, Size specialSize)
  *
  * If "page_encr" is passed, it points to encrypted page and "page" is its
  * plain form. The point is that checksum needs to be verified before
- * decryption, but other fields must be checked after that.
+ * decryption, but other fields must be checked after that. We assume that
+ * "page_encr" points to local memory rather than to a shared buffer, so that
+ * this function can modify it.
  *
  * If flag PIV_LOG_WARNING is set, a WARNING is logged in the event of
  * a checksum failure.
@@ -145,8 +147,29 @@ PageIsVerifiedExtended(Page page, BlockNumber blkno, int flags, Page page_encr)
 	}
 
 	/* Check all-zeroes case */
-	if (IsAllZero((char *) page, BLCKSZ))
-		return true;
+	if (page_encr == NULL)
+	{
+		if (IsAllZero((char *) page, BLCKSZ))
+			return true;
+	}
+	else
+	{
+		/*
+		 * Since pg_checksums cannot use PageIsNew() to check whether the
+		 * checksum needs to be checked (see comments in that application), we
+		 * used to compute the checksum for all pages, including the all-zero
+		 * ones. (Now we rely on the fact that a new page may only contain
+		 * zeroes, so pg_checksums can simply use IsAllZero().) Thus pages
+		 * containing non-zero checksum and zeroes elsewhere might still
+		 * exist. Let's set the checksum to zero so that we can return true in
+		 * such cases. It's not worth checking the checksum value in this
+		 * special check.
+		 */
+		((PageHeader) page_encr)->pd_checksum = 0;
+
+		if (IsAllZero((char *) page_encr, BLCKSZ))
+			return true;
+	}
 
 	/*
 	 * Throw a WARNING if the checksum fails, but only after we've checked for
@@ -1519,16 +1542,19 @@ PageSetChecksumCopy(Page page, BlockNumber blkno)
 {
 	static char *pageCopy = NULL;
 
-	/*
-	 * If we don't need a checksum, just return the passed-in data.
-	 *
-	 * Note that, if encryption is enabled, PageIsNew() does not tell reliably
-	 * whether the checksum computation should really be skipped. The problem
-	 * is that the field that the function checks can become zero just due to
-	 * the encryption.
-	 */
-	if ((!data_encrypted && PageIsNew(page)) || !DataChecksumsEnabled())
+	/* If we don't need a checksum, just return the passed-in data */
+	if (PageIsNew(page) || !DataChecksumsEnabled())
+	{
+		/*
+		 * PageIsVerifiedExtended() returns false if page is new but contains
+		 * non-zero bytes, so let's assume the same here. The pg_checksums.c
+		 * utility relies on this relationship because it cannot use the
+		 * PageIsNew() function on the encrypted pages - see comments there.
+		 */
+		Assert(!DataChecksumsEnabled() || IsAllZero((char *) page, BLCKSZ));
+
 		return (char *) page;
+	}
 
 	/*
 	 * We allocate the copy space once and use it over on each subsequent
@@ -1553,14 +1579,14 @@ PageSetChecksumCopy(Page page, BlockNumber blkno)
 void
 PageSetChecksumInplace(Page page, BlockNumber blkno)
 {
-	/*
-	 * If we don't need a checksum, just return.
-	 *
-	 * Note that encrypted page is checksumed even if it's empty, see
-	 * PageSetChecksumCopy() for explanation.
-	 */
-	if ((!data_encrypted && PageIsNew(page)) || !DataChecksumsEnabled())
+	/* If we don't need a checksum, just return */
+	if (PageIsNew(page) || !DataChecksumsEnabled())
+	{
+		/* See PageSetChecksumCopy(). */
+		Assert(!DataChecksumsEnabled() || IsAllZero((char *) page, BLCKSZ));
+
 		return;
+	}
 
 	((PageHeader) page)->pd_checksum = pg_checksum_page((char *) page, blkno);
 }

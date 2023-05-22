@@ -25,6 +25,7 @@
 #include "commands/defrem.h"
 #include "common/compression.h"
 #include "common/file_perm.h"
+#include "common/string.h"
 #include "lib/stringinfo.h"
 #include "miscadmin.h"
 #include "nodes/pg_list.h"
@@ -1601,8 +1602,13 @@ sendFile(bbsink *sink, const char *readfilename, const char *tarfilename,
 				 * However, replaying WAL would reinstate the correct page in
 				 * this case. We also skip completely new pages, since they
 				 * don't have a checksum yet.
+				 *
+				 * PageIsNew() cannot be used if the data is encrypted, see
+				 * comments in pg_checksums.c.
 				 */
-				if (!PageIsNew(page) && PageGetLSN(page) < sink->bbs_state->startptr)
+				if (PageGetLSN(page) < sink->bbs_state->startptr &&
+					((!data_encrypted && !PageIsNew(page)) ||
+					 (data_encrypted && !IsAllZero(page, BLCKSZ))))
 				{
 					checksum = pg_checksum_page((char *) page, blkno + segmentno * RELSEG_SIZE);
 					phdr = (PageHeader) page;
