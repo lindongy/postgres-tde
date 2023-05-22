@@ -1543,7 +1543,9 @@ PageSetChecksumCopy(Page page, BlockNumber blkno)
 	static char *pageCopy = NULL;
 
 	/* If we don't need a checksum, just return the passed-in data */
-	if (PageIsNew(page) || !DataChecksumsEnabled())
+	if (!DataChecksumsEnabled() ||
+		(!data_encrypted && PageIsNew(page)) ||
+		(data_encrypted && IsAllZero(page, BLCKSZ)))
 	{
 		/*
 		 * PageIsVerifiedExtended() returns false if page is new but contains
@@ -1580,7 +1582,9 @@ void
 PageSetChecksumInplace(Page page, BlockNumber blkno)
 {
 	/* If we don't need a checksum, just return */
-	if (PageIsNew(page) || !DataChecksumsEnabled())
+	if (!DataChecksumsEnabled() ||
+		(!data_encrypted && PageIsNew(page)) ||
+		(data_encrypted && IsAllZero(page, BLCKSZ)))
 	{
 		/* See PageSetChecksumCopy(). */
 		Assert(!DataChecksumsEnabled() || IsAllZero((char *) page, BLCKSZ));
