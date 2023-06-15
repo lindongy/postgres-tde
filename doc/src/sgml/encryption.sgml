@@ -41,7 +41,12 @@
    </computeroutput>
    Likewise, for the key lengths <literal>192</literal> and
 <literal>256</literal> bits, the key string length should
-   be <literal>48</literal> and <literal>64</literal> characters respectively.
+   be <literal>48</literal> and <literal>64</literal> characters
+   respectively. Please note that non-default key length has to be specified
+   explicitly, using the <literal>--key-bits</literal> option. For example:
+<screen>
+<prompt>$</prompt> <userinput>initdb -D /usr/local/pgsql/data -K /usr/local/pgsql/fetch_key_cmd --key-bits=192</userinput>
+</screen>
  </para>
 
  <para>

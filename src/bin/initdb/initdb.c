@@ -2236,6 +2236,7 @@ usage(const char *progname)
 	printf(_("  -K, --encryption-key-command\n"
 			 "                            command that returns encryption key\n"));
 	printf(_("      --key-bits=NBITS      number of bits in the encryption key\n"));
+	printf(_("                            valid values: 128 (default), 192, 256\n"));
 #endif
 	printf(_("      --locale=LOCALE       set default locale for new databases\n"));
 	printf(_("      --lc-collate=, --lc-ctype=, --lc-messages=LOCALE\n"
