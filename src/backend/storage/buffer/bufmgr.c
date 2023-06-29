@@ -4149,7 +4149,6 @@ MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
 		bool		dirtied = false;
 		bool		delayChkptFlags = false;
 		uint32		buf_state;
-		bool	need_fpi;
 
 		/*
 		 * If we need to protect hint bit updates from torn writes, WAL-log a
@@ -4160,9 +4159,8 @@ MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
 		 * We don't check full_page_writes here because that logic is included
 		 * when we call XLogInsert() since the value changes dynamically.
 		 */
-		need_fpi = XLogHintBitIsNeeded() &&
-			(pg_atomic_read_u32(&bufHdr->state) & BM_PERMANENT);
-		if (need_fpi || data_encrypted)
+		if ((XLogHintBitIsNeeded() || data_encrypted) &&
+			(pg_atomic_read_u32(&bufHdr->state) & BM_PERMANENT))
 		{
 			/*
 			 * If we must not write WAL, due to a relfilenode-specific
@@ -4198,24 +4196,21 @@ MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
 			 * It's possible we may enter here without an xid, so it is
 			 * essential that CreateCheckPoint waits for virtual transactions
 			 * rather than full transactionids.
-			 *
-			 * Encryption alone should not be the reason for FPI.
 			 */
-			if (need_fpi)
-			{
-				Assert((MyProc->delayChkptFlags & DELAY_CHKPT_START) == 0);
-				MyProc->delayChkptFlags |= DELAY_CHKPT_START;
-				delayChkptFlags = true;
-				lsn = XLogSaveBufferForHint(buffer, buffer_std);
-			}
-
-			/*
-			 * Callers rely on us to generate LSN for the sake of encryption
-			 * IV.
-			 */
-			if (XLogRecPtrIsInvalid(lsn) && data_encrypted)
-				lsn = get_lsn_for_encryption();
+			Assert((MyProc->delayChkptFlags & DELAY_CHKPT_START) == 0);
+			MyProc->delayChkptFlags |= DELAY_CHKPT_START;
+			delayChkptFlags = true;
+			lsn = XLogSaveBufferForHint(buffer, buffer_std);
 		}
+
+		/*
+		 * Callers rely on us to generate LSN for the sake of encryption
+		 * IV. If 'lsn' is invalid, FPI is not needed (either it wasn't needed
+		 * at all or another backend called this function concurrently and
+		 * already created the FPI), but we still need a valid LSN.
+		 */
+		if (XLogRecPtrIsInvalid(lsn) && data_encrypted)
+			lsn = get_lsn_for_encryption();
 
 		buf_state = LockBufHdr(bufHdr);
 
