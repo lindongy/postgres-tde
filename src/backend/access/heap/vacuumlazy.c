@@ -1495,15 +1495,15 @@ lazy_scan_new_or_empty(LVRelState *vacrel, Buffer buf, BlockNumber blkno,
 			 * To prevent that, check whether the page has been previously
 			 * WAL-logged, and if not, do that now.
 			 */
-				if (RelationNeedsWAL(vacrel->rel) &&
-					PageGetLSN(page) == InvalidXLogRecPtr)
-					log_newpage_buffer(buf, true);
-				else if (data_encrypted &&
-						 PageGetLSN(page) == InvalidXLogRecPtr)
-					set_page_lsn_for_encryption(page);
+			if (RelationNeedsWAL(vacrel->rel) &&
+				PageGetLSN(page) == InvalidXLogRecPtr)
+				log_newpage_buffer(buf, true);
+			else if (data_encrypted &&
+					 PageGetLSN(page) == InvalidXLogRecPtr)
+				set_page_lsn_for_encryption(page);
 
-				PageSetAllVisible(page);
-				visibilitymap_set(vacrel->rel, blkno, buf, InvalidXLogRecPtr,
+			PageSetAllVisible(page);
+			visibilitymap_set(vacrel->rel, blkno, buf, InvalidXLogRecPtr,
 							  vmbuffer, InvalidTransactionId,
 							  VISIBILITYMAP_ALL_VISIBLE | VISIBILITYMAP_ALL_FROZEN);
 			END_CRIT_SECTION();
