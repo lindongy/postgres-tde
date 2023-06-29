@@ -28,6 +28,7 @@
 #include "access/xlogutils.h"
 #include "catalog/storage.h"
 #include "catalog/storage_xlog.h"
+#include "common/string.h"
 #include "miscadmin.h"
 #include "storage/encryption.h"
 #include "storage/freespace.h"
@@ -487,7 +488,7 @@ RelationCopyStorage(SMgrRelation src, SMgrRelation dst,
 	{
 		char	*buf_read, *buf_dst;
 		Page	page_encr = NULL;
-		XLogRecPtr	lsn;
+		XLogRecPtr	lsn = InvalidXLogRecPtr;
 
 		/* If we got a cancel signal during the copy of the data, quit */
 		CHECK_FOR_INTERRUPTS();
@@ -531,12 +532,19 @@ RelationCopyStorage(SMgrRelation src, SMgrRelation dst,
 		 * space.
 		 */
 		if (use_wal)
-		{
 			log_newpage(&dst->smgr_rnode.node, forkNum, blkno, page, false);
+
+		/*
+		 * Encryption requires the lsn regardless use_wal. (Only non-empty
+		 * pages are encrypted.)
+		 */
+		if (data_encrypted && !IsAllZero(page, BLCKSZ))
+		{
 			lsn = PageGetLSN(page);
+
+			if (XLogRecPtrIsInvalid(lsn))
+				lsn = get_lsn_for_encryption();
 		}
-		else if (data_encrypted)
-			lsn = get_lsn_for_encryption();
 
 		buf_dst = (char *) page;
 
