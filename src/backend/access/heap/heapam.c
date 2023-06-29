@@ -8242,7 +8242,11 @@ log_heap_visible(RelFileNode rnode, Buffer heap_buffer, Buffer vm_buffer,
 	XLogRegisterBuffer(0, vm_buffer, 0);
 
 	flags = REGBUF_STANDARD;
-	if (!XLogHintBitIsNeeded())
+	/*
+	 * In an encrypted instance we pass the returned recptr to PageSetLSN(),
+	 * so don't skip the FPI.
+	 */
+	if (!XLogHintBitIsNeeded() && !data_encrypted)
 		flags |= REGBUF_NO_IMAGE;
 	XLogRegisterBuffer(1, heap_buffer, flags);
 
@@ -8864,7 +8868,8 @@ heap_xlog_visible(XLogReaderState *record)
 
 		PageSetAllVisible(page);
 
-		if (XLogHintBitIsNeeded())
+		/* Encryption requires an unique IV. */
+		if (XLogHintBitIsNeeded() || data_encrypted)
 			PageSetLSN(page, lsn);
 
 		MarkBufferDirty(buffer);
