@@ -1,3 +1,35 @@
+TDE_1.1.6
+=========
+
+Bug Fixes
+---------
+
+1. Fixed checking of page checksum in an encrypted cluster.
+
+In a non-encrypted cluster, the page checksums are not computed for all-zero
+pages. Since the encryption makes it difficult to check whether the decrypted
+page will contain only zeroes, page checksums need to be treated specially in
+an encrypted cluster. However, in some cases we incorrectly expected that an
+all-zero page should have the checksum and reported error if it did not.
+
+2. Avoid unnecessary encryption of empty pages when copying a relation.
+
+The typical use case is ALTER TABLE ... SET TABLESPACE ...
+
+3. Fixed encryption of a hint bit.
+
+Change of a "hint bit" that indicates that all tuples on a page are visible to
+all transactions now enforces re-encryption of the whole page, using a new
+initialization vector (IV). That bit does not reveal actual user data, but the
+current design is that the hint should be encrypted.
+
+4. Do not omit the full-page-image (FPI) when setting hint bits.
+
+In an encrypted cluster, change of a hint bit could advance the page LSN
+without writhing the FPI on rare circumstances. If a torn-page write followed,
+it'd be impossible to recover such a page.
+
+
 TDE_1.1.5
 =========
 

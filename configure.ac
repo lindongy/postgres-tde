@@ -17,7 +17,7 @@ dnl Read the Autoconf manual for details.
 dnl
 m4_pattern_forbid(^PGAC_)dnl to catch undefined macros
 
-AC_INIT([PostgreSQL-TDE], [15.4_TDE_1.1.5], [bugs-tde@cybertec.at], [], [https://www.cybertec.at/])
+AC_INIT([PostgreSQL-TDE], [15.4_TDE_1.1.6], [bugs-tde@cybertec.at], [], [https://www.cybertec.at/])
 
 m4_if(m4_defn([m4_PACKAGE_VERSION]), [2.69], [], [m4_fatal([Autoconf version 2.69 is required.
 Untested combinations of 'autoconf' and PostgreSQL versions are not
